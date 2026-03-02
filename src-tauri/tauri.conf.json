@@ -1,0 +1,17 @@
+{
+  "productName": "NeuroBrowser",
+  "version": "0.1.0",
+  "identifier": "com.neurobrowser.app",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "NeuroBrowser",
+        "width": 1280,
+        "height": 720
+      }
+    ]
+  }
+}

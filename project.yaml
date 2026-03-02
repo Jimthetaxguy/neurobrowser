@@ -1,0 +1,83 @@
+# NeuroBrowser Project Metadata
+# Machine-readable YAML version
+
+project:
+  name: NeuroBrowser
+  version: 0.1.0
+  created: "2026-02-23"
+  status: foundation_complete
+  
+vision:
+  tagline: "AI-Native Browser with Custom Rendering Engine"
+  differentiation: "Control rendering pipeline for AI-native features"
+  target_users:
+    - personal
+    - enterprise
+    
+product:
+  variants:
+    - name: NeuroBrowser Desktop
+      type: desktop
+      priority: 1
+    - name: NeuroBrowser CLI
+      type: cli
+      priority: 2
+
+architecture:
+  stack:
+    - React + Tauri (frontend)
+    - Rust (backend)
+    - scraper (HTML parsing)
+    - Pluggable AI providers
+
+status:
+  library: compiling
+  tauri: blocked
+  frontend: implemented
+  
+blockers:
+  - id: tauri_config
+    severity: high
+    description: "Missing icons, config path issues"
+  - id: fastrender_integration
+    severity: medium
+    description: "Version conflicts, using scraper instead"
+
+roadmap:
+  phases:
+    - phase: 1
+      name: Foundation
+      status: complete
+    - phase: 2
+      name: Tools & Forms
+      status: in_progress
+    - phase: 3
+      name: Parallelism
+      status: pending
+    - phase: 4
+      name: Desktop UI
+      status: pending
+    - phase: 5
+      name: CLI
+      status: pending
+
+goals:
+  immediate:
+    - fix_tauri_build
+    - frontend_connected
+    - demo_working
+    
+short_term:
+    - form_support
+    - scroll_automation
+    - price_extraction
+    
+medium_term:
+    - parallel_tabs
+    - local_ai
+    - cli_variant
+    
+long_term:
+    - js_support
+    - fastrender_full
+    - production_ready

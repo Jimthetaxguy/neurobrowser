@@ -1,0 +1,28 @@
+# Rust AI Frameworks Documentation
+# This directory contains generated documentation from source materials
+# in the user's Downloads folder - not version controlled
+docs/rust-ai-frameworks/
+
+# Build output
+book/
+
+# Rust generated files
+target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Node (for Tauri frontend)
+node_modules/
