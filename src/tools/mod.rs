@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
 
+pub mod contracts;
+pub mod errors;
+
+pub use errors::{ToolError, AgentError, AgentResult};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
     pub tool_name: String,

@@ -1,3 +1,6 @@
+pub mod memory;
+pub mod streaming;
+
 use crate::providers::{
     AiContext, AiProvider, ProviderConfig, ScrollPosition, ToolCall, ToolResult as AiToolResult,
 };
