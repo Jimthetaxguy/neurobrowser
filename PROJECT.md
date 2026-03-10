@@ -1,4 +1,5 @@
 # NeuroBrowser Project Documentation
+
 # Project Vision, Status, Roadmap and Goals
 
 version: "0.1.0"
@@ -6,7 +7,9 @@ created: "2026-02-23"
 updated: "2026-02-23"
 
 # =============================================================================
+
 # PROJECT VISION
+
 # =============================================================================
 
 vision:
@@ -14,16 +17,16 @@ vision:
   tagline: "AI-Native Browser with Custom Rendering Engine"
   
   description: |
-    An AI-first browser that combines a custom Rust rendering engine with a 
-    pluggable AI agent layer, enabling unprecedented control over how AI 
-    interacts with web content. Unlike existing "AI browsers" that layer AI 
-    on top of Chromium/WebView, NeuroBrowser controls the rendering pipeline 
-    for AI-native features like structural DOM querying, semantic metadata 
+    An AI-first browser that combines a custom Rust rendering engine with a
+    pluggable AI agent layer, enabling unprecedented control over how AI
+    interacts with web content. Unlike existing "AI browsers" that layer AI
+    on top of Chromium/WebView, NeuroBrowser controls the rendering pipeline
+    for AI-native features like structural DOM querying, semantic metadata
     extraction, and parallel page analysis at scale.
   
   core_differentiation: |
     Unlike Arc Search, Opera Aria, and other AI browsers that use WebView/Chromium,
-    NeuroBrowser provides full DOM control, is lightweight (~50MB vs 200MB+), 
+    NeuroBrowser provides full DOM control, is lightweight (~50MB vs 200MB+),
     and offers complete privacy with no external browser telemetry.
 
   target_users:
@@ -32,7 +35,9 @@ vision:
     - "Enterprises requiring private, controllable AI browsing"
 
 # =============================================================================
+
 # PRODUCT SPECIFICATION
+
 # =============================================================================
 
 product:
@@ -41,7 +46,7 @@ product:
       type: "desktop"
       description: "Tauri + React native desktop application"
       priority: 1
-      
+
     - name: "NeuroBrowser CLI"
       type: "cli" 
       description: "Headless operation for automation and scripting"
@@ -53,7 +58,7 @@ product:
         description: "AI can query DOM structure directly (not just visual)"
         priority: P0
         status: implemented
-        
+
       - name: "Parallel Tabs"
         description: "10 concurrent page instances"
         priority: P0
@@ -106,7 +111,9 @@ product:
     - take_screenshot()
 
 # =============================================================================
+
 # CURRENT STATUS
+
 # =============================================================================
 
 status:
@@ -119,7 +126,7 @@ status:
       path: "neurobrowser/"
       status: "compiles"
       notes: "All core modules implemented"
-      
+
     - name: "AI Providers"
       path: "src/providers/"
       status: "implemented"
@@ -176,7 +183,9 @@ status:
         - Tauri integration
 
 # =============================================================================
+
 # TECHNICAL ARCHITECTURE
+
 # =============================================================================
 
 architecture:
@@ -186,11 +195,11 @@ architecture:
     agent: "Rust (ReAct pattern)"
     rendering: "scraper crate (HTML/CSS)"
     ai_providers: "pluggable (OpenAI/Anthropic/Ollama)"
-    
+
   modules:
     - name: "lib.rs"
       purpose: "Core exports and types"
-      
+
     - name: "agent/mod.rs"
       purpose: "ReAct agent implementation"
       dependencies:
@@ -218,24 +227,41 @@ architecture:
       purpose: "Browser tool definitions"
 
 # =============================================================================
+
 # BLOCKERS AND ISSUES
+
 # =============================================================================
 
 blockers:
-  - id: "tauri_config"
+
+- id: "tauri_config"
     severity: "high"
     description: "Tauri build blocked - missing icons and config path issues"
     location: "src-tauri/tauri.conf.json"
     solution: "Add placeholder icons or fix config"
-    
-  - id: "fastrender_integration"
+
+- id: "fastrender_integration"
     severity: "medium"
     description: "FastRender version conflicts - using scraper instead"
     impact: "Static HTML only, no JavaScript execution"
     solution: "Add JS support via alternative (e.g., headless chromium fallback)"
 
+- id: "iframe_x_frame_options"
+    severity: "medium"
+    description: "Blob URL iframe rendering is blocked by sites using X-Frame-Options: SAMEORIGIN"
+    impact: "Users clicking links inside the rendered iframe trigger a browser crash/block instead of routing through the Tauri backend."
+    solution: "Inject click interceptor scripts into HTML payload to proxy navigations via postMessage (implemented as a hotfix in index.html)."
+
+- id: "backend_command_mismatch"
+    severity: "high"
+    description: "Tauri commands exposed to the frontend don't always match the internal Rust structure implementations."
+    impact: "Commands like `set_provider` or `close_page` were declared in main.rs but not implemented in `ReActAgent` or `SessionManager`, causing fatal compile errors."
+    solution: "Ensure trait boundaries and implementations are synced before registering Tauri commands."
+
 # =============================================================================
+
 # ROADMAP
+
 # =============================================================================
 
 roadmap:
@@ -248,7 +274,7 @@ roadmap:
       - "AI provider plugins working"
       - "ReAct agent implemented"
       - "Basic DOM tools working"
-      
+
   phase_2:
     name: "Tools & Forms"
     status: "in_progress"
@@ -258,7 +284,7 @@ roadmap:
       - "Form interaction (input, select, submit)"
       - "Scroll automation"
       - "Price/Table extraction"
-      
+
   phase_3:
     name: "Parallelism"
     status: "pending"
@@ -267,7 +293,7 @@ roadmap:
       - "Tab pool (10 instances)"
       - "Shared resource management"
       - "Concurrent task orchestration"
-      
+
   phase_4:
     name: "Desktop UI"
     status: "pending"
@@ -277,7 +303,7 @@ roadmap:
       - "Tab management UI"
       - "Settings/preferences"
       - "Keyboard shortcuts"
-      
+
   phase_5:
     name: "CLI"
     status: "pending"
@@ -286,7 +312,7 @@ roadmap:
       - "Headless mode"
       - "JSON output"
       - "Script integration"
-      
+
   phase_6:
     name: "Provider Ecosystem"
     status: "ongoing"
@@ -296,7 +322,9 @@ roadmap:
       - "Plugin SDK documentation"
 
 # =============================================================================
+
 # GOALS
+
 # =============================================================================
 
 goals:
@@ -305,7 +333,7 @@ goals:
       description: "Fix Tauri config and get build working"
       priority: "critical"
       owner: "james"
-      
+
     - id: "frontend_connected"
       description: "Connect frontend to backend properly"
       priority: "critical"
@@ -318,7 +346,7 @@ goals:
     - id: "form_support"
       description: "Implement full form filling capabilities"
       priority: "high"
-      
+
     - id: "scroll_automation"
       description: "Implement scroll automation tools"
       priority: "high"
@@ -331,7 +359,7 @@ goals:
     - id: "parallel_tabs"
       description: "Implement 10-tab parallel browsing"
       priority: "high"
-      
+
     - id: "local_ai"
       description: "Full Ollama/local model support"
       priority: "medium"
@@ -344,7 +372,7 @@ goals:
     - id: "js_support"
       description: "Add JavaScript execution support"
       priority: "high"
-      
+
     - id: "fastrender_full"
       description: "Full FastRender integration"
       priority: "high"
@@ -354,14 +382,16 @@ goals:
       priority: "critical"
 
 # =============================================================================
+
 # SUCCESS METRICS
+
 # =============================================================================
 
 metrics:
   technical:
     - name: "Page render success rate"
       target: ">95%"
-      
+
     - name: "Tool execution success"
       target: ">90%"
       
@@ -377,41 +407,46 @@ metrics:
   product:
     - name: "Feature completion"
       target: "All P0 features"
-      
+
     - name: "Build success"
       target: "Desktop app compiles and runs"
 
 # =============================================================================
+
 # COMPETITIVE ANALYSIS
+
 # =============================================================================
 
 competitors:
-  - name: "Arc Search"
+
+- name: "Arc Search"
     approach: "AI on Chromium"
     weakness: "No DOM control, heavy"
-    
-  - name: "Opera Aria"
+
+- name: "Opera Aria"
     approach: "AI on Chromium"
     weakness: "No DOM control"
-    
-  - name: "BrowserUse"
+
+- name: "BrowserUse"
     approach: "Automation on existing browsers"
     weakness: "Heavy, limited by sandbox"
-    
-  - name: "Jina Reader"
+
+- name: "Jina Reader"
     approach: "Server-side rendering"
     weakness: "No interactivity"
 
 # =============================================================================
+
 # REFERENCES
+
 # =============================================================================
 
 references:
   source_repos:
     - name: "agent-browser"
-      url: "https://github.com/AIAnytime/agent-browser"
+      url: "<https://github.com/AIAnytime/agent-browser>"
       use: "AI agent patterns, ReAct implementation"
-      
+
     - name: "fastrender"
       url: "https://github.com/wilsonzlin/fastrender"
       use: "Rendering engine (not yet integrated due to version conflicts)"
@@ -421,22 +456,26 @@ references:
     - "Cursor's collaborative AI coding research"
 
 # =============================================================================
+
 # NOTES
+
 # =============================================================================
 
 notes: |
-  - Project started 2026-02-23
-  - Derived from analyzing agent-browser and fastrender repos
-  - Core library compiles successfully
-  - Tauri build blocked on config issues
-  - Using scraper crate instead of FastRender due to dependency conflicts
-  - Desktop-first approach per user request
-  - Both personal (A) and enterprise (B) use cases viable
+
+- Project started 2026-02-23
+- Derived from analyzing agent-browser and fastrender repos
+- Core library compiles successfully
+- Tauri build blocked on config issues
+- Using scraper crate instead of FastRender due to dependency conflicts
+- Desktop-first approach per user request
+- Both personal (A) and enterprise (B) use cases viable
   
   Key insight: The differentiation is controlling the rendering pipeline itself,
   not just layering AI on top of existing browsers. This enables:
-  - Full DOM access for AI querying
-  - Privacy (no Chrome/Safari dependency)
-  - Custom rendering optimized for AI extraction
-  - Lightweight (~50MB vs 200MB+)
-  - Control (no feature restrictions from upstream browsers)
+
+- Full DOM access for AI querying
+- Privacy (no Chrome/Safari dependency)
+- Custom rendering optimized for AI extraction
+- Lightweight (~50MB vs 200MB+)
+- Control (no feature restrictions from upstream browsers)

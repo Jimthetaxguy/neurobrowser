@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -259,7 +260,9 @@
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     .loading-overlay {
@@ -334,7 +337,7 @@
 
     .tab-close:hover {
       opacity: 1;
-      background: rgba(255,255,255,0.2);
+      background: rgba(255, 255, 255, 0.2);
     }
 
     .new-tab-btn {
@@ -353,6 +356,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="loading-overlay" id="loadingOverlay">
     <div class="loading-message">
@@ -379,29 +383,30 @@
     </div>
   </div>
 
-    <main>
-      <div class="browser-view">
-        <div class="browser-toolbar">
-          <button class="btn btn-secondary" id="backBtn">←</button>
-          <button class="btn btn-secondary" id="forwardBtn">→</button>
-          <button class="btn btn-secondary" id="refreshBtn">↻</button>
-        </div>
-        <div class="page-stats" id="pageStats">
-          <div class="stat">Links: <span class="stat-value" id="linkCount">0</span></div>
-          <div class="stat">Images: <span class="stat-value" id="imageCount">0</span></div>
-          <div class="stat">Forms: <span class="stat-value" id="formCount">0</span></div>
-          <div class="stat">Prices: <span class="stat-value" id="priceCount">0</span></div>
-        </div>
-        <div class="browser-content" id="browserContent">
-          <iframe id="contentFrame" sandbox="allow-same-origin allow-scripts" title="Page Content"></iframe>
-        </div>
+  <main>
+    <div class="browser-view">
+      <div class="browser-toolbar">
+        <button class="btn btn-secondary" id="backBtn">←</button>
+        <button class="btn btn-secondary" id="forwardBtn">→</button>
+        <button class="btn btn-secondary" id="refreshBtn">↻</button>
       </div>
+      <div class="page-stats" id="pageStats">
+        <div class="stat">Links: <span class="stat-value" id="linkCount">0</span></div>
+        <div class="stat">Images: <span class="stat-value" id="imageCount">0</span></div>
+        <div class="stat">Forms: <span class="stat-value" id="formCount">0</span></div>
+        <div class="stat">Prices: <span class="stat-value" id="priceCount">0</span></div>
+      </div>
+      <div class="browser-content" id="browserContent">
+        <iframe id="contentFrame" sandbox="allow-same-origin allow-scripts allow-forms" title="Page Content"></iframe>
+      </div>
+    </div>
 
     <div class="sidebar">
       <div class="sidebar-header">AI Assistant</div>
       <div class="chat-messages" id="chatMessages">
         <div class="message assistant">
-          Hello! I'm your AI browsing assistant. Ask me anything about the current page, or tell me what you'd like to find.
+          Hello! I'm your AI browsing assistant. Ask me anything about the current page, or tell me what you'd like to
+          find.
         </div>
       </div>
       <div class="loading" id="loading">Thinking...</div>
@@ -429,7 +434,7 @@
         throw new Error('Tauri API not available - running in browser mode without backend.');
       }
     };
-    
+
     const urlInput = document.getElementById('urlInput');
     const goBtn = document.getElementById('goBtn');
     const chatInput = document.getElementById('chatInput');
@@ -476,13 +481,13 @@
       if (!url) return;
 
       statusText.textContent = 'Validating URL...';
-      
+
       try {
         const { invoke } = window.__TAURI__.core;
-        
+
         // Validate URL first
         const validation = await invoke('validate_url', { url });
-        
+
         if (!validation.valid) {
           statusText.textContent = 'Error: ' + (validation.error || 'Invalid URL');
           browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">
@@ -491,36 +496,64 @@
           </div>`;
           return;
         }
-        
+
         urlInput.value = validation.normalized_url;
-        statusText.textContent = 'Loading...';
-        
-        await invoke('navigate', { 
-          sessionId: currentSessionId, 
-          pageId: currentPageId, 
-          url: validation.normalized_url 
+        showLoading('Navigating to ' + validation.normalized_url + '...');
+
+        await invoke('navigate', {
+          sessionId: currentSessionId,
+          pageId: currentPageId,
+          url: validation.normalized_url
         });
-        
-        const pageInfo = await invoke('get_page_info', { 
-          sessionId: currentSessionId, 
-          pageId: currentPageId 
+
+        const pageInfo = await invoke('get_page_info', {
+          sessionId: currentSessionId,
+          pageId: currentPageId
         });
-        
+
         // Render HTML content in iframe
         if (pageInfo.html) {
-          const blob = new Blob([pageInfo.html], { type: 'text/html' });
+          let htmlContent = pageInfo.html;
+
+          // Inject base tag for relative assets
+          if (!htmlContent.match(/<base\s/i) && htmlContent.match(/<head>/i)) {
+            htmlContent = htmlContent.replace(/<head>/i, `<head><base href="${pageInfo.url}">`);
+          } else if (!htmlContent.match(/<base\s/i)) {
+            htmlContent = `<base href="${pageInfo.url}">` + htmlContent;
+          }
+
+          // Inject script to route link clicks back to Tauri MVP engine
+          htmlContent += `
+            <script>
+              document.addEventListener('click', (e) => {
+                const a = e.target.closest('a');
+                if (a && a.href) {
+                  e.preventDefault();
+                  window.parent.postMessage({ type: 'navigate', url: a.href }, '*');
+                }
+              });
+              document.addEventListener('submit', (e) => {
+                e.preventDefault();
+                window.parent.postMessage({ type: 'form_submit', msg: 'Form submissions not yet supported in MVP' }, '*');
+              });
+            <\/script>
+          `;
+
+          const blob = new Blob([htmlContent], { type: 'text/html' });
           const blobUrl = URL.createObjectURL(blob);
           contentFrame.src = blobUrl;
         }
-        
+
         // Update stats
         linkCount.textContent = pageInfo.link_count || 0;
         imageCount.textContent = pageInfo.image_count || 0;
         formCount.textContent = pageInfo.form_count || 0;
         priceCount.textContent = pageInfo.price_count || 0;
-        
+
+        hideLoading();
         statusText.textContent = 'Loaded: ' + pageInfo.title;
       } catch (e) {
+        hideLoading();
         const errorMsg = e.message || String(e);
         statusText.textContent = 'Error: ' + errorMsg;
         browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">
@@ -536,27 +569,26 @@
       if (!prompt) return;
 
       chatInput.value = '';
-      
+
       const userMsg = document.createElement('div');
       userMsg.className = 'message user';
       userMsg.textContent = prompt;
       chatMessages.appendChild(userMsg);
 
-      loading.classList.add('active');
-      statusText.textContent = 'AI is thinking...';
+      showLoading('AI is thinking...');
 
       try {
         const { invoke } = window.__TAURI__.core;
-        const result = await invoke('ask', { 
-          sessionId: currentSessionId, 
-          pageId: currentPageId, 
-          prompt 
+        const result = await invoke('ask', {
+          sessionId: currentSessionId,
+          pageId: currentPageId,
+          prompt
         });
-        
+
         const assistantMsg = document.createElement('div');
         assistantMsg.className = 'message assistant';
         assistantMsg.innerHTML = `<div>${result.response}</div>`;
-        
+
         // Show tools used if any
         if (result.tools_used && result.tools_used.length > 0) {
           const toolsDiv = document.createElement('div');
@@ -566,11 +598,13 @@
             .join('');
           assistantMsg.appendChild(toolsDiv);
         }
-        
+
         chatMessages.appendChild(assistantMsg);
-        
+
+        hideLoading();
         statusText.textContent = 'Ready';
       } catch (e) {
+        hideLoading();
         const assistantMsg = document.createElement('div');
         assistantMsg.className = 'message assistant';
         assistantMsg.textContent = `Demo response: I would ${prompt.toLowerCase()} (Tauri not connected)`;
@@ -592,6 +626,16 @@
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         askAssistant();
+      }
+    });
+
+    // Handle iframe messages
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'navigate') {
+        urlInput.value = e.data.url;
+        navigate();
+      } else if (e.data && e.data.type === 'form_submit') {
+        statusText.textContent = e.data.msg;
       }
     });
 
@@ -625,7 +669,7 @@
         const { invoke } = window.__TAURI__.core;
         const newPageId = await invoke('create_page', { sessionId: currentSessionId });
         currentPageId = newPageId;
-        
+
         const tab = document.createElement('div');
         tab.className = 'tab active';
         tab.dataset.id = newPageId;
@@ -638,17 +682,17 @@
 
     async function closeCurrentTab() {
       if (document.querySelectorAll('.tab').length <= 1) return; // Don't close last tab
-      
+
       try {
         const { invoke } = window.__TAURI__.core;
         await invoke('close_page', { sessionId: currentSessionId, pageId: currentPageId });
-        
+
         // Remove tab from UI
         const tabElement = document.querySelector(`.tab[data-id="${currentPageId}"]`);
         if (tabElement) {
           tabElement.remove();
         }
-        
+
         // Switch to first available tab
         const firstTab = document.querySelector('.tab');
         if (firstTab) {
@@ -663,4 +707,5 @@
     initSession();
   </script>
 </body>
+
 </html>
