@@ -7,256 +7,363 @@
   <title>NeuroBrowser</title>
   <style>
     * {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
-      box-sizing: border-box;
     }
 
     :root {
-      --bg-primary: #1a1a2e;
-      --bg-secondary: #16213e;
-      --bg-tertiary: #0f3460;
-      --accent: #e94560;
-      --text-primary: #eaeaea;
-      --text-secondary: #a0a0a0;
-      --border: #2a2a4a;
+      --bg: #0f172a;
+      --panel: #16213e;
+      --panel-2: #1f2a44;
+      --surface: #f5f7fb;
+      --accent: #ff5b5b;
+      --accent-2: #ffa552;
+      --text: #e8ecf4;
+      --muted: #91a0b8;
+      --border: rgba(145, 160, 184, 0.18);
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      background:
+        radial-gradient(circle at top left, rgba(255, 165, 82, 0.16), transparent 26%),
+        radial-gradient(circle at top right, rgba(255, 91, 91, 0.14), transparent 24%),
+        linear-gradient(180deg, #0c1220 0%, #0f172a 100%);
+      color: var(--text);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
       height: 100vh;
-      display: flex;
-      flex-direction: column;
     }
 
     header {
-      background: var(--bg-secondary);
-      padding: 12px 20px;
-      display: flex;
       align-items: center;
-      gap: 20px;
+      backdrop-filter: blur(18px);
+      background: rgba(10, 15, 28, 0.88);
       border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: auto auto 1fr auto;
+      padding: 14px 18px;
     }
 
-    .logo {
-      font-size: 20px;
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      font-size: 19px;
       font-weight: 700;
-      color: var(--accent);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .brand-dot {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-radius: 999px;
+      box-shadow: 0 0 28px rgba(255, 91, 91, 0.55);
+      height: 12px;
+      width: 12px;
+    }
+
+    .provider-select,
+    .url-input,
+    .chat-input {
+      background: rgba(22, 33, 62, 0.72);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
     }
 
     .provider-select {
-      padding: 6px 12px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      font-size: 13px;
       cursor: pointer;
-    }
-
-    .provider-select:focus {
-      outline: none;
-      border-color: var(--accent);
+      padding: 10px 14px;
     }
 
     .url-bar {
-      flex: 1;
-      display: flex;
-      gap: 8px;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr auto;
     }
 
-    .url-input {
-      flex: 1;
-      padding: 8px 16px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      font-size: 14px;
+    .url-input,
+    .chat-input {
+      font: inherit;
+      padding: 12px 16px;
     }
 
-    .url-input:focus {
+    .url-input:focus,
+    .chat-input:focus,
+    .provider-select:focus {
+      border-color: rgba(255, 165, 82, 0.7);
       outline: none;
-      border-color: var(--accent);
     }
 
     .btn {
-      padding: 8px 16px;
-      border-radius: 6px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       border: none;
-      background: var(--accent);
+      border-radius: 12px;
       color: white;
       cursor: pointer;
-      font-weight: 500;
-      transition: opacity 0.2s;
+      font: inherit;
+      font-weight: 700;
+      padding: 10px 16px;
+      transition: transform 140ms ease, opacity 140ms ease;
     }
 
     .btn:hover {
-      opacity: 0.9;
+      opacity: 0.94;
+      transform: translateY(-1px);
     }
 
     .btn-secondary {
-      background: var(--bg-tertiary);
+      background: rgba(31, 42, 68, 0.86);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .tabs {
+      align-items: center;
+      background: rgba(15, 23, 42, 0.72);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 18px;
+    }
+
+    .tab {
+      align-items: center;
+      background: rgba(31, 42, 68, 0.82);
+      border: 1px solid transparent;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      gap: 10px;
+      min-width: 0;
+      padding: 8px 14px;
+      transition: border-color 140ms ease, background 140ms ease;
+    }
+
+    .tab.active {
+      background: rgba(255, 91, 91, 0.18);
+      border-color: rgba(255, 165, 82, 0.7);
+    }
+
+    .tab-title {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab-close {
+      border-radius: 999px;
+      color: var(--muted);
+      font-weight: 700;
+      line-height: 1;
+      padding: 2px 6px;
+    }
+
+    .tab-close:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: white;
     }
 
     main {
-      flex: 1;
-      display: flex;
-      overflow: hidden;
+      display: grid;
+      gap: 0;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      min-height: 0;
     }
 
-    .browser-view {
-      flex: 1;
-      background: white;
-      display: flex;
-      flex-direction: column;
+    .browser-panel {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-height: 0;
+      position: relative;
+    }
+
+    .browser-toolbar,
+    .page-stats,
+    .sidebar-header,
+    .status-bar {
+      background: rgba(15, 23, 42, 0.76);
+      border-color: var(--border);
     }
 
     .browser-toolbar {
-      background: var(--bg-secondary);
-      padding: 8px 12px;
-      display: flex;
-      gap: 8px;
       border-bottom: 1px solid var(--border);
-    }
-
-    .browser-content {
-      flex: 1;
       display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .browser-content iframe {
-      flex: 1;
-      width: 100%;
-      border: none;
-      background: white;
+      gap: 10px;
+      padding: 12px 18px;
     }
 
     .page-stats {
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
       display: flex;
+      flex-wrap: wrap;
       gap: 16px;
-      padding: 8px 16px;
-      background: var(--bg-tertiary);
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: 4px;
+      padding: 10px 18px;
     }
 
     .stat-value {
-      color: var(--accent);
-      font-weight: 600;
+      color: #ffd7a8;
+      font-weight: 700;
+      margin-left: 6px;
+    }
+
+    .browser-stage {
+      background:
+        linear-gradient(180deg, rgba(245, 247, 251, 0.95), rgba(225, 232, 243, 0.98));
+      min-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .browser-stage::before {
+      background: linear-gradient(90deg, rgba(255, 91, 91, 0.11), rgba(255, 165, 82, 0.1));
+      content: "";
+      inset: 0;
+      pointer-events: none;
+      position: absolute;
+      z-index: 0;
+    }
+
+    .stage-placeholder {
+      color: #475569;
+      inset: 22px;
+      position: absolute;
+      z-index: 1;
+    }
+
+    .stage-placeholder h2 {
+      font-size: 22px;
+      margin-bottom: 10px;
+    }
+
+    .stage-placeholder p {
+      line-height: 1.5;
+      max-width: 540px;
     }
 
     .sidebar {
-      width: 350px;
-      background: var(--bg-secondary);
+      background: rgba(11, 18, 33, 0.9);
       border-left: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-rows: auto 1fr auto auto;
+      min-height: 0;
     }
 
     .sidebar-header {
-      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
-      font-weight: 600;
+      font-weight: 700;
+      padding: 14px 18px;
     }
 
     .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 18px;
     }
 
     .message {
-      padding: 12px 16px;
-      border-radius: 8px;
-      max-width: 90%;
-      line-height: 1.5;
-    }
-
-    .message.user {
-      align-self: flex-end;
-      background: var(--accent);
+      border-radius: 16px;
+      line-height: 1.55;
+      max-width: 95%;
+      padding: 12px 14px;
+      white-space: pre-wrap;
     }
 
     .message.assistant {
       align-self: flex-start;
-      background: var(--bg-tertiary);
+      background: rgba(31, 42, 68, 0.9);
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, rgba(255, 91, 91, 0.95), rgba(255, 165, 82, 0.9));
+      color: white;
     }
 
     .tools-used {
-      font-size: 11px;
-      color: var(--text-secondary);
+      color: var(--muted);
+      font-size: 12px;
       margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid var(--border);
-    }
-
-    .tool-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      background: var(--accent);
-      color: white;
-      border-radius: 10px;
-      margin-right: 4px;
-      font-size: 10px;
-    }
-
-    .chat-input-area {
-      padding: 16px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      gap: 8px;
-    }
-
-    .chat-input {
-      flex: 1;
-      padding: 10px 14px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      font-size: 14px;
-      resize: none;
-      font-family: inherit;
-    }
-
-    .chat-input:focus {
-      outline: none;
-      border-color: var(--accent);
     }
 
     .loading {
+      color: var(--muted);
       display: none;
-      padding: 20px;
-      text-align: center;
-      color: var(--text-secondary);
+      padding: 0 18px 16px;
     }
 
     .loading.active {
       display: block;
     }
 
-    .loading-spinner {
-      width: 24px;
-      height: 24px;
-      border: 3px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
+    .chat-input-area {
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr auto;
+      padding: 16px 18px 18px;
+    }
+
+    .chat-input {
+      min-height: 72px;
+      resize: none;
+    }
+
+    .status-bar {
+      align-items: center;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 18px;
+    }
+
+    .loading-overlay {
+      align-items: center;
+      background: rgba(10, 15, 28, 0.55);
+      backdrop-filter: blur(8px);
+      display: none;
+      inset: 0;
+      justify-content: center;
+      position: fixed;
+      z-index: 1000;
+    }
+
+    .loading-overlay.active {
+      display: flex;
+    }
+
+    .loading-card {
+      background: rgba(11, 18, 33, 0.94);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 26px 30px;
+      text-align: center;
+      width: min(380px, calc(100vw - 48px));
+    }
+
+    .spinner {
       animation: spin 1s linear infinite;
-      margin: 0 auto 12px;
+      border: 3px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      border-top-color: var(--accent-2);
+      height: 28px;
+      margin: 0 auto 14px;
+      width: 28px;
     }
 
     @keyframes spin {
@@ -265,193 +372,154 @@
       }
     }
 
-    .loading-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(26, 26, 46, 0.8);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
+    @media (max-width: 980px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 1fr) 320px;
+      }
 
-    .loading-overlay.active {
-      display: flex;
-    }
-
-    .loading-message {
-      background: var(--bg-secondary);
-      padding: 24px 40px;
-      border-radius: 8px;
-      text-align: center;
-    }
-
-    .status-bar {
-      background: var(--bg-secondary);
-      padding: 6px 16px;
-      font-size: 12px;
-      color: var(--text-secondary);
-      border-top: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .tabs {
-      display: flex;
-      gap: 4px;
-      padding: 8px 16px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border);
-      overflow-x: auto;
-    }
-
-    .tab {
-      padding: 6px 16px;
-      border-radius: 4px 4px 0 0;
-      background: var(--bg-tertiary);
-      font-size: 13px;
-      cursor: pointer;
-      white-space: nowrap;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .tab.active {
-      background: var(--accent);
-    }
-
-    .tab-close {
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      opacity: 0.7;
-    }
-
-    .tab-close:hover {
-      opacity: 1;
-      background: rgba(255, 255, 255, 0.2);
-    }
-
-    .new-tab-btn {
-      padding: 4px 12px;
-      border-radius: 4px;
-      background: transparent;
-      border: 1px dashed var(--border);
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 13px;
-    }
-
-    .new-tab-btn:hover {
-      border-color: var(--accent);
-      color: var(--accent);
+      .sidebar {
+        border-left: none;
+        border-top: 1px solid var(--border);
+      }
     }
   </style>
 </head>
 
 <body>
   <div class="loading-overlay" id="loadingOverlay">
-    <div class="loading-message">
-      <div class="loading-spinner"></div>
+    <div class="loading-card">
+      <div class="spinner"></div>
       <div id="loadingMessage">Loading...</div>
     </div>
   </div>
-  <header>
-    <div class="logo">NeuroBrowser</div>
-    <select class="provider-select" id="providerSelect">
-      <option value="openai">OpenAI</option>
-      <option value="anthropic">Anthropic</option>
-      <option value="ollama">Ollama</option>
-    </select>
-    <div class="url-bar">
-      <input type="text" class="url-input" id="urlInput" placeholder="Enter URL and press Enter...">
-      <button class="btn" id="goBtn">Go</button>
-    </div>
-  </header>
 
-  <div class="tabs" id="tabs">
-    <div class="tab active" data-id="0">
-      <span>New Tab</span>
-    </div>
-  </div>
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>NeuroBrowser</span>
+      </div>
+      <select class="provider-select" id="providerSelect">
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic</option>
+        <option value="ollama">Ollama</option>
+      </select>
+      <div class="url-bar">
+        <input type="text" class="url-input" id="urlInput" placeholder="Enter a URL or domain and press Enter">
+        <button class="btn" id="goBtn">Go</button>
+      </div>
+      <button class="btn btn-secondary" id="newTabBtn">New Tab</button>
+    </header>
 
-  <main>
-    <div class="browser-view">
-      <div class="browser-toolbar">
-        <button class="btn btn-secondary" id="backBtn">←</button>
-        <button class="btn btn-secondary" id="forwardBtn">→</button>
-        <button class="btn btn-secondary" id="refreshBtn">↻</button>
-      </div>
-      <div class="page-stats" id="pageStats">
-        <div class="stat">Links: <span class="stat-value" id="linkCount">0</span></div>
-        <div class="stat">Images: <span class="stat-value" id="imageCount">0</span></div>
-        <div class="stat">Forms: <span class="stat-value" id="formCount">0</span></div>
-        <div class="stat">Prices: <span class="stat-value" id="priceCount">0</span></div>
-      </div>
-      <div class="browser-content" id="browserContent">
-        <iframe id="contentFrame" sandbox="allow-same-origin allow-scripts allow-forms" title="Page Content"></iframe>
-      </div>
-    </div>
+    <div class="tabs" id="tabs"></div>
 
-    <div class="sidebar">
-      <div class="sidebar-header">AI Assistant</div>
-      <div class="chat-messages" id="chatMessages">
-        <div class="message assistant">
-          Hello! I'm your AI browsing assistant. Ask me anything about the current page, or tell me what you'd like to
-          find.
+    <main>
+      <section class="browser-panel">
+        <div class="browser-toolbar">
+          <button class="btn btn-secondary" id="backBtn">Back</button>
+          <button class="btn btn-secondary" id="forwardBtn">Forward</button>
+          <button class="btn btn-secondary" id="refreshBtn">Reload</button>
         </div>
-      </div>
-      <div class="loading" id="loading">Thinking...</div>
-      <div class="chat-input-area">
-        <textarea class="chat-input" id="chatInput" rows="2" placeholder="Ask about the page..."></textarea>
-        <button class="btn" id="sendBtn">Send</button>
-      </div>
-    </div>
-  </main>
 
-  <div class="status-bar">
-    <span id="statusText">Ready</span>
-    <span>Tab 1 of 1</span>
+        <div class="page-stats">
+          <div>Links <span class="stat-value" id="linkCount">0</span></div>
+          <div>Images <span class="stat-value" id="imageCount">0</span></div>
+          <div>Forms <span class="stat-value" id="formCount">0</span></div>
+          <div>Prices <span class="stat-value" id="priceCount">0</span></div>
+          <div>Tables <span class="stat-value" id="tableCount">0</span></div>
+        </div>
+
+        <div class="browser-stage" id="browserStage">
+          <div class="stage-placeholder" id="stagePlaceholder">
+            <h2>Live page webview attaches here</h2>
+            <p>
+              Tabs now run in native child webviews managed by Rust. This shell controls layout,
+              browsing commands, and AI actions while the actual page renders in a real browser runtime.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <div class="sidebar-header">AI Assistant</div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="message assistant">Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.</div>
+        </div>
+        <div class="loading" id="thinkingIndicator">Thinking...</div>
+        <div class="chat-input-area">
+          <textarea class="chat-input" id="chatInput" placeholder="Ask about the current page..."></textarea>
+          <button class="btn" id="sendBtn">Send</button>
+        </div>
+      </aside>
+    </main>
+
+    <div class="status-bar">
+      <span id="statusText">Starting session...</span>
+      <span id="tabCountLabel">Tabs: 0</span>
+    </div>
   </div>
 
   <script>
-    // Polyfill or ensure __TAURI__ exists for local dev if web build fails to inject
     window.__TAURI__ = window.__TAURI__ || {};
     window.__TAURI__.core = window.__TAURI__.core || {
       invoke: async (cmd, args = {}) => {
-        console.warn(`[Mock Tauri] Called ${cmd} with`, args);
+        console.warn(`[Mock Tauri] ${cmd}`, args);
         if (cmd === 'create_session') return 'mock-session-id';
-        if (cmd === 'create_page') return 0;
-        if (cmd === 'get_page_info') return { title: 'Mock Page', html: '<h1>Mock Content</h1>', link_count: 0, image_count: 0, form_count: 0, price_count: 0 };
-        throw new Error('Tauri API not available - running in browser mode without backend.');
+        if (cmd === 'create_page') return Math.floor(Math.random() * 100000);
+        if (cmd === 'get_page_snapshot' || cmd === 'get_page_info') {
+          return {
+            url: 'about:blank',
+            title: 'Demo Page',
+            html: '<h1>Demo Mode</h1>',
+            text: 'Demo Mode',
+            link_count: 0,
+            image_count: 0,
+            form_count: 0,
+            price_count: 0,
+            table_count: 0,
+            viewport_width: 1280,
+            viewport_height: 720,
+            interactive_ready: false
+          };
+        }
+        if (cmd === 'validate_url') {
+          return {
+            valid: true,
+            normalized_url: args.url.startsWith('http') ? args.url : `https://${args.url}`,
+            error: null
+          };
+        }
+        return null;
       }
     };
 
+    const state = {
+      sessionId: null,
+      currentPageId: null,
+      tabs: [],
+      lastSnapshot: null
+    };
+
+    const tabsEl = document.getElementById('tabs');
+    const statusText = document.getElementById('statusText');
+    const tabCountLabel = document.getElementById('tabCountLabel');
     const urlInput = document.getElementById('urlInput');
-    const goBtn = document.getElementById('goBtn');
-    const chatInput = document.getElementById('chatInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const chatMessages = document.getElementById('chatMessages');
-    const loading = document.getElementById('loading');
+    const browserStage = document.getElementById('browserStage');
+    const stagePlaceholder = document.getElementById('stagePlaceholder');
     const loadingOverlay = document.getElementById('loadingOverlay');
     const loadingMessage = document.getElementById('loadingMessage');
-    const statusText = document.getElementById('statusText');
-    const browserContent = document.getElementById('browserContent');
-    const contentFrame = document.getElementById('contentFrame');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const thinkingIndicator = document.getElementById('thinkingIndicator');
+
     const linkCount = document.getElementById('linkCount');
     const imageCount = document.getElementById('imageCount');
     const formCount = document.getElementById('formCount');
     const priceCount = document.getElementById('priceCount');
+    const tableCount = document.getElementById('tableCount');
 
-    function showLoading(message = 'Loading...') {
+    function showLoading(message) {
       loadingMessage.textContent = message;
       loadingOverlay.classList.add('active');
     }
@@ -460,251 +528,300 @@
       loadingOverlay.classList.remove('active');
     }
 
-    let currentSessionId = null;
-    let currentPageId = 0;
-    let currentProvider = 'openai';
+    function invoke(cmd, args = {}) {
+      return window.__TAURI__.core.invoke(cmd, args);
+    }
 
-    async function initSession() {
-      try {
-        const { invoke } = window.__TAURI__.core;
-        currentSessionId = await invoke('create_session');
-        currentPageId = await invoke('create_page', { sessionId: currentSessionId });
-        statusText.textContent = 'Session initialized';
-      } catch (e) {
-        console.error('Failed to init session:', e);
-        statusText.textContent = 'Tauri not connected - running in demo mode';
+    function activeTab() {
+      return state.tabs.find((tab) => tab.id === state.currentPageId) || null;
+    }
+
+    function updateStatus(message) {
+      statusText.textContent = message;
+    }
+
+    function updateCounts(snapshot) {
+      linkCount.textContent = snapshot.link_count ?? 0;
+      imageCount.textContent = snapshot.image_count ?? 0;
+      formCount.textContent = snapshot.form_count ?? 0;
+      priceCount.textContent = snapshot.price_count ?? 0;
+      tableCount.textContent = snapshot.table_count ?? 0;
+    }
+
+    function updateTabTitle(pageId, title) {
+      const tab = state.tabs.find((item) => item.id === pageId);
+      if (!tab) return;
+      tab.title = title || tab.title || 'Untitled';
+      renderTabs();
+    }
+
+    function renderTabs() {
+      tabsEl.innerHTML = '';
+      state.tabs.forEach((tab) => {
+        const tabEl = document.createElement('button');
+        tabEl.className = `tab${tab.id === state.currentPageId ? ' active' : ''}`;
+        tabEl.dataset.id = String(tab.id);
+        tabEl.innerHTML = `
+          <span class="tab-title">${tab.title || 'New Tab'}</span>
+          <span class="tab-close" data-close="${tab.id}">×</span>
+        `;
+        tabsEl.appendChild(tabEl);
+      });
+      tabCountLabel.textContent = `Tabs: ${state.tabs.length}`;
+    }
+
+    async function syncBrowserViewport() {
+      if (!state.currentPageId) return;
+      const rect = browserStage.getBoundingClientRect();
+      await invoke('sync_browser_viewport', {
+        pageId: state.currentPageId,
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height
+      });
+    }
+
+    let syncFrame = null;
+    function queueViewportSync() {
+      if (syncFrame) return;
+      syncFrame = window.requestAnimationFrame(async () => {
+        syncFrame = null;
+        try {
+          await syncBrowserViewport();
+        } catch (error) {
+          console.error('viewport sync failed', error);
+        }
+      });
+    }
+
+    async function refreshSnapshot(options = {}) {
+      if (!state.currentPageId || !state.sessionId) return null;
+
+      const { waitForReady = true } = options;
+
+      if (waitForReady) {
+        try {
+          await invoke('wait_for_page_ready', {
+            pageId: state.currentPageId,
+            timeoutMs: 10000
+          });
+        } catch (error) {
+          console.warn('page readiness wait failed', error);
+        }
+      }
+
+      const snapshot = await invoke('get_page_snapshot', {
+        sessionId: state.sessionId,
+        pageId: state.currentPageId
+      });
+
+      state.lastSnapshot = snapshot;
+      urlInput.value = snapshot.url || '';
+      updateCounts(snapshot);
+      updateTabTitle(state.currentPageId, snapshot.title || 'Untitled');
+      stagePlaceholder.style.display = snapshot.title || snapshot.url !== 'about:blank' ? 'none' : 'block';
+      updateStatus(snapshot.title ? `Loaded: ${snapshot.title}` : 'Ready');
+      return snapshot;
+    }
+
+    async function activatePage(pageId) {
+      if (!pageId || !state.sessionId) return;
+      state.currentPageId = pageId;
+      renderTabs();
+      await invoke('set_active_page', {
+        sessionId: state.sessionId,
+        pageId
+      });
+      await syncBrowserViewport();
+      await refreshSnapshot({ waitForReady: false });
+    }
+
+    async function createNewTab() {
+      if (!state.sessionId) return;
+      const pageId = await invoke('create_page', { sessionId: state.sessionId });
+      state.tabs.push({
+        id: pageId,
+        title: `Tab ${state.tabs.length + 1}`
+      });
+      renderTabs();
+      await activatePage(pageId);
+      updateStatus('New tab ready');
+    }
+
+    async function closeTab(pageId) {
+      if (state.tabs.length <= 1) return;
+      await invoke('close_page', {
+        sessionId: state.sessionId,
+        pageId
+      });
+
+      const closingIndex = state.tabs.findIndex((tab) => tab.id === pageId);
+      state.tabs = state.tabs.filter((tab) => tab.id !== pageId);
+      const nextTab = state.tabs[closingIndex] || state.tabs[closingIndex - 1] || state.tabs[0];
+      renderTabs();
+      if (nextTab) {
+        await activatePage(nextTab.id);
       }
     }
 
-    async function navigate() {
-      let url = urlInput.value.trim();
-      if (!url) return;
+    function appendMessage(role, text, tools = []) {
+      const message = document.createElement('div');
+      message.className = `message ${role}`;
+      message.textContent = text;
 
-      statusText.textContent = 'Validating URL...';
+      if (tools.length > 0) {
+        const toolsDiv = document.createElement('div');
+        toolsDiv.className = 'tools-used';
+        toolsDiv.textContent = `Tools: ${tools.join(', ')}`;
+        message.appendChild(toolsDiv);
+      }
+
+      chatMessages.appendChild(message);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function navigateCurrentPage() {
+      if (!state.currentPageId || !state.sessionId) return;
+      const rawUrl = urlInput.value.trim();
+      if (!rawUrl) return;
+
+      showLoading('Validating destination...');
+      updateStatus('Validating URL...');
 
       try {
-        const { invoke } = window.__TAURI__.core;
-
-        // Validate URL first
-        const validation = await invoke('validate_url', { url });
-
+        const validation = await invoke('validate_url', { url: rawUrl });
         if (!validation.valid) {
-          statusText.textContent = 'Error: ' + (validation.error || 'Invalid URL');
-          browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">
-            <h2>Invalid URL</h2>
-            <p>${validation.error || 'The URL format is invalid'}</p>
-          </div>`;
-          return;
+          throw new Error(validation.error || 'Invalid URL');
         }
 
         urlInput.value = validation.normalized_url;
-        showLoading('Navigating to ' + validation.normalized_url + '...');
+        updateStatus(`Navigating to ${validation.normalized_url}`);
+        showLoading(`Opening ${validation.normalized_url}...`);
 
         await invoke('navigate', {
-          sessionId: currentSessionId,
-          pageId: currentPageId,
+          sessionId: state.sessionId,
+          pageId: state.currentPageId,
           url: validation.normalized_url
         });
 
-        const pageInfo = await invoke('get_page_info', {
-          sessionId: currentSessionId,
-          pageId: currentPageId
-        });
-
-        // Render HTML content in iframe
-        if (pageInfo.html) {
-          let htmlContent = pageInfo.html;
-
-          // Inject base tag for relative assets
-          if (!htmlContent.match(/<base\s/i) && htmlContent.match(/<head>/i)) {
-            htmlContent = htmlContent.replace(/<head>/i, `<head><base href="${pageInfo.url}">`);
-          } else if (!htmlContent.match(/<base\s/i)) {
-            htmlContent = `<base href="${pageInfo.url}">` + htmlContent;
-          }
-
-          // Inject script to route link clicks back to Tauri MVP engine
-          htmlContent += `
-            <script>
-              document.addEventListener('click', (e) => {
-                const a = e.target.closest('a');
-                if (a && a.href) {
-                  e.preventDefault();
-                  window.parent.postMessage({ type: 'navigate', url: a.href }, '*');
-                }
-              });
-              document.addEventListener('submit', (e) => {
-                e.preventDefault();
-                window.parent.postMessage({ type: 'form_submit', msg: 'Form submissions not yet supported in MVP' }, '*');
-              });
-            <\/script>
-          `;
-
-          const blob = new Blob([htmlContent], { type: 'text/html' });
-          const blobUrl = URL.createObjectURL(blob);
-          contentFrame.src = blobUrl;
-        }
-
-        // Update stats
-        linkCount.textContent = pageInfo.link_count || 0;
-        imageCount.textContent = pageInfo.image_count || 0;
-        formCount.textContent = pageInfo.form_count || 0;
-        priceCount.textContent = pageInfo.price_count || 0;
-
+        await refreshSnapshot();
+      } catch (error) {
+        updateStatus(`Navigation failed: ${error.message || error}`);
+      } finally {
         hideLoading();
-        statusText.textContent = 'Loaded: ' + pageInfo.title;
-      } catch (e) {
-        hideLoading();
-        const errorMsg = e.message || String(e);
-        statusText.textContent = 'Error: ' + errorMsg;
-        browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">
-          <h2>Navigation Error</h2>
-          <p>${errorMsg}</p>
-          <p style="font-size: 12px; margin-top: 20px;">Running in demo mode - Tauri connection may not be available</p>
-        </div>`;
       }
     }
 
     async function askAssistant() {
       const prompt = chatInput.value.trim();
-      if (!prompt) return;
+      if (!prompt || !state.currentPageId || !state.sessionId) return;
 
       chatInput.value = '';
-
-      const userMsg = document.createElement('div');
-      userMsg.className = 'message user';
-      userMsg.textContent = prompt;
-      chatMessages.appendChild(userMsg);
-
-      showLoading('AI is thinking...');
+      appendMessage('user', prompt);
+      thinkingIndicator.classList.add('active');
+      updateStatus('Agent is working...');
 
       try {
-        const { invoke } = window.__TAURI__.core;
         const result = await invoke('ask', {
-          sessionId: currentSessionId,
-          pageId: currentPageId,
+          sessionId: state.sessionId,
+          pageId: state.currentPageId,
           prompt
         });
-
-        const assistantMsg = document.createElement('div');
-        assistantMsg.className = 'message assistant';
-        assistantMsg.innerHTML = `<div>${result.response}</div>`;
-
-        // Show tools used if any
-        if (result.tools_used && result.tools_used.length > 0) {
-          const toolsDiv = document.createElement('div');
-          toolsDiv.className = 'tools-used';
-          toolsDiv.innerHTML = 'Tools: ' + result.tools_used
-            .map(t => `<span class="tool-badge">${t}</span>`)
-            .join('');
-          assistantMsg.appendChild(toolsDiv);
-        }
-
-        chatMessages.appendChild(assistantMsg);
-
-        hideLoading();
-        statusText.textContent = 'Ready';
-      } catch (e) {
-        hideLoading();
-        const assistantMsg = document.createElement('div');
-        assistantMsg.className = 'message assistant';
-        assistantMsg.textContent = `Demo response: I would ${prompt.toLowerCase()} (Tauri not connected)`;
-        chatMessages.appendChild(assistantMsg);
-        statusText.textContent = 'Demo mode';
+        appendMessage('assistant', result.response, result.tools_used || []);
+        await refreshSnapshot({ waitForReady: false });
+        updateStatus('Ready');
+      } catch (error) {
+        appendMessage('assistant', `Request failed: ${error.message || error}`);
+        updateStatus('Agent request failed');
+      } finally {
+        thinkingIndicator.classList.remove('active');
       }
-
-      loading.classList.remove('active');
-      chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    goBtn.addEventListener('click', navigate);
-    urlInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') navigate();
+    async function browserAction(command) {
+      if (!state.currentPageId || !state.sessionId) return;
+      try {
+        await invoke(command, {
+          sessionId: state.sessionId,
+          pageId: state.currentPageId
+        });
+        await refreshSnapshot();
+      } catch (error) {
+        updateStatus(`Browser action failed: ${error.message || error}`);
+      }
+    }
+
+    async function init() {
+      try {
+        state.sessionId = await invoke('create_session');
+        await createNewTab();
+        queueViewportSync();
+        updateStatus('Session ready');
+      } catch (error) {
+        updateStatus(`Startup failed: ${error.message || error}`);
+      }
+    }
+
+    document.getElementById('goBtn').addEventListener('click', navigateCurrentPage);
+    document.getElementById('newTabBtn').addEventListener('click', createNewTab);
+    document.getElementById('sendBtn').addEventListener('click', askAssistant);
+    document.getElementById('backBtn').addEventListener('click', () => browserAction('browser_back'));
+    document.getElementById('forwardBtn').addEventListener('click', () => browserAction('browser_forward'));
+    document.getElementById('refreshBtn').addEventListener('click', () => browserAction('browser_reload'));
+
+    tabsEl.addEventListener('click', async (event) => {
+      const closeId = event.target.dataset.close;
+      if (closeId) {
+        event.stopPropagation();
+        await closeTab(Number(closeId));
+        return;
+      }
+
+      const tab = event.target.closest('.tab');
+      if (!tab) return;
+      await activatePage(Number(tab.dataset.id));
     });
 
-    sendBtn.addEventListener('click', askAssistant);
-    chatInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
+    urlInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        navigateCurrentPage();
+      }
+    });
+
+    chatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
         askAssistant();
       }
     });
 
-    // Handle iframe messages
-    window.addEventListener('message', (e) => {
-      if (e.data && e.data.type === 'navigate') {
-        urlInput.value = e.data.url;
-        navigate();
-      } else if (e.data && e.data.type === 'form_submit') {
-        statusText.textContent = e.data.msg;
-      }
-    });
+    document.addEventListener('keydown', (event) => {
+      const modifier = event.metaKey || event.ctrlKey;
+      if (!modifier) return;
 
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-      // Ctrl+T: New tab
-      if (e.ctrlKey && e.key === 't') {
-        e.preventDefault();
+      if (event.key.toLowerCase() === 't') {
+        event.preventDefault();
         createNewTab();
       }
-      // Ctrl+W: Close tab
-      if (e.ctrlKey && e.key === 'w') {
-        e.preventDefault();
-        closeCurrentTab();
-      }
-      // Ctrl+L: Focus URL bar
-      if (e.ctrlKey && e.key === 'l') {
-        e.preventDefault();
+
+      if (event.key.toLowerCase() === 'l') {
+        event.preventDefault();
         urlInput.focus();
         urlInput.select();
       }
-      // Ctrl+Enter in URL bar: Navigate
-      if (e.ctrlKey && e.key === 'Enter' && document.activeElement === urlInput) {
-        e.preventDefault();
-        navigate();
+
+      if (event.key.toLowerCase() === 'w' && state.currentPageId) {
+        event.preventDefault();
+        closeTab(state.currentPageId);
       }
     });
 
-    async function createNewTab() {
-      try {
-        const { invoke } = window.__TAURI__.core;
-        const newPageId = await invoke('create_page', { sessionId: currentSessionId });
-        currentPageId = newPageId;
+    window.addEventListener('resize', queueViewportSync);
+    new ResizeObserver(queueViewportSync).observe(browserStage);
 
-        const tab = document.createElement('div');
-        tab.className = 'tab active';
-        tab.dataset.id = newPageId;
-        tab.innerHTML = `<span>New Tab</span>`;
-        document.getElementById('tabs').appendChild(tab);
-      } catch (e) {
-        console.log('Demo mode: would create new tab');
-      }
-    }
-
-    async function closeCurrentTab() {
-      if (document.querySelectorAll('.tab').length <= 1) return; // Don't close last tab
-
-      try {
-        const { invoke } = window.__TAURI__.core;
-        await invoke('close_page', { sessionId: currentSessionId, pageId: currentPageId });
-
-        // Remove tab from UI
-        const tabElement = document.querySelector(`.tab[data-id="${currentPageId}"]`);
-        if (tabElement) {
-          tabElement.remove();
-        }
-
-        // Switch to first available tab
-        const firstTab = document.querySelector('.tab');
-        if (firstTab) {
-          currentPageId = parseInt(firstTab.dataset.id);
-          firstTab.classList.add('active');
-        }
-      } catch (e) {
-        console.log('Demo mode: would close tab');
-      }
-    }
-
-    initSession();
+    init();
   </script>
 </body>
 

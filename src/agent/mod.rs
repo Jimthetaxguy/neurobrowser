@@ -50,7 +50,7 @@ impl ReActAgent {
         Self {
             config: config.clone(),
             provider,
-            tool_registry: Mutex::new(ToolRegistry::new()),
+            tool_registry: Mutex::new(crate::browser::default_tool_registry()),
             state: Mutex::new(AgentState {
                 current_url: String::new(),
                 page_title: String::new(),
@@ -66,12 +66,18 @@ impl ReActAgent {
         self
     }
 
+    pub fn set_provider(&self, provider_type: crate::providers::ProviderType) {
+        // This would require a mutable provider - for now, we just log the change
+        // A full implementation would swap out the provider instance
+        tracing::info!("Provider change requested to: {:?}", provider_type);
+    }
+
     pub async fn execute(
         &self,
         user_prompt: &str,
         browser: &dyn BrowserInterface,
     ) -> Result<String, String> {
-        let page_info = browser.get_page_info();
+        let page_info = browser.snapshot().await?;
 
         {
             let mut state = self.state.lock().map_err(|e| e.to_string())?;
@@ -84,7 +90,7 @@ impl ReActAgent {
         let mut current_prompt = user_prompt.to_string();
 
         for iteration in 0..self.config.max_iterations {
-            let context = self.build_context(browser)?;
+            let context = self.build_context(browser).await?;
 
             let response = self
                 .provider
@@ -132,38 +138,47 @@ impl ReActAgent {
         Err("Max iterations reached".to_string())
     }
 
-    fn build_context(&self, browser: &dyn BrowserInterface) -> Result<AiContext, String> {
-        let page_info = browser.get_page_info();
+    async fn build_context(&self, browser: &dyn BrowserInterface) -> Result<AiContext, String> {
+        let page_info = browser.snapshot().await?;
 
-        let state = self.state.lock().map_err(|e| e.to_string())?;
+        let (current_url, page_title, tool_results, conversation_history) = {
+            let state = self.state.lock().map_err(|e| e.to_string())?;
+            (
+                state.current_url.clone(),
+                state.page_title.clone(),
+                state.tool_results.clone(),
+                state
+                    .conversation
+                    .iter()
+                    .map(|message| crate::providers::Message {
+                        role: message.role.clone(),
+                        content: message.content.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
 
         let dom_snapshot = format!(
-            "URL: {}\nTitle: {}\nLinks: {}\nImages: {}\nForms: {}",
+            "URL: {}\nTitle: {}\nInteractive: {}\nLinks: {}\nImages: {}\nForms: {}",
             page_info.url,
             page_info.title,
+            page_info.interactive_ready,
             page_info.links.len(),
             page_info.images.len(),
             page_info.forms.len()
         );
 
         Ok(AiContext {
-            current_url: state.current_url.clone(),
-            page_title: state.page_title.clone(),
+            current_url,
+            page_title,
             dom_snapshot,
-            accessibility_tree: None,
+            accessibility_tree: browser.accessibility_tree().await?,
             scroll_position: ScrollPosition {
                 x: page_info.scroll_x,
                 y: page_info.scroll_y,
             },
-            tool_results: state.tool_results.clone(),
-            conversation_history: state
-                .conversation
-                .iter()
-                .map(|m| crate::providers::Message {
-                    role: m.role.clone(),
-                    content: m.content.clone(),
-                })
-                .collect(),
+            tool_results,
+            conversation_history,
         })
     }
 
@@ -179,9 +194,7 @@ impl ReActAgent {
         };
 
         if let Some(tool) = tool {
-            let result = tool
-                .execute(tool_call.arguments.clone(), browser)
-                .await;
+            let result = tool.execute(tool_call.arguments.clone(), browser).await;
             if result.success {
                 Ok(result.result)
             } else {

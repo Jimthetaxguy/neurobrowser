@@ -1,183 +1,49 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod runtime;
+
 use neurobrowser::{
-    AgentConfig, BrowserInterface, PageConfig, ProviderConfig, ProviderType, SessionManager,
+    AgentConfig, BrowserInterface, PageConfig, PageSnapshot, ProviderConfig, ProviderType,
+    SessionManager,
+};
+use runtime::{
+    close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
+    wait_for_runtime_page, BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload,
+    TauriBrowserRuntime,
 };
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use std::sync::Arc;
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 struct AppState {
     session_manager: SessionManager,
+    runtimes: Arc<BrowserRuntimeRegistry>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct NavigateRequest {
-    session_id: String,
-    url: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct AskRequest {
-    session_id: String,
-    page_id: usize,
-    prompt: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PageInfo {
-    url: String,
-    title: String,
-    html: String,
-    link_count: usize,
-    image_count: usize,
-    form_count: usize,
-    price_count: usize,
-    viewport_width: u32,
-    viewport_height: u32,
-}
-
-#[tauri::command]
-fn create_session(state: State<'_, AppState>) -> Result<String, String> {
-    let session_id = state.session_manager.create_session();
-    Ok(session_id)
-}
-
-#[tauri::command]
-fn create_page(state: State<'_, AppState>, session_id: String) -> Result<usize, String> {
-    let page = state.session_manager.create_page(&session_id)?;
-    Ok(page.id)
-}
-
-#[tauri::command]
-fn navigate(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    url: String,
-) -> Result<(), String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.browser.navigate(&url)
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 struct AskResult {
     response: String,
     tools_used: Vec<String>,
     iterations: usize,
 }
 
-#[tauri::command]
-async fn ask(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    prompt: String,
-) -> Result<AskResult, String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    let response = page.agent.execute(&prompt, page.browser.as_ref()).await?;
-
-    // For now, return empty tools_used - a full implementation would track tool execution
-    Ok(AskResult {
-        response,
-        tools_used: vec![],
-        iterations: 1,
-    })
-}
-
-#[tauri::command]
-fn get_page_info(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-) -> Result<PageInfo, String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    let page_state = page.browser.get_state()?;
-    let page_info = page.browser.get_page_info();
-
-    Ok(PageInfo {
-        url: page_state.url,
-        title: page_state.title,
-        html: page_state.html,
-        link_count: page_info.links.len(),
-        image_count: page_info.images.len(),
-        form_count: page_info.forms.len(),
-        price_count: page_info.prices.len(),
-        viewport_width: page_state.viewport_width,
-        viewport_height: page_state.viewport_height,
-    })
-}
-
-#[tauri::command]
-fn click_element(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    selector: String,
-) -> Result<(), String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.browser.click(&selector)
-}
-
-#[tauri::command]
-fn type_text_element(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    selector: String,
+#[derive(Serialize)]
+struct SnapshotResponse {
+    url: String,
+    title: String,
+    html: String,
     text: String,
-) -> Result<(), String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.browser.type_text(&selector, &text)
+    link_count: usize,
+    image_count: usize,
+    form_count: usize,
+    price_count: usize,
+    table_count: usize,
+    viewport_width: u32,
+    viewport_height: u32,
+    interactive_ready: bool,
 }
 
-#[tauri::command]
-fn submit_form_element(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    selector: String,
-) -> Result<(), String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.browser.submit_form(&selector)
-}
-
-#[tauri::command]
-fn scroll_to_element(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    selector: String,
-) -> Result<(), String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.browser.scroll_to(&selector)
-}
-
-#[tauri::command]
-fn scroll_by_pixels(
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    x: f32,
-    y: f32,
-) -> Result<(), String> {
-    let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.browser.scroll_by(x, y)
-}
-
-#[tauri::command]
-fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionListItem>, String> {
-    let sessions = state.session_manager.list_sessions();
-    Ok(sessions
-        .into_iter()
-        .map(|s| SessionListItem {
-            id: s.id,
-            created_at: s.created_at,
-            page_count: s.page_count,
-        })
-        .collect())
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 struct SessionListItem {
     id: String,
     created_at: u64,
@@ -191,9 +57,245 @@ struct ValidateUrlResult {
     error: Option<String>,
 }
 
+fn browser_for_page(
+    app: AppHandle,
+    state: &AppState,
+    session_id: &str,
+    page_id: usize,
+) -> Result<(neurobrowser::PageHandle, TauriBrowserRuntime), String> {
+    let page = state.session_manager.get_page(session_id, page_id)?;
+    let browser = TauriBrowserRuntime::new(
+        app,
+        page.id,
+        page.runtime_id.clone(),
+        state.runtimes.clone(),
+    );
+    Ok((page, browser))
+}
+
+fn snapshot_response(snapshot: PageSnapshot) -> SnapshotResponse {
+    SnapshotResponse {
+        url: snapshot.url,
+        title: snapshot.title,
+        html: snapshot.html.unwrap_or_default(),
+        text: snapshot.text.unwrap_or_default(),
+        link_count: snapshot.links.len(),
+        image_count: snapshot.images.len(),
+        form_count: snapshot.forms.len(),
+        price_count: snapshot.prices.len(),
+        table_count: snapshot.tables.len(),
+        viewport_width: snapshot.viewport_width,
+        viewport_height: snapshot.viewport_height,
+        interactive_ready: snapshot.interactive_ready,
+    }
+}
+
+#[tauri::command]
+fn create_session(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.session_manager.create_session())
+}
+
+#[tauri::command]
+async fn create_page(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<usize, String> {
+    let page = state.session_manager.create_page(&session_id)?;
+    let host_window = app
+        .get_window(window.label())
+        .ok_or_else(|| "Host window not found".to_string())?;
+    create_runtime_page(&host_window, state.runtimes.clone(), page.id, &page.runtime_id)?;
+    set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+    Ok(page.id)
+}
+
+#[tauri::command]
+fn set_active_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    state.session_manager.set_active_page(&session_id, page_id)?;
+    set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)
+}
+
+#[tauri::command]
+fn sync_browser_viewport(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    page_id: usize,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    sync_runtime_viewport(
+        &app,
+        state.runtimes.as_ref(),
+        page_id,
+        BrowserViewport {
+            x,
+            y,
+            width,
+            height,
+        },
+    )
+}
+
+#[tauri::command]
+async fn navigate(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    url: String,
+) -> Result<(), String> {
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.navigate(&url).await
+}
+
+#[tauri::command]
+async fn wait_for_page_ready(
+    state: State<'_, AppState>,
+    page_id: usize,
+    timeout_ms: Option<u64>,
+) -> Result<(), String> {
+    wait_for_runtime_page(
+        state.runtimes.as_ref(),
+        page_id,
+        timeout_ms.unwrap_or(8_000),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn get_page_snapshot(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<SnapshotResponse, String> {
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let snapshot = browser.snapshot().await?;
+    Ok(snapshot_response(snapshot))
+}
+
+#[tauri::command]
+async fn get_page_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<SnapshotResponse, String> {
+    get_page_snapshot(app, state, session_id, page_id).await
+}
+
+#[tauri::command]
+async fn ask(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    prompt: String,
+) -> Result<AskResult, String> {
+    let (page, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let response = page.agent.execute(&prompt, &browser).await?;
+
+    Ok(AskResult {
+        response,
+        tools_used: vec![],
+        iterations: 1,
+    })
+}
+
+#[tauri::command]
+fn close_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    state.session_manager.close_page(&session_id, page_id)?;
+    close_runtime_page(&app, state.runtimes.as_ref(), page_id)
+}
+
+#[tauri::command]
+fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionListItem>, String> {
+    Ok(state
+        .session_manager
+        .list_sessions()
+        .into_iter()
+        .map(|session| SessionListItem {
+            id: session.id,
+            created_at: session.created_at,
+            page_count: session.page_count,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn browser_reload(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    let (page, _) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
+    state.runtimes.set_loading(page.id, true);
+    app.get_webview(&page.runtime_id)
+        .ok_or_else(|| "Runtime webview not found".to_string())?
+        .reload()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn browser_back(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    let (page, _) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
+    state.runtimes.set_loading(page.id, true);
+    app.get_webview(&page.runtime_id)
+        .ok_or_else(|| "Runtime webview not found".to_string())?
+        .eval("history.back()")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn browser_forward(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    let (page, _) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
+    state.runtimes.set_loading(page.id, true);
+    app.get_webview(&page.runtime_id)
+        .ok_or_else(|| "Runtime webview not found".to_string())?
+        .eval("history.forward()")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn browser_runtime_report(
+    state: State<'_, AppState>,
+    payload: RuntimeReportPayload,
+) -> Result<(), String> {
+    state.runtimes.page_runtime_id(payload.page_id)?;
+    state.runtimes.resolve_request(
+        &payload.request_id,
+        payload.payload,
+        payload.error,
+    )
+}
+
 #[tauri::command]
 fn validate_url(url: String) -> ValidateUrlResult {
-    // Basic URL validation
     let normalized = if url.starts_with("http://") || url.starts_with("https://") {
         url.clone()
     } else if url.contains('.') && !url.contains(' ') {
@@ -206,7 +308,6 @@ fn validate_url(url: String) -> ValidateUrlResult {
         };
     };
 
-    // Check for suspicious patterns
     if normalized.contains("javascript:") || normalized.contains("data:") {
         return ValidateUrlResult {
             valid: false,
@@ -241,22 +342,30 @@ fn main() {
     };
 
     let session_manager = SessionManager::new(browser_config, agent_config);
+    let runtimes = Arc::new(BrowserRuntimeRegistry::default());
 
     tauri::Builder::default()
-        .manage(AppState { session_manager })
+        .manage(AppState {
+            session_manager,
+            runtimes,
+        })
         .invoke_handler(tauri::generate_handler![
-            create_session,
-            create_page,
-            navigate,
             ask,
+            browser_back,
+            browser_forward,
+            browser_reload,
+            browser_runtime_report,
+            close_page,
+            create_page,
+            create_session,
             get_page_info,
+            get_page_snapshot,
             list_sessions,
+            navigate,
+            set_active_page,
+            sync_browser_viewport,
             validate_url,
-            click_element,
-            type_text_element,
-            submit_form_element,
-            scroll_to_element,
-            scroll_by_pixels,
+            wait_for_page_ready,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
