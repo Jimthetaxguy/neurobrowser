@@ -45,6 +45,21 @@
       color: var(--accent);
     }
 
+    .provider-select {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .provider-select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
     .url-bar {
       flex: 1;
       display: flex;
@@ -180,6 +195,24 @@
       background: var(--bg-tertiary);
     }
 
+    .tools-used {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .tool-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: var(--accent);
+      color: white;
+      border-radius: 10px;
+      margin-right: 4px;
+      font-size: 10px;
+    }
+
     .chat-input-area {
       padding: 16px;
       border-top: 1px solid var(--border);
@@ -213,6 +246,44 @@
 
     .loading.active {
       display: block;
+    }
+
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(26, 26, 46, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .loading-overlay.active {
+      display: flex;
+    }
+
+    .loading-message {
+      background: var(--bg-secondary);
+      padding: 24px 40px;
+      border-radius: 8px;
+      text-align: center;
     }
 
     .status-bar {
@@ -265,11 +336,37 @@
       opacity: 1;
       background: rgba(255,255,255,0.2);
     }
+
+    .new-tab-btn {
+      padding: 4px 12px;
+      border-radius: 4px;
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .new-tab-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
   </style>
 </head>
 <body>
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-message">
+      <div class="loading-spinner"></div>
+      <div id="loadingMessage">Loading...</div>
+    </div>
+  </div>
   <header>
     <div class="logo">NeuroBrowser</div>
+    <select class="provider-select" id="providerSelect">
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic</option>
+      <option value="ollama">Ollama</option>
+    </select>
     <div class="url-bar">
       <input type="text" class="url-input" id="urlInput" placeholder="Enter URL and press Enter...">
       <button class="btn" id="goBtn">Go</button>
@@ -321,12 +418,26 @@
   </div>
 
   <script>
+    // Polyfill or ensure __TAURI__ exists for local dev if web build fails to inject
+    window.__TAURI__ = window.__TAURI__ || {};
+    window.__TAURI__.core = window.__TAURI__.core || {
+      invoke: async (cmd, args = {}) => {
+        console.warn(`[Mock Tauri] Called ${cmd} with`, args);
+        if (cmd === 'create_session') return 'mock-session-id';
+        if (cmd === 'create_page') return 0;
+        if (cmd === 'get_page_info') return { title: 'Mock Page', html: '<h1>Mock Content</h1>', link_count: 0, image_count: 0, form_count: 0, price_count: 0 };
+        throw new Error('Tauri API not available - running in browser mode without backend.');
+      }
+    };
+    
     const urlInput = document.getElementById('urlInput');
     const goBtn = document.getElementById('goBtn');
     const chatInput = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
     const chatMessages = document.getElementById('chatMessages');
     const loading = document.getElementById('loading');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingMessage = document.getElementById('loadingMessage');
     const statusText = document.getElementById('statusText');
     const browserContent = document.getElementById('browserContent');
     const contentFrame = document.getElementById('contentFrame');
@@ -335,8 +446,18 @@
     const formCount = document.getElementById('formCount');
     const priceCount = document.getElementById('priceCount');
 
+    function showLoading(message = 'Loading...') {
+      loadingMessage.textContent = message;
+      loadingOverlay.classList.add('active');
+    }
+
+    function hideLoading() {
+      loadingOverlay.classList.remove('active');
+    }
+
     let currentSessionId = null;
     let currentPageId = 0;
+    let currentProvider = 'openai';
 
     async function initSession() {
       try {
@@ -351,21 +472,33 @@
     }
 
     async function navigate() {
-      const url = urlInput.value.trim();
+      let url = urlInput.value.trim();
       if (!url) return;
 
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        urlInput.value = 'https://' + url;
-      }
-
-      statusText.textContent = 'Loading...';
+      statusText.textContent = 'Validating URL...';
       
       try {
         const { invoke } = window.__TAURI__.core;
+        
+        // Validate URL first
+        const validation = await invoke('validate_url', { url });
+        
+        if (!validation.valid) {
+          statusText.textContent = 'Error: ' + (validation.error || 'Invalid URL');
+          browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">
+            <h2>Invalid URL</h2>
+            <p>${validation.error || 'The URL format is invalid'}</p>
+          </div>`;
+          return;
+        }
+        
+        urlInput.value = validation.normalized_url;
+        statusText.textContent = 'Loading...';
+        
         await invoke('navigate', { 
           sessionId: currentSessionId, 
           pageId: currentPageId, 
-          url: urlInput.value 
+          url: validation.normalized_url 
         });
         
         const pageInfo = await invoke('get_page_info', { 
@@ -388,12 +521,13 @@
         
         statusText.textContent = 'Loaded: ' + pageInfo.title;
       } catch (e) {
-        browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #666;">
-          <h2>Demo Mode</h2>
-          <p>Would navigate to ${urlInput.value}</p>
-          <p style="font-size: 12px; margin-top: 20px;">${e.message || e}</p>
+        const errorMsg = e.message || String(e);
+        statusText.textContent = 'Error: ' + errorMsg;
+        browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">
+          <h2>Navigation Error</h2>
+          <p>${errorMsg}</p>
+          <p style="font-size: 12px; margin-top: 20px;">Running in demo mode - Tauri connection may not be available</p>
         </div>`;
-        statusText.textContent = 'Demo mode';
       }
     }
 
@@ -413,7 +547,7 @@
 
       try {
         const { invoke } = window.__TAURI__.core;
-        const response = await invoke('ask', { 
+        const result = await invoke('ask', { 
           sessionId: currentSessionId, 
           pageId: currentPageId, 
           prompt 
@@ -421,7 +555,18 @@
         
         const assistantMsg = document.createElement('div');
         assistantMsg.className = 'message assistant';
-        assistantMsg.textContent = response;
+        assistantMsg.innerHTML = `<div>${result.response}</div>`;
+        
+        // Show tools used if any
+        if (result.tools_used && result.tools_used.length > 0) {
+          const toolsDiv = document.createElement('div');
+          toolsDiv.className = 'tools-used';
+          toolsDiv.innerHTML = 'Tools: ' + result.tools_used
+            .map(t => `<span class="tool-badge">${t}</span>`)
+            .join('');
+          assistantMsg.appendChild(toolsDiv);
+        }
+        
         chatMessages.appendChild(assistantMsg);
         
         statusText.textContent = 'Ready';
@@ -449,6 +594,71 @@
         askAssistant();
       }
     });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl+T: New tab
+      if (e.ctrlKey && e.key === 't') {
+        e.preventDefault();
+        createNewTab();
+      }
+      // Ctrl+W: Close tab
+      if (e.ctrlKey && e.key === 'w') {
+        e.preventDefault();
+        closeCurrentTab();
+      }
+      // Ctrl+L: Focus URL bar
+      if (e.ctrlKey && e.key === 'l') {
+        e.preventDefault();
+        urlInput.focus();
+        urlInput.select();
+      }
+      // Ctrl+Enter in URL bar: Navigate
+      if (e.ctrlKey && e.key === 'Enter' && document.activeElement === urlInput) {
+        e.preventDefault();
+        navigate();
+      }
+    });
+
+    async function createNewTab() {
+      try {
+        const { invoke } = window.__TAURI__.core;
+        const newPageId = await invoke('create_page', { sessionId: currentSessionId });
+        currentPageId = newPageId;
+        
+        const tab = document.createElement('div');
+        tab.className = 'tab active';
+        tab.dataset.id = newPageId;
+        tab.innerHTML = `<span>New Tab</span>`;
+        document.getElementById('tabs').appendChild(tab);
+      } catch (e) {
+        console.log('Demo mode: would create new tab');
+      }
+    }
+
+    async function closeCurrentTab() {
+      if (document.querySelectorAll('.tab').length <= 1) return; // Don't close last tab
+      
+      try {
+        const { invoke } = window.__TAURI__.core;
+        await invoke('close_page', { sessionId: currentSessionId, pageId: currentPageId });
+        
+        // Remove tab from UI
+        const tabElement = document.querySelector(`.tab[data-id="${currentPageId}"]`);
+        if (tabElement) {
+          tabElement.remove();
+        }
+        
+        // Switch to first available tab
+        const firstTab = document.querySelector('.tab');
+        if (firstTab) {
+          currentPageId = parseInt(firstTab.dataset.id);
+          firstTab.classList.add('active');
+        }
+      } catch (e) {
+        console.log('Demo mode: would close tab');
+      }
+    }
 
     initSession();
   </script>

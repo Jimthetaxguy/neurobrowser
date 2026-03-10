@@ -59,15 +59,29 @@ fn navigate(
     page.browser.navigate(&url)
 }
 
+#[derive(Serialize, Deserialize)]
+struct AskResult {
+    response: String,
+    tools_used: Vec<String>,
+    iterations: usize,
+}
+
 #[tauri::command]
 async fn ask(
     state: State<'_, AppState>,
     session_id: String,
     page_id: usize,
     prompt: String,
-) -> Result<String, String> {
+) -> Result<AskResult, String> {
     let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.agent.execute(&prompt, page.browser.as_ref()).await
+    let response = page.agent.execute(&prompt, page.browser.as_ref()).await?;
+
+    // For now, return empty tools_used - a full implementation would track tool execution
+    Ok(AskResult {
+        response,
+        tools_used: vec![],
+        iterations: 1,
+    })
 }
 
 #[tauri::command]
@@ -91,6 +105,63 @@ fn get_page_info(
         viewport_width: page_state.viewport_width,
         viewport_height: page_state.viewport_height,
     })
+}
+
+#[tauri::command]
+fn click_element(
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    selector: String,
+) -> Result<(), String> {
+    let page = state.session_manager.get_page(&session_id, page_id)?;
+    page.browser.click(&selector)
+}
+
+#[tauri::command]
+fn type_text_element(
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    selector: String,
+    text: String,
+) -> Result<(), String> {
+    let page = state.session_manager.get_page(&session_id, page_id)?;
+    page.browser.type_text(&selector, &text)
+}
+
+#[tauri::command]
+fn submit_form_element(
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    selector: String,
+) -> Result<(), String> {
+    let page = state.session_manager.get_page(&session_id, page_id)?;
+    page.browser.submit_form(&selector)
+}
+
+#[tauri::command]
+fn scroll_to_element(
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    selector: String,
+) -> Result<(), String> {
+    let page = state.session_manager.get_page(&session_id, page_id)?;
+    page.browser.scroll_to(&selector)
+}
+
+#[tauri::command]
+fn scroll_by_pixels(
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    x: f32,
+    y: f32,
+) -> Result<(), String> {
+    let page = state.session_manager.get_page(&session_id, page_id)?;
+    page.browser.scroll_by(x, y)
 }
 
 #[tauri::command]
@@ -181,6 +252,11 @@ fn main() {
             get_page_info,
             list_sessions,
             validate_url,
+            click_element,
+            type_text_element,
+            submit_form_element,
+            scroll_to_element,
+            scroll_by_pixels,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
