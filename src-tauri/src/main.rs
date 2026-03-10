@@ -103,11 +103,26 @@ async fn create_page(
     session_id: String,
 ) -> Result<usize, String> {
     let page = state.session_manager.create_page(&session_id)?;
-    let host_window = app
-        .get_window(window.label())
-        .ok_or_else(|| "Host window not found".to_string())?;
-    create_runtime_page(&host_window, state.runtimes.clone(), page.id, &page.runtime_id)?;
-    set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+    let result = (|| -> Result<(), String> {
+        let host_window = app
+            .get_window(window.label())
+            .ok_or_else(|| "Host window not found".to_string())?;
+        create_runtime_page(
+            &host_window,
+            state.runtimes.clone(),
+            page.id,
+            &page.runtime_id,
+        )?;
+        set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        let _ = close_runtime_page(&app, state.runtimes.as_ref(), page.id);
+        let _ = state.session_manager.close_page(&session_id, page.id);
+        return Err(error);
+    }
+
     Ok(page.id)
 }
 
@@ -118,7 +133,9 @@ fn set_active_page(
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
-    state.session_manager.set_active_page(&session_id, page_id)?;
+    state
+        .session_manager
+        .set_active_page(&session_id, page_id)?;
     set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 
@@ -287,11 +304,9 @@ fn browser_runtime_report(
     payload: RuntimeReportPayload,
 ) -> Result<(), String> {
     state.runtimes.page_runtime_id(payload.page_id)?;
-    state.runtimes.resolve_request(
-        &payload.request_id,
-        payload.payload,
-        payload.error,
-    )
+    state
+        .runtimes
+        .resolve_request(&payload.request_id, payload.payload, payload.error)
 }
 
 #[tauri::command]

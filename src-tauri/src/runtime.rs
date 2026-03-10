@@ -1,7 +1,5 @@
-use neurobrowser::{
-    browser::enrich_snapshot, BrowserInterface, ElementInfo, PageSnapshot,
-};
 use async_trait::async_trait;
+use neurobrowser::{browser::enrich_snapshot, BrowserInterface, ElementInfo, PageSnapshot};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -81,10 +79,24 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
 
       Promise.resolve()
         .then(producer)
-        .then((payload) => invoke('browser_runtime_report', { pageId, requestId, payload, error: null }))
+        .then((payload) => invoke('browser_runtime_report', {
+          payload: {
+            page_id: pageId,
+            request_id: requestId,
+            payload,
+            error: null
+          }
+        }))
         .catch((error) => {
           const message = error && error.message ? error.message : String(error);
-          return invoke('browser_runtime_report', { pageId, requestId, payload: null, error: message });
+          return invoke('browser_runtime_report', {
+            payload: {
+              page_id: pageId,
+              request_id: requestId,
+              payload: null,
+              error: message
+            }
+          });
         });
     },
 
@@ -256,7 +268,10 @@ impl BrowserRuntimeRegistry {
     pub fn begin_request(&self) -> (String, oneshot::Receiver<Result<Value, String>>) {
         let request_id = uuid::Uuid::new_v4().to_string();
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().unwrap().insert(request_id.clone(), sender);
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(request_id.clone(), sender);
         (request_id, receiver)
     }
 
@@ -405,7 +420,12 @@ impl TauriBrowserRuntime {
 
         let value = tokio::time::timeout(REQUEST_TIMEOUT, receiver)
             .await
-            .map_err(|_| format!("Timed out waiting for browser runtime response for page {}", self.page_id))?
+            .map_err(|_| {
+                format!(
+                    "Timed out waiting for browser runtime response for page {}",
+                    self.page_id
+                )
+            })?
             .map_err(|_| "Browser runtime response channel closed".to_string())??;
 
         serde_json::from_value(value).map_err(|e| e.to_string())
@@ -452,10 +472,7 @@ impl BrowserInterface for TauriBrowserRuntime {
             .await
     }
 
-    async fn get_attributes(
-        &self,
-        selector: &str,
-    ) -> Result<HashMap<String, String>, String> {
+    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.request_json(&format!("runtime.getAttributes({selector_json})"))
             .await
@@ -526,11 +543,9 @@ pub fn create_runtime_page(
             registry_for_nav.set_loading(page_id, true);
             true
         })
-        .on_page_load(move |_webview, payload| {
-            match payload.event() {
-                PageLoadEvent::Started => registry_for_load.set_loading(page_id, true),
-                PageLoadEvent::Finished => registry_for_load.set_loading(page_id, false),
-            }
+        .on_page_load(move |_webview, payload| match payload.event() {
+            PageLoadEvent::Started => registry_for_load.set_loading(page_id, true),
+            PageLoadEvent::Finished => registry_for_load.set_loading(page_id, false),
         })
         .on_document_title_changed(move |_webview, _title| {
             if let Some(snapshot) = registry_for_title.snapshot(page_id) {
@@ -552,7 +567,11 @@ pub fn create_runtime_page(
     Ok(())
 }
 
-pub fn close_runtime_page(app: &AppHandle, registry: &BrowserRuntimeRegistry, page_id: usize) -> Result<(), String> {
+pub fn close_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
     if let Some(runtime_id) = registry.unregister_page(page_id) {
         if let Some(webview) = app.get_webview(&runtime_id) {
             webview.close().map_err(|e| e.to_string())?;
@@ -577,7 +596,10 @@ pub fn set_active_runtime_page(
                 .set_position(LogicalPosition::new(viewport.x, viewport.y))
                 .map_err(|e| e.to_string())?;
             webview
-                .set_size(LogicalSize::new(viewport.width.max(1.0), viewport.height.max(1.0)))
+                .set_size(LogicalSize::new(
+                    viewport.width.max(1.0),
+                    viewport.height.max(1.0),
+                ))
                 .map_err(|e| e.to_string())?;
             webview.show().map_err(|e| e.to_string())?;
             registry.set_visible(known_page_id, true);
@@ -605,7 +627,10 @@ pub fn sync_runtime_viewport(
             .set_position(LogicalPosition::new(viewport.x, viewport.y))
             .map_err(|e| e.to_string())?;
         webview
-            .set_size(LogicalSize::new(viewport.width.max(1.0), viewport.height.max(1.0)))
+            .set_size(LogicalSize::new(
+                viewport.width.max(1.0),
+                viewport.height.max(1.0),
+            ))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
