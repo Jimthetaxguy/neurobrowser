@@ -1,10 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use neurobrowser::{
-    AgentConfig, BrowserEngine, PageConfig, ProviderConfig, ProviderType, SessionManager,
+    AgentConfig, BrowserInterface, PageConfig, ProviderConfig, ProviderType, SessionManager,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tauri::State;
 
 struct AppState {
@@ -28,6 +27,11 @@ struct AskRequest {
 struct PageInfo {
     url: String,
     title: String,
+    html: String,
+    link_count: usize,
+    image_count: usize,
+    form_count: usize,
+    price_count: usize,
     viewport_width: u32,
     viewport_height: u32,
 }
@@ -56,14 +60,14 @@ fn navigate(
 }
 
 #[tauri::command]
-fn ask(
+async fn ask(
     state: State<'_, AppState>,
     session_id: String,
     page_id: usize,
     prompt: String,
 ) -> Result<String, String> {
     let page = state.session_manager.get_page(&session_id, page_id)?;
-    page.agent.execute(&prompt, page.browser.as_ref())
+    page.agent.execute(&prompt, page.browser.as_ref()).await
 }
 
 #[tauri::command]
@@ -74,10 +78,16 @@ fn get_page_info(
 ) -> Result<PageInfo, String> {
     let page = state.session_manager.get_page(&session_id, page_id)?;
     let page_state = page.browser.get_state()?;
+    let page_info = page.browser.get_page_info();
 
     Ok(PageInfo {
         url: page_state.url,
         title: page_state.title,
+        html: page_state.html,
+        link_count: page_info.links.len(),
+        image_count: page_info.images.len(),
+        form_count: page_info.forms.len(),
+        price_count: page_info.prices.len(),
         viewport_width: page_state.viewport_width,
         viewport_height: page_state.viewport_height,
     })
@@ -101,6 +111,44 @@ struct SessionListItem {
     id: String,
     created_at: u64,
     page_count: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ValidateUrlResult {
+    valid: bool,
+    normalized_url: String,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn validate_url(url: String) -> ValidateUrlResult {
+    // Basic URL validation
+    let normalized = if url.starts_with("http://") || url.starts_with("https://") {
+        url.clone()
+    } else if url.contains('.') && !url.contains(' ') {
+        format!("https://{}", url)
+    } else {
+        return ValidateUrlResult {
+            valid: false,
+            normalized_url: String::new(),
+            error: Some("Invalid URL format".to_string()),
+        };
+    };
+
+    // Check for suspicious patterns
+    if normalized.contains("javascript:") || normalized.contains("data:") {
+        return ValidateUrlResult {
+            valid: false,
+            normalized_url: normalized,
+            error: Some("Dangerous URL scheme blocked".to_string()),
+        };
+    }
+
+    ValidateUrlResult {
+        valid: true,
+        normalized_url: normalized,
+        error: None,
+    }
 }
 
 fn main() {
@@ -132,6 +180,7 @@ fn main() {
             ask,
             get_page_info,
             list_sessions,
+            validate_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

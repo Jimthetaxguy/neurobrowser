@@ -109,10 +109,35 @@
     .browser-content {
       flex: 1;
       display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .browser-content iframe {
+      flex: 1;
+      width: 100%;
+      border: none;
+      background: white;
+    }
+
+    .page-stats {
+      display: flex;
+      gap: 16px;
+      padding: 8px 16px;
+      background: var(--bg-tertiary);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .stat {
+      display: flex;
       align-items: center;
-      justify-content: center;
-      color: #333;
-      font-size: 18px;
+      gap: 4px;
+    }
+
+    .stat-value {
+      color: var(--accent);
+      font-weight: 600;
     }
 
     .sidebar {
@@ -257,17 +282,23 @@
     </div>
   </div>
 
-  <main>
-    <div class="browser-view">
-      <div class="browser-toolbar">
-        <button class="btn btn-secondary" id="backBtn">←</button>
-        <button class="btn btn-secondary" id="forwardBtn">→</button>
-        <button class="btn btn-secondary" id="refreshBtn">↻</button>
+    <main>
+      <div class="browser-view">
+        <div class="browser-toolbar">
+          <button class="btn btn-secondary" id="backBtn">←</button>
+          <button class="btn btn-secondary" id="forwardBtn">→</button>
+          <button class="btn btn-secondary" id="refreshBtn">↻</button>
+        </div>
+        <div class="page-stats" id="pageStats">
+          <div class="stat">Links: <span class="stat-value" id="linkCount">0</span></div>
+          <div class="stat">Images: <span class="stat-value" id="imageCount">0</span></div>
+          <div class="stat">Forms: <span class="stat-value" id="formCount">0</span></div>
+          <div class="stat">Prices: <span class="stat-value" id="priceCount">0</span></div>
+        </div>
+        <div class="browser-content" id="browserContent">
+          <iframe id="contentFrame" sandbox="allow-same-origin allow-scripts" title="Page Content"></iframe>
+        </div>
       </div>
-      <div class="browser-content" id="browserContent">
-        Welcome to NeuroBrowser - Your AI-Native Browser Assistant
-      </div>
-    </div>
 
     <div class="sidebar">
       <div class="sidebar-header">AI Assistant</div>
@@ -298,6 +329,11 @@
     const loading = document.getElementById('loading');
     const statusText = document.getElementById('statusText');
     const browserContent = document.getElementById('browserContent');
+    const contentFrame = document.getElementById('contentFrame');
+    const linkCount = document.getElementById('linkCount');
+    const imageCount = document.getElementById('imageCount');
+    const formCount = document.getElementById('formCount');
+    const priceCount = document.getElementById('priceCount');
 
     let currentSessionId = null;
     let currentPageId = 0;
@@ -337,10 +373,26 @@
           pageId: currentPageId 
         });
         
-        browserContent.textContent = `Loaded: ${pageInfo.title}`;
-        statusText.textContent = 'Loaded';
+        // Render HTML content in iframe
+        if (pageInfo.html) {
+          const blob = new Blob([pageInfo.html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          contentFrame.src = blobUrl;
+        }
+        
+        // Update stats
+        linkCount.textContent = pageInfo.link_count || 0;
+        imageCount.textContent = pageInfo.image_count || 0;
+        formCount.textContent = pageInfo.form_count || 0;
+        priceCount.textContent = pageInfo.price_count || 0;
+        
+        statusText.textContent = 'Loaded: ' + pageInfo.title;
       } catch (e) {
-        browserContent.textContent = `Demo mode: Would navigate to ${urlInput.value}`;
+        browserContent.innerHTML = `<div style="padding: 40px; text-align: center; color: #666;">
+          <h2>Demo Mode</h2>
+          <p>Would navigate to ${urlInput.value}</p>
+          <p style="font-size: 12px; margin-top: 20px;">${e.message || e}</p>
+        </div>`;
         statusText.textContent = 'Demo mode';
       }
     }
