@@ -242,6 +242,7 @@ Execution completed via Ralph Loop agent with direct implementation.
 - **Iframe X-Frame-Options:** Sites block being framed in the MVP's Blob URL rendering. We injected a click interceptor in `index.html` as a hotfix to manually capture `<a>` clicks and proxy them to the backend rather than letting the iframe navigate.
 - **Backend Command Mismatches:** Discovered that commands `set_provider` and `close_page` were registered in Tauri but completely missing from the `ReActAgent` and `SessionManager` source files, crashing the backend. Removed them for now.
 - **Frontend Tauri Context:** The Vanilla JS MVP requires `withGlobalTauri: true` in `tauri.conf.json` and a `window.__TAURI__` polyfill to prevent undefined errors when developing locally.
+- **CORS and Dynamic JS Assets:** Rendering static HTML in a Blob URL iframe leaves the site's Javascript trying to reach out to its home servers (e.g. YouTube, Google) from the `localhost:5173` origin. This triggers massive CORS blocks, failed `fetch()`/XHR requests, 404s on lazy-loaded images, and blocked nested `<iframe>` widgets. This is a hard limitation of the static `scraper` approach.
 
 ---
 
