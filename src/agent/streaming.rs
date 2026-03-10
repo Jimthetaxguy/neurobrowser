@@ -16,12 +16,27 @@ pub enum AgentStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum StreamEvent {
-    Token { text: String },
-    ToolCallStart { tool: String, arguments: serde_json::Value },
-    ToolCallResult { tool: String, result: String, success: bool },
+    Token {
+        text: String,
+    },
+    ToolCallStart {
+        tool: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallResult {
+        tool: String,
+        result: String,
+        success: bool,
+    },
     Status(AgentStatus),
-    Error { code: String, message: String },
-    Done { final_response: String, iterations: usize },
+    Error {
+        code: String,
+        message: String,
+    },
+    Done {
+        final_response: String,
+        iterations: usize,
+    },
 }
 
 #[async_trait]

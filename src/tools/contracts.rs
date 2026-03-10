@@ -1,6 +1,6 @@
+use async_trait::async_trait;
 use schemars::schema::Schema;
 use serde::{Deserialize, Serialize};
-use async_trait::async_trait;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimit {
@@ -106,7 +106,11 @@ pub struct ToolResult {
 }
 
 impl ToolResult {
-    pub fn success(tool_name: &str, arguments: serde_json::Value, result: serde_json::Value) -> Self {
+    pub fn success(
+        tool_name: &str,
+        arguments: serde_json::Value,
+        result: serde_json::Value,
+    ) -> Self {
         Self {
             tool_name: tool_name.to_string(),
             arguments,

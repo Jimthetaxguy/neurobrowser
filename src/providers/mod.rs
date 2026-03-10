@@ -105,18 +105,18 @@ impl Default for ProviderConfig {
 
 pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
-    
+
     for line in content.lines() {
         let line = line.trim();
         if line.starts_with("Action:") {
             let action_part = line.strip_prefix("Action:").unwrap().trim();
-            
+
             if let Some((name, args_str)) = action_part.split_once('(') {
                 let name = name.trim();
                 let args_str = args_str.trim_end_matches(')').trim();
-                
+
                 let arguments = parse_arguments(args_str);
-                
+
                 if !arguments.is_empty() {
                     calls.push(ToolCall {
                         name: name.to_string(),
@@ -126,25 +126,25 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
             }
         }
     }
-    
+
     calls
 }
 
 fn parse_arguments(args_str: &str) -> HashMap<String, String> {
     let mut arguments = HashMap::new();
-    
+
     if args_str.is_empty() {
         return arguments;
     }
-    
+
     let args = split_arguments(args_str);
-    
+
     for arg in args {
         let arg = arg.trim();
         if arg.is_empty() {
             continue;
         }
-        
+
         if let Some((key, value)) = arg.split_once('=') {
             let key = key.trim();
             let value = value.trim().trim_matches('"').trim_matches('\'');
@@ -159,7 +159,7 @@ fn parse_arguments(args_str: &str) -> HashMap<String, String> {
             arguments.insert("value".to_string(), arg.to_string());
         }
     }
-    
+
     arguments
 }
 
@@ -169,7 +169,7 @@ fn split_arguments(args_str: &str) -> Vec<String> {
     let mut in_quotes = false;
     let mut quote_char = ' ';
     let mut paren_depth = 0;
-    
+
     for ch in args_str.chars() {
         match ch {
             '"' | '\'' if !in_quotes => {
@@ -199,11 +199,11 @@ fn split_arguments(args_str: &str) -> Vec<String> {
             }
         }
     }
-    
+
     if !current.trim().is_empty() {
         args.push(current.trim().to_string());
     }
-    
+
     args
 }
 
@@ -211,14 +211,18 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     let mut prompt = String::from("You are an intelligent browser assistant. ");
     prompt.push_str(&format!("Current URL: {}\n", context.current_url));
     prompt.push_str(&format!("Page title: {}\n\n", context.page_title));
-    
+
     if !context.tool_results.is_empty() {
         prompt.push_str("Recent tool results:\n");
         for result in &context.tool_results {
             prompt.push_str(&format!(
                 "- {}: {}\n",
                 result.tool_name,
-                if result.success { &result.result } else { "Error" }
+                if result.success {
+                    &result.result
+                } else {
+                    "Error"
+                }
             ));
         }
         prompt.push('\n');
@@ -236,17 +240,17 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("- get_prices(): Extract price information\n");
     prompt.push_str("- get_tables(): Extract table data\n");
     prompt.push_str("- get_accessibility(): Get accessibility tree\n");
-    
+
     prompt
 }
 
-pub mod openai;
 pub mod anthropic;
 pub mod ollama;
+pub mod openai;
 
-pub use openai::OpenAiProvider;
 pub use anthropic::AnthropicProvider;
 pub use ollama::OllamaProvider;
+pub use openai::OpenAiProvider;
 
 use std::sync::Arc;
 
