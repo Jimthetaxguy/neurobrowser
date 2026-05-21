@@ -37,6 +37,10 @@ NeuroBrowser/ControlSurface/
 
 # Claude Code
 .claude/
+AGENTS.md
+CLAUDE.md
+.opencode/
+ralph-plan-*.md
 
 # Local browser test artifacts
 .playwright-mcp/

@@ -23,7 +23,7 @@ cargo build --release      # Release (LTO + strip + abort)
 
 ## Architecture
 
-See [CLAUDE.md](CLAUDE.md) for detailed architecture including:
+This repository keeps the architecture in the Rust modules and project docs, including:
 - Error architecture (ToolError struct with builder pattern, AgentError enum)
 - Async streaming via mpsc channels + StreamEvent tagged JSON
 - Tauri IPC bridge between the desktop shell and Rust backend

@@ -66,8 +66,8 @@ impl From<ToolError> for String {
     }
 }
 
-/// Agent-level errors. Migrated to thiserror derive in Ralph Plan Loop 50 (H15).
-/// ToolError is intentionally a struct (not enum) — see CLAUDE.md.
+/// Agent-level errors using thiserror derive.
+/// ToolError is intentionally a serializable struct, not an enum.
 #[derive(Debug, Error)]
 pub enum AgentError {
     #[error("Provider error: {0}")]
