@@ -8,18 +8,24 @@
 
 /* Begin PBXBuildFile section */
 		0A2CC44B81DFB053CADF6D19 /* BrowserViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413FF80CF13473E0E3857CBF /* BrowserViewController.swift */; };
+		33CFE7B5C1CDBF9E2CED2BF1 /* ReactControlSurfaceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE9F8D46AC462A6A3CF9597 /* ReactControlSurfaceViewController.swift */; };
 		4B5104017A61DB596F34F20E /* SidebarViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD00DABE9B8EA1A5DEDCE9C /* SidebarViewController.swift */; };
 		5BF1F3AD2A663A750EDFE421 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A93138B837807A5447C94D7 /* AppDelegate.swift */; };
+		72F0B4680DD0E9E7D9F88445 /* ControlSurface in Resources */ = {isa = PBXBuildFile; fileRef = 24DA18C78995EF635B5C49E1 /* ControlSurface */; };
 		A5E35A96FC3186B676C3D4F5 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2F39ECA8A6475B642B9532 /* MainWindowController.swift */; };
 		B144B18817F1039E257C87AA /* ContentViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C97382E579548A578AACD96 /* ContentViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1BE9F8D46AC462A6A3CF9597 /* ReactControlSurfaceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactControlSurfaceViewController.swift; sourceTree = "<group>"; };
+		24DA18C78995EF635B5C49E1 /* ControlSurface */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ControlSurface; sourceTree = "<group>"; };
 		331C0B4ADA6F8F1A0077672E /* NeuroBrowser.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NeuroBrowser.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A93138B837807A5447C94D7 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		413FF80CF13473E0E3857CBF /* BrowserViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserViewController.swift; sourceTree = "<group>"; };
 		6C97382E579548A578AACD96 /* ContentViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewController.swift; sourceTree = "<group>"; };
 		9A2F39ECA8A6475B642B9532 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
+		CA91242E76FDCA15925406D6 /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
+		D74989087FC2F519A213467F /* appkit.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = appkit.html; sourceTree = "<group>"; };
 		ECD00DABE9B8EA1A5DEDCE9C /* SidebarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -40,6 +46,15 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		971F4FD1AB70E7F6C43040FE /* ControlSurface */ = {
+			isa = PBXGroup;
+			children = (
+				D74989087FC2F519A213467F /* appkit.html */,
+				CA91242E76FDCA15925406D6 /* index.html */,
+			);
+			path = ControlSurface;
+			sourceTree = "<group>";
+		};
 		9F7628FEB366CE41C00D2336 /* NeuroBrowser */ = {
 			isa = PBXGroup;
 			children = (
@@ -47,7 +62,9 @@
 				413FF80CF13473E0E3857CBF /* BrowserViewController.swift */,
 				6C97382E579548A578AACD96 /* ContentViewController.swift */,
 				9A2F39ECA8A6475B642B9532 /* MainWindowController.swift */,
+				1BE9F8D46AC462A6A3CF9597 /* ReactControlSurfaceViewController.swift */,
 				ECD00DABE9B8EA1A5DEDCE9C /* SidebarViewController.swift */,
+				24DA18C78995EF635B5C49E1 /* ControlSurface */,
 				E766C6C5573B889F1858BC53 /* Resources */,
 			);
 			path = NeuroBrowser;
@@ -68,6 +85,7 @@
 			buildConfigurationList = 0B8F2F441ED0C96A7D82E7DA /* Build configuration list for PBXNativeTarget "NeuroBrowser" */;
 			buildPhases = (
 				6F6CDDE28449248D9DA4A782 /* Sources */,
+				B1F20EA1EF4DFCCE902E6895 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -110,6 +128,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		B1F20EA1EF4DFCCE902E6895 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				72F0B4680DD0E9E7D9F88445 /* ControlSurface in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		6F6CDDE28449248D9DA4A782 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -119,6 +148,7 @@
 				0A2CC44B81DFB053CADF6D19 /* BrowserViewController.swift in Sources */,
 				B144B18817F1039E257C87AA /* ContentViewController.swift in Sources */,
 				A5E35A96FC3186B676C3D4F5 /* MainWindowController.swift in Sources */,
+				33CFE7B5C1CDBF9E2CED2BF1 /* ReactControlSurfaceViewController.swift in Sources */,
 				4B5104017A61DB596F34F20E /* SidebarViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

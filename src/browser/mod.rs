@@ -1,6 +1,7 @@
 use crate::tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageSnapshot, PriceInfo, TableInfo, ToolRegistry,
+    PageSnapshot, PriceInfo, RiskLevel, TableInfo, ToolAction, ToolArgumentDefinition,
+    ToolDefinition, ToolRegistry, ToolRisk,
 };
 use async_trait::async_trait;
 use regex_lite::Regex;
@@ -233,6 +234,8 @@ impl BrowserInterface for BrowserEngine {
 
 pub fn default_tool_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(NavigateTool));
+    registry.register(Arc::new(WaitTool));
     registry.register(Arc::new(QueryDomTool));
     registry.register(Arc::new(GetTextTool));
     registry.register(Arc::new(GetLinksTool));
@@ -243,6 +246,11 @@ pub fn default_tool_registry() -> ToolRegistry {
     registry.register(Arc::new(ScrollToTool));
     registry.register(Arc::new(ScrollByTool));
     registry.register(Arc::new(SubmitFormTool));
+    registry.register(Arc::new(KeypressTool));
+    registry.register(Arc::new(ScreenshotTool));
+    registry.register(Arc::new(BackTool));
+    registry.register(Arc::new(ForwardTool));
+    registry.register(Arc::new(ReloadTool));
     registry
 }
 
@@ -443,6 +451,78 @@ fn limit_text(value: &str, max_len: usize) -> String {
     value.trim().chars().take(max_len).collect()
 }
 
+struct NavigateTool;
+
+#[async_trait]
+impl BrowserTool for NavigateTool {
+    fn name(&self) -> &str {
+        "navigate"
+    }
+
+    fn description(&self) -> &str {
+        "Navigate the current page to a URL"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "url",
+            "HTTP or HTTPS URL to open",
+        )])
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        let url = args.get("url").cloned().unwrap_or_default();
+        match browser.navigate(&url).await {
+            Ok(()) => {
+                let _ = browser.wait_for_navigation().await;
+                crate::tools::ToolResult::success("navigate", args, format!("Navigated to {url}"))
+            }
+            Err(error) => crate::tools::ToolResult::error("navigate", args, error),
+        }
+    }
+}
+
+struct WaitTool;
+
+#[async_trait]
+impl BrowserTool for WaitTool {
+    fn name(&self) -> &str {
+        "wait"
+    }
+
+    fn description(&self) -> &str {
+        "Wait for page navigation or dynamic page work to settle"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Wait, RiskLevel::Low),
+        )
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        match browser.wait_for_navigation().await {
+            Ok(()) => crate::tools::ToolResult::success("wait", args, "Page is ready".to_string()),
+            Err(error) => crate::tools::ToolResult::error("wait", args, error),
+        }
+    }
+}
+
 struct QueryDomTool;
 
 #[async_trait]
@@ -453,6 +533,18 @@ impl BrowserTool for QueryDomTool {
 
     fn description(&self) -> &str {
         "Query DOM elements by CSS selector"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "selector",
+            "CSS selector to query",
+        )])
     }
 
     async fn execute(
@@ -502,6 +594,18 @@ impl BrowserTool for GetTextTool {
         "Get text content of elements that match a selector"
     }
 
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "selector",
+            "CSS selector to read",
+        )])
+    }
+
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -525,6 +629,14 @@ impl BrowserTool for GetLinksTool {
 
     fn description(&self) -> &str {
         "Get all links on the current page"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        )
     }
 
     async fn execute(
@@ -566,6 +678,14 @@ impl BrowserTool for GetPricesTool {
         "Extract price information from the current page"
     }
 
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        )
+    }
+
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -603,6 +723,14 @@ impl BrowserTool for GetTablesTool {
 
     fn description(&self) -> &str {
         "Extract table data from the current page"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        )
     }
 
     async fn execute(
@@ -652,6 +780,18 @@ impl BrowserTool for ClickTool {
         "Click an element on the current page"
     }
 
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Click, RiskLevel::Medium),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "selector",
+            "CSS selector to click",
+        )])
+    }
+
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -677,6 +817,18 @@ impl BrowserTool for TypeTool {
 
     fn description(&self) -> &str {
         "Type text into an input element"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Type, RiskLevel::High).sensitive(true),
+        )
+        .with_arguments(vec![
+            ToolArgumentDefinition::required("selector", "CSS selector to type into"),
+            ToolArgumentDefinition::required("text", "Text to type").sensitive(true),
+        ])
     }
 
     async fn execute(
@@ -709,6 +861,18 @@ impl BrowserTool for ScrollToTool {
         "Scroll an element into view"
     }
 
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "selector",
+            "CSS selector to scroll into view",
+        )])
+    }
+
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -736,6 +900,18 @@ impl BrowserTool for ScrollByTool {
 
     fn description(&self) -> &str {
         "Scroll by pixel offset"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+        )
+        .with_arguments(vec![
+            ToolArgumentDefinition::required("x", "Horizontal scroll delta in pixels"),
+            ToolArgumentDefinition::required("y", "Vertical scroll delta in pixels"),
+        ])
     }
 
     async fn execute(
@@ -774,6 +950,18 @@ impl BrowserTool for SubmitFormTool {
         "Submit a form on the current page"
     }
 
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Submit, RiskLevel::High).externally_visible(true),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "selector",
+            "CSS selector for the form or element inside it",
+        )])
+    }
+
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -787,6 +975,175 @@ impl BrowserTool for SubmitFormTool {
                 "Form submitted successfully".to_string(),
             ),
             Err(error) => crate::tools::ToolResult::error("submit_form", args, error),
+        }
+    }
+}
+
+struct KeypressTool;
+
+#[async_trait]
+impl BrowserTool for KeypressTool {
+    fn name(&self) -> &str {
+        "keypress"
+    }
+
+    fn description(&self) -> &str {
+        "Send a keypress to the active page element"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Keypress, RiskLevel::Medium),
+        )
+        .with_arguments(vec![ToolArgumentDefinition::required(
+            "key",
+            "Keyboard key value, such as Enter or Escape",
+        )])
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        let key = args.get("key").cloned().unwrap_or_default();
+        match browser.keypress(&key).await {
+            Ok(()) => crate::tools::ToolResult::success("keypress", args, format!("Pressed {key}")),
+            Err(error) => crate::tools::ToolResult::error("keypress", args, error),
+        }
+    }
+}
+
+struct ScreenshotTool;
+
+#[async_trait]
+impl BrowserTool for ScreenshotTool {
+    fn name(&self) -> &str {
+        "screenshot"
+    }
+
+    fn description(&self) -> &str {
+        "Capture a screenshot of the current page"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Screenshot, RiskLevel::Low),
+        )
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        match browser.screenshot().await {
+            Ok(value) => crate::tools::ToolResult::success("screenshot", args, value),
+            Err(error) => crate::tools::ToolResult::error("screenshot", args, error),
+        }
+    }
+}
+
+struct BackTool;
+
+#[async_trait]
+impl BrowserTool for BackTool {
+    fn name(&self) -> &str {
+        "back"
+    }
+
+    fn description(&self) -> &str {
+        "Navigate back in browser history"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Back, RiskLevel::Low),
+        )
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        match browser.browser_back().await {
+            Ok(()) => crate::tools::ToolResult::success("back", args, "Navigated back".to_string()),
+            Err(error) => crate::tools::ToolResult::error("back", args, error),
+        }
+    }
+}
+
+struct ForwardTool;
+
+#[async_trait]
+impl BrowserTool for ForwardTool {
+    fn name(&self) -> &str {
+        "forward"
+    }
+
+    fn description(&self) -> &str {
+        "Navigate forward in browser history"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Forward, RiskLevel::Low),
+        )
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        match browser.browser_forward().await {
+            Ok(()) => {
+                crate::tools::ToolResult::success("forward", args, "Navigated forward".to_string())
+            }
+            Err(error) => crate::tools::ToolResult::error("forward", args, error),
+        }
+    }
+}
+
+struct ReloadTool;
+
+#[async_trait]
+impl BrowserTool for ReloadTool {
+    fn name(&self) -> &str {
+        "reload"
+    }
+
+    fn description(&self) -> &str {
+        "Reload the current page"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Reload, RiskLevel::Low),
+        )
+    }
+
+    async fn execute(
+        &self,
+        args: HashMap<String, String>,
+        browser: &dyn BrowserInterface,
+    ) -> crate::tools::ToolResult {
+        match browser.browser_reload().await {
+            Ok(()) => {
+                crate::tools::ToolResult::success("reload", args, "Reloaded page".to_string())
+            }
+            Err(error) => crate::tools::ToolResult::error("reload", args, error),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::agent::{AgentConfig, ReActAgent};
 use crate::browser::PageConfig;
-use crate::providers::create_provider;
+use crate::providers::{create_provider, ProviderConfig};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +8,7 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionState>>,
     #[allow(dead_code)]
     browser_config: PageConfig,
-    agent_config: AgentConfig,
+    agent_config: Mutex<AgentConfig>,
     page_counter: Mutex<usize>,
 }
 
@@ -25,7 +25,7 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             browser_config,
-            agent_config,
+            agent_config: Mutex::new(agent_config),
             page_counter: Mutex::new(0),
         }
     }
@@ -64,8 +64,9 @@ impl SessionManager {
 
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;
 
-        let provider = create_provider(&self.agent_config.provider_config);
-        let agent = Arc::new(ReActAgent::new(self.agent_config.clone(), provider));
+        let agent_config = self.agent_config.lock().unwrap().clone();
+        let provider = create_provider(&agent_config.provider_config);
+        let agent = Arc::new(ReActAgent::new(agent_config, provider));
 
         let mut counter = self.page_counter.lock().unwrap();
         let page_id = *counter;
@@ -134,6 +135,22 @@ impl SessionManager {
         if let Some(active) = session.active_page {
             if active == page_id {
                 session.active_page = session.pages.first().map(|p| p.id);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_provider_config(&self, provider_config: ProviderConfig) -> Result<(), String> {
+        {
+            let mut agent_config = self.agent_config.lock().map_err(|e| e.to_string())?;
+            agent_config.provider_config = provider_config.clone();
+        }
+
+        let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
+        for session in sessions.values() {
+            for page in &session.pages {
+                page.agent.set_provider_config(provider_config.clone())?;
             }
         }
 

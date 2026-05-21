@@ -108,6 +108,14 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
 
     for line in content.lines() {
         let line = line.trim();
+        if line.starts_with("ToolCall:") {
+            let json_part = line.strip_prefix("ToolCall:").unwrap().trim();
+            if let Some(call) = parse_structured_tool_call(json_part) {
+                calls.push(call);
+            }
+            continue;
+        }
+
         if line.starts_with("Action:") {
             let action_part = line.strip_prefix("Action:").unwrap().trim();
 
@@ -128,6 +136,31 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
     }
 
     calls
+}
+
+fn parse_structured_tool_call(json_part: &str) -> Option<ToolCall> {
+    #[derive(Deserialize)]
+    struct RawToolCall {
+        name: String,
+        arguments: HashMap<String, serde_json::Value>,
+    }
+
+    let parsed: RawToolCall = serde_json::from_str(json_part).ok()?;
+    let arguments = parsed
+        .arguments
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                serde_json::Value::String(value) => value,
+                other => other.to_string(),
+            };
+            (key, value)
+        })
+        .collect();
+    Some(ToolCall {
+        name: parsed.name,
+        arguments,
+    })
 }
 
 fn parse_arguments(args_str: &str) -> HashMap<String, String> {
@@ -228,18 +261,26 @@ pub fn build_system_prompt(context: &AiContext) -> String {
         prompt.push('\n');
     }
 
+    prompt.push_str("Use structured browser tool calls when an action is needed:\n");
+    prompt.push_str("ToolCall: {\"name\":\"tool_name\",\"arguments\":{\"key\":\"value\"}}\n\n");
     prompt.push_str("Available tools:\n");
+    prompt.push_str("- navigate(url): Navigate to an HTTP(S) URL\n");
+    prompt.push_str("- wait(): Wait for page readiness\n");
     prompt.push_str("- query_dom(selector): Query DOM elements by CSS selector\n");
     prompt.push_str("- get_text(selector): Get text content of element\n");
     prompt.push_str("- click(selector): Click an element\n");
     prompt.push_str("- type(selector, text): Type text into input\n");
+    prompt.push_str("- keypress(key): Send a keypress to the focused element\n");
     prompt.push_str("- scroll_to(selector): Scroll element into view\n");
     prompt.push_str("- scroll_by(x, y): Scroll by pixels\n");
     prompt.push_str("- submit_form(selector): Submit a form\n");
+    prompt.push_str("- screenshot(): Capture the current page if supported\n");
+    prompt.push_str("- back(): Browser history back\n");
+    prompt.push_str("- forward(): Browser history forward\n");
+    prompt.push_str("- reload(): Reload page\n");
     prompt.push_str("- get_links(): Get all links on page\n");
     prompt.push_str("- get_prices(): Extract price information\n");
     prompt.push_str("- get_tables(): Extract table data\n");
-    prompt.push_str("- get_accessibility(): Get accessibility tree\n");
 
     prompt
 }

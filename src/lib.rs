@@ -5,6 +5,10 @@ pub mod session;
 pub mod tools;
 
 pub use agent::{
+    policy::{
+        ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, AutonomyLevel, PolicyDecision,
+        PolicyOutcome, RiskFlag,
+    },
     streaming::{AgentStatus, StreamEvent, StreamingAgent},
     AgentConfig, AgentMessage, AgentState, ReActAgent,
 };
@@ -17,5 +21,6 @@ pub use session::{PageHandle, SessionInfo, SessionManager};
 pub use tools::{AgentError, AgentResult, ToolError};
 pub use tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageInfo, PageSnapshot, PriceInfo, TableInfo, ToolRegistry, ToolResult,
+    PageInfo, PageSnapshot, PriceInfo, RiskLevel, StructuredToolCall, TableInfo, ToolAction,
+    ToolArgumentDefinition, ToolDefinition, ToolRegistry, ToolResult, ToolRisk,
 };

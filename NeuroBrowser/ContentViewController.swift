@@ -12,6 +12,8 @@ class ContentViewController: NSViewController {
     var tabView: NSTabView!
     var webViews: [WKWebView] = []
     var tabBar: NSSegmentedControl!
+    var pageUpdateHandler: (([String: Any]) -> Void)?
+    private var webViewContainer: NSView!
     
     // MARK: - State
     
@@ -72,7 +74,7 @@ class ContentViewController: NSViewController {
         view.addSubview(tabBar)
         
         // WebView container
-        let webViewContainer = NSView()
+        webViewContainer = NSView()
         webViewContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webViewContainer)
         
@@ -146,13 +148,10 @@ class ContentViewController: NSViewController {
         currentTabIndex = newIndex
         
         // Add webview to view hierarchy
-        webView.frame = view.bounds
+        webView.frame = webViewContainer.bounds
         webView.autoresizingMask = [.width, .height]
-        
-        // Find webview container
-        if let container = view.subviews.last(where: { $0 != tabBar && $0.subviews.isEmpty }) {
-            container.addSubview(webView)
-        }
+        webViewContainer.addSubview(webView)
+        showCurrentTab()
         
         // Load default page
         if let url = URL(string: "https://www.example.com") {
@@ -176,6 +175,13 @@ class ContentViewController: NSViewController {
         
         showCurrentTab()
         updateNavigationButtons()
+    }
+
+    func selectTab(pageId: Int) {
+        guard pageId >= 0, pageId < webViews.count else { return }
+        currentTabIndex = pageId
+        tabBar.selectedSegment = pageId
+        showCurrentTab()
     }
     
     @objc private func tabBarChanged() {
@@ -213,12 +219,12 @@ class ContentViewController: NSViewController {
     
     // MARK: - Navigation
     
-    @objc private func goBack() {
+    @objc func goBack() {
         guard currentTabIndex < webViews.count else { return }
         webViews[currentTabIndex].goBack()
     }
     
-    @objc private func goForward() {
+    @objc func goForward() {
         guard currentTabIndex < webViews.count else { return }
         webViews[currentTabIndex].goForward()
     }
@@ -230,6 +236,11 @@ class ContentViewController: NSViewController {
     
     @objc private func urlBarAction() {
         let input = urlBar.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        navigateCurrentTab(to: input)
+    }
+
+    func navigateCurrentTab(to input: String) {
+        let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
         
         var urlToLoad: URL?
@@ -248,7 +259,70 @@ class ContentViewController: NSViewController {
         }
         
         guard let url = urlToLoad, currentTabIndex < webViews.count else { return }
+        urlBar.stringValue = url.absoluteString
         webViews[currentTabIndex].load(URLRequest(url: url))
+    }
+
+    func snapshotCurrentPage(completion: @escaping ([String: Any]) -> Void) {
+        guard currentTabIndex < webViews.count else {
+            completion(emptySnapshot())
+            return
+        }
+
+        let webView = webViews[currentTabIndex]
+        let script = """
+        (() => {
+          const text = document.body ? document.body.innerText : "";
+          return {
+            title: document.title || "",
+            text: text.slice(0, 20000),
+            link_count: document.links ? document.links.length : 0,
+            image_count: document.images ? document.images.length : 0,
+            form_count: document.forms ? document.forms.length : 0,
+            price_count: (text.match(/\\$/g) || []).length,
+            table_count: document.querySelectorAll ? document.querySelectorAll("table").length : 0
+          };
+        })()
+        """
+
+        webView.evaluateJavaScript(script) { result, _ in
+            var snapshot = self.emptySnapshot()
+            snapshot["url"] = webView.url?.absoluteString ?? ""
+
+            if let pageData = result as? [String: Any] {
+                snapshot.merge(pageData) { _, new in new }
+            }
+
+            completion(snapshot)
+        }
+    }
+
+    private func emptySnapshot() -> [String: Any] {
+        return [
+            "url": "",
+            "title": "",
+            "html": "",
+            "text": "",
+            "link_count": 0,
+            "image_count": 0,
+            "form_count": 0,
+            "price_count": 0,
+            "table_count": 0,
+            "viewport_width": Int(view.bounds.width),
+            "viewport_height": Int(view.bounds.height),
+            "interactive_ready": true
+        ]
+    }
+
+    private func emitSnapshot() {
+        snapshotCurrentPage { [weak self] snapshot in
+            guard let self else { return }
+            self.pageUpdateHandler?([
+                "type": "snapshot",
+                "pageId": self.currentTabIndex,
+                "snapshot": snapshot
+            ])
+        }
     }
     
     private func updateNavigationButtons() {
@@ -275,6 +349,7 @@ extension ContentViewController: WKNavigationDelegate {
         }
         reloadButton.title = "↻"
         updateNavigationButtons()
+        emitSnapshot()
     }
     
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

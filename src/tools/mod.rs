@@ -6,6 +6,9 @@ use std::sync::Arc;
 pub mod contracts;
 pub mod errors;
 
+pub use contracts::{
+    RiskLevel, StructuredToolCall, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk,
+};
 pub use errors::{AgentError, AgentResult, ToolError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +43,13 @@ impl ToolResult {
 pub trait BrowserTool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            self.name(),
+            self.description(),
+            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        )
+    }
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -59,6 +69,25 @@ pub trait BrowserInterface: Send + Sync {
     async fn scroll_to(&self, selector: &str) -> Result<(), String>;
     async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String>;
     async fn snapshot(&self) -> Result<PageSnapshot, String>;
+    async fn keypress(&self, key: &str) -> Result<(), String> {
+        Err(format!("keypress is not supported by this browser: {key}"))
+    }
+
+    async fn screenshot(&self) -> Result<String, String> {
+        Err("screenshot is not supported by this browser".to_string())
+    }
+
+    async fn browser_back(&self) -> Result<(), String> {
+        Err("back navigation is not supported by this browser".to_string())
+    }
+
+    async fn browser_forward(&self) -> Result<(), String> {
+        Err("forward navigation is not supported by this browser".to_string())
+    }
+
+    async fn browser_reload(&self) -> Result<(), String> {
+        Err("reload is not supported by this browser".to_string())
+    }
 
     async fn wait_for_navigation(&self) -> Result<(), String> {
         Ok(())
@@ -173,6 +202,10 @@ impl ToolRegistry {
             .iter()
             .map(|(name, tool)| (name.as_str(), tool.description()))
             .collect()
+    }
+
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.values().map(|tool| tool.definition()).collect()
     }
 
     pub fn names(&self) -> Vec<String> {

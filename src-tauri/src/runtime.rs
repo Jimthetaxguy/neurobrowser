@@ -203,6 +203,17 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     scrollBy(x, y) {
       window.scrollBy(x, y);
       return { ok: true };
+    },
+
+    keypress(key) {
+      const target = document.activeElement || document.body || document.documentElement;
+      if (!target) {
+        throw new Error('No focused element available for keypress');
+      }
+      const init = { key, bubbles: true, cancelable: true };
+      target.dispatchEvent(new KeyboardEvent('keydown', init));
+      target.dispatchEvent(new KeyboardEvent('keyup', init));
+      return { ok: true };
     }
   };
 
@@ -418,15 +429,16 @@ impl TauriBrowserRuntime {
             return Err(error.to_string());
         }
 
-        let value = tokio::time::timeout(REQUEST_TIMEOUT, receiver)
-            .await
-            .map_err(|_| {
-                format!(
+        let value = match tokio::time::timeout(REQUEST_TIMEOUT, receiver).await {
+            Ok(result) => result.map_err(|_| "Browser runtime response channel closed".to_string())??,
+            Err(_) => {
+                self.registry.cancel_request(&request_id);
+                return Err(format!(
                     "Timed out waiting for browser runtime response for page {}",
                     self.page_id
-                )
-            })?
-            .map_err(|_| "Browser runtime response channel closed".to_string())??;
+                ));
+            }
+        };
 
         serde_json::from_value(value).map_err(|e| e.to_string())
     }
@@ -510,6 +522,39 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String> {
         self.execute_action(&format!("runtime.scrollBy({}, {})", x, y))
             .await
+    }
+
+    async fn keypress(&self, key: &str) -> Result<(), String> {
+        let key_json = serde_json::to_string(key).map_err(|e| e.to_string())?;
+        self.execute_action(&format!("runtime.keypress({key_json})"))
+            .await?;
+        let _ = self.wait_for_navigation().await;
+        Ok(())
+    }
+
+    async fn browser_back(&self) -> Result<(), String> {
+        self.registry.set_loading(self.page_id, true);
+        self.webview()?
+            .eval("history.back()")
+            .map_err(|e| e.to_string())?;
+        let _ = self.wait_for_navigation().await;
+        Ok(())
+    }
+
+    async fn browser_forward(&self) -> Result<(), String> {
+        self.registry.set_loading(self.page_id, true);
+        self.webview()?
+            .eval("history.forward()")
+            .map_err(|e| e.to_string())?;
+        let _ = self.wait_for_navigation().await;
+        Ok(())
+    }
+
+    async fn browser_reload(&self) -> Result<(), String> {
+        self.registry.set_loading(self.page_id, true);
+        self.webview()?.reload().map_err(|e| e.to_string())?;
+        let _ = self.wait_for_navigation().await;
+        Ok(())
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
