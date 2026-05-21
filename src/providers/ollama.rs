@@ -1,4 +1,7 @@
-use crate::providers::{AiProvider, AiResponse, AiContext, ProviderConfig, ProviderError, ProviderResult, parse_tool_calls};
+use crate::providers::{
+    parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig, ProviderError,
+    ProviderResult,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use std::time::Duration;
@@ -11,14 +14,16 @@ pub struct OllamaProvider {
 
 impl OllamaProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let base_url = config.base_url.clone()
+        let base_url = config
+            .base_url
+            .clone()
             .unwrap_or_else(|| "http://localhost:11434".to_string());
-        
+
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| Client::new());
-        
+
         Self {
             config,
             client,
@@ -38,7 +43,11 @@ impl OllamaProvider {
                 prompt_str.push_str(&format!(
                     "- {}: {}\n",
                     result.tool_name,
-                    if result.success { &result.result } else { "Error" }
+                    if result.success {
+                        &result.result
+                    } else {
+                        "Error"
+                    }
                 ));
             }
             prompt_str.push('\n');
@@ -46,7 +55,7 @@ impl OllamaProvider {
 
         prompt_str.push_str("User request: ");
         prompt_str.push_str(prompt);
-        
+
         prompt_str
     }
 }
@@ -55,7 +64,7 @@ impl OllamaProvider {
 impl AiProvider for OllamaProvider {
     async fn complete(&self, prompt: &str, context: &AiContext) -> ProviderResult<AiResponse> {
         let full_prompt = self.build_prompt(prompt, context);
-        
+
         let body = serde_json::json!({
             "model": self.config.model,
             "prompt": full_prompt,
@@ -66,7 +75,8 @@ impl AiProvider for OllamaProvider {
             }
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/api/generate", self.base_url))
             .json(&body)
             .send()
@@ -80,17 +90,18 @@ impl AiProvider for OllamaProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(ProviderError::RequestFailed(format!("Status {}: {}", status, text)));
+            return Err(ProviderError::RequestFailed(format!(
+                "Status {}: {}",
+                status, text
+            )));
         }
 
-        let json: serde_json::Value = response.json()
+        let json: serde_json::Value = response
+            .json()
             .await
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
-        let content = json["response"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let content = json["response"].as_str().unwrap_or("").to_string();
 
         let finish_reason = if json["done"].as_bool().unwrap_or(true) {
             "stop".to_string()

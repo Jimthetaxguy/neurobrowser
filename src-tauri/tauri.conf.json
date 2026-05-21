@@ -1,17 +1,43 @@
 {
   "productName": "NeuroBrowser",
   "version": "0.1.0",
-  "identifier": "com.neurobrowser.app",
+  "identifier": "com.neurobrowser.desktop",
   "build": {
-    "frontendDist": "dist"
+    "frontendDist": "dist",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "NeuroBrowser",
         "width": 1280,
-        "height": 720
+        "height": 720,
+        "resizable": true,
+        "fullscreen": false
       }
-    ]
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost http://localhost:* ws://localhost:* https: http:; object-src 'none'; base-uri 'self'"
+    }
   }
 }

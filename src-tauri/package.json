@@ -6,14 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:appkit": "vite build --outDir ../NeuroBrowser/ControlSurface --emptyOutDir",
+    "smoke:desktop": "npm run build && CARGO_TARGET_DIR=/tmp/neurobrowser-tauri-target cargo check --manifest-path Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-react": "^5.2.0",
     "vite": "^6"
   }
 }

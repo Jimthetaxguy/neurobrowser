@@ -105,18 +105,26 @@ impl Default for ProviderConfig {
 
 pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
-    
+
     for line in content.lines() {
         let line = line.trim();
+        if line.starts_with("ToolCall:") {
+            let json_part = line.strip_prefix("ToolCall:").unwrap().trim();
+            if let Some(call) = parse_structured_tool_call(json_part) {
+                calls.push(call);
+            }
+            continue;
+        }
+
         if line.starts_with("Action:") {
             let action_part = line.strip_prefix("Action:").unwrap().trim();
-            
+
             if let Some((name, args_str)) = action_part.split_once('(') {
                 let name = name.trim();
                 let args_str = args_str.trim_end_matches(')').trim();
-                
+
                 let arguments = parse_arguments(args_str);
-                
+
                 if !arguments.is_empty() {
                     calls.push(ToolCall {
                         name: name.to_string(),
@@ -126,25 +134,50 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
             }
         }
     }
-    
+
     calls
+}
+
+fn parse_structured_tool_call(json_part: &str) -> Option<ToolCall> {
+    #[derive(Deserialize)]
+    struct RawToolCall {
+        name: String,
+        arguments: HashMap<String, serde_json::Value>,
+    }
+
+    let parsed: RawToolCall = serde_json::from_str(json_part).ok()?;
+    let arguments = parsed
+        .arguments
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                serde_json::Value::String(value) => value,
+                other => other.to_string(),
+            };
+            (key, value)
+        })
+        .collect();
+    Some(ToolCall {
+        name: parsed.name,
+        arguments,
+    })
 }
 
 fn parse_arguments(args_str: &str) -> HashMap<String, String> {
     let mut arguments = HashMap::new();
-    
+
     if args_str.is_empty() {
         return arguments;
     }
-    
+
     let args = split_arguments(args_str);
-    
+
     for arg in args {
         let arg = arg.trim();
         if arg.is_empty() {
             continue;
         }
-        
+
         if let Some((key, value)) = arg.split_once('=') {
             let key = key.trim();
             let value = value.trim().trim_matches('"').trim_matches('\'');
@@ -159,7 +192,7 @@ fn parse_arguments(args_str: &str) -> HashMap<String, String> {
             arguments.insert("value".to_string(), arg.to_string());
         }
     }
-    
+
     arguments
 }
 
@@ -169,7 +202,7 @@ fn split_arguments(args_str: &str) -> Vec<String> {
     let mut in_quotes = false;
     let mut quote_char = ' ';
     let mut paren_depth = 0;
-    
+
     for ch in args_str.chars() {
         match ch {
             '"' | '\'' if !in_quotes => {
@@ -199,11 +232,11 @@ fn split_arguments(args_str: &str) -> Vec<String> {
             }
         }
     }
-    
+
     if !current.trim().is_empty() {
         args.push(current.trim().to_string());
     }
-    
+
     args
 }
 
@@ -211,42 +244,54 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     let mut prompt = String::from("You are an intelligent browser assistant. ");
     prompt.push_str(&format!("Current URL: {}\n", context.current_url));
     prompt.push_str(&format!("Page title: {}\n\n", context.page_title));
-    
+
     if !context.tool_results.is_empty() {
         prompt.push_str("Recent tool results:\n");
         for result in &context.tool_results {
             prompt.push_str(&format!(
                 "- {}: {}\n",
                 result.tool_name,
-                if result.success { &result.result } else { "Error" }
+                if result.success {
+                    &result.result
+                } else {
+                    "Error"
+                }
             ));
         }
         prompt.push('\n');
     }
 
+    prompt.push_str("Use structured browser tool calls when an action is needed:\n");
+    prompt.push_str("ToolCall: {\"name\":\"tool_name\",\"arguments\":{\"key\":\"value\"}}\n\n");
     prompt.push_str("Available tools:\n");
+    prompt.push_str("- navigate(url): Navigate to an HTTP(S) URL\n");
+    prompt.push_str("- wait(): Wait for page readiness\n");
     prompt.push_str("- query_dom(selector): Query DOM elements by CSS selector\n");
     prompt.push_str("- get_text(selector): Get text content of element\n");
     prompt.push_str("- click(selector): Click an element\n");
     prompt.push_str("- type(selector, text): Type text into input\n");
+    prompt.push_str("- keypress(key): Send a keypress to the focused element\n");
     prompt.push_str("- scroll_to(selector): Scroll element into view\n");
     prompt.push_str("- scroll_by(x, y): Scroll by pixels\n");
     prompt.push_str("- submit_form(selector): Submit a form\n");
+    prompt.push_str("- screenshot(): Capture the current page if supported\n");
+    prompt.push_str("- back(): Browser history back\n");
+    prompt.push_str("- forward(): Browser history forward\n");
+    prompt.push_str("- reload(): Reload page\n");
     prompt.push_str("- get_links(): Get all links on page\n");
     prompt.push_str("- get_prices(): Extract price information\n");
     prompt.push_str("- get_tables(): Extract table data\n");
-    prompt.push_str("- get_accessibility(): Get accessibility tree\n");
-    
+
     prompt
 }
 
-pub mod openai;
 pub mod anthropic;
 pub mod ollama;
+pub mod openai;
 
-pub use openai::OpenAiProvider;
 pub use anthropic::AnthropicProvider;
 pub use ollama::OllamaProvider;
+pub use openai::OpenAiProvider;
 
 use std::sync::Arc;
 

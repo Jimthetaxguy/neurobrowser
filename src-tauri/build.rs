@@ -1,3 +1,29 @@
 fn main() {
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
+            "ask",
+            "browser_back",
+            "browser_forward",
+            "browser_reload",
+            "browser_runtime_report",
+            "cancel_agent_run",
+            "close_page",
+            "create_page",
+            "create_session",
+            "get_action_policy",
+            "get_page_info",
+            "get_page_snapshot",
+            "list_sessions",
+            "navigate",
+            "set_action_policy",
+            "set_active_page",
+            "set_provider",
+            "start_agent_run",
+            "submit_approval",
+            "sync_browser_viewport",
+            "validate_url",
+            "wait_for_page_ready",
+        ])),
+    )
+    .expect("failed to run tauri build script")
 }

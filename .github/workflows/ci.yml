@@ -1,0 +1,98 @@
+# neurobrowser — CI Workflow
+# Source: Framework rust/ci/ci-base.yml + ci-guards.yml (Loops 12, 19)
+# Repo: Rust + Tauri, tokio, thiserror v2, 18 source files
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  check:
+    name: "Check: fmt + clippy + test + build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --all-targets
+
+      - name: cargo build (release)
+        run: cargo build --release
+
+  tauri:
+    name: "Tauri: frontend build + cargo check"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            src-tauri -> src-tauri/target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src-tauri/package-lock.json
+
+      - name: npm ci
+        working-directory: src-tauri
+        run: npm ci
+
+      - name: npm build
+        working-directory: src-tauri
+        run: npm run build
+
+      - name: cargo check tauri
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  guards:
+    name: "Guards: no-mock + merge conflicts + iCloud"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No-mock dependency guard
+        run: |
+          if rg -n --fixed-strings -e mockall -e mockito -e wiremock Cargo.toml Cargo.lock 2>/dev/null; then
+            echo "::error::Mock crates are forbidden."
+            exit 1
+          fi
+
+      - name: Merge conflict detection (XP-20)
+        run: |
+          if rg -n '<<<<<<< |======= |>>>>>>> ' --glob '!*.lock' src/ 2>/dev/null; then
+            echo "::error::Unresolved merge conflict markers found."
+            exit 1
+          fi
+
+      - name: iCloud duplicate detection (XP-25)
+        run: |
+          dupes=$(find src -name "* 2*" 2>/dev/null)
+          if [ -n "$dupes" ]; then
+            echo "$dupes"
+            echo "::error::iCloud duplicate files detected."
+            exit 1
+          fi

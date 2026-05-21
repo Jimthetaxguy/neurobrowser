@@ -1,13 +1,14 @@
 use crate::agent::{AgentConfig, ReActAgent};
-use crate::browser::{BrowserEngine, PageConfig};
-use crate::providers::create_provider;
+use crate::browser::PageConfig;
+use crate::providers::{create_provider, ProviderConfig};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionState>>,
+    #[allow(dead_code)]
     browser_config: PageConfig,
-    agent_config: AgentConfig,
+    agent_config: Mutex<AgentConfig>,
     page_counter: Mutex<usize>,
 }
 
@@ -24,7 +25,7 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             browser_config,
-            agent_config,
+            agent_config: Mutex::new(agent_config),
             page_counter: Mutex::new(0),
         }
     }
@@ -63,10 +64,9 @@ impl SessionManager {
 
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;
 
-        let browser = Arc::new(BrowserEngine::new(self.browser_config.clone()));
-
-        let provider = create_provider(&self.agent_config.provider_config);
-        let agent = Arc::new(ReActAgent::new(self.agent_config.clone(), provider));
+        let agent_config = self.agent_config.lock().unwrap().clone();
+        let provider = create_provider(&agent_config.provider_config);
+        let agent = Arc::new(ReActAgent::new(agent_config, provider));
 
         let mut counter = self.page_counter.lock().unwrap();
         let page_id = *counter;
@@ -74,11 +74,12 @@ impl SessionManager {
 
         let handle = PageHandle {
             id: page_id,
-            browser,
+            runtime_id: format!("page-runtime-{page_id}"),
             agent,
         };
 
         session.pages.push(handle.clone());
+        session.active_page = Some(page_id);
 
         Ok(handle)
     }
@@ -106,12 +107,61 @@ impl SessionManager {
             })
             .collect()
     }
+
+    pub fn set_active_page(&self, session_id: &str, page_id: usize) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions.get_mut(session_id).ok_or("Session not found")?;
+        if session.pages.iter().any(|page| page.id == page_id) {
+            session.active_page = Some(page_id);
+            Ok(())
+        } else {
+            Err("Page not found".to_string())
+        }
+    }
+
+    pub fn close_page(&self, session_id: &str, page_id: usize) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions.get_mut(session_id).ok_or("Session not found")?;
+
+        let pos = session
+            .pages
+            .iter()
+            .position(|p| p.id == page_id)
+            .ok_or("Page not found")?;
+
+        session.pages.remove(pos);
+
+        // If we removed the active page, update active_page
+        if let Some(active) = session.active_page {
+            if active == page_id {
+                session.active_page = session.pages.first().map(|p| p.id);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_provider_config(&self, provider_config: ProviderConfig) -> Result<(), String> {
+        {
+            let mut agent_config = self.agent_config.lock().map_err(|e| e.to_string())?;
+            agent_config.provider_config = provider_config.clone();
+        }
+
+        let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
+        for session in sessions.values() {
+            for page in &session.pages {
+                page.agent.set_provider_config(provider_config.clone())?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
 pub struct PageHandle {
     pub id: usize,
-    pub browser: Arc<BrowserEngine>,
+    pub runtime_id: String,
     pub agent: Arc<ReActAgent>,
 }
 
