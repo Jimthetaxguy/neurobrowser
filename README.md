@@ -30,6 +30,8 @@ This repository keeps the architecture in the Rust modules and project docs, inc
 
 See [docs/frontend-architecture-spike.md](docs/frontend-architecture-spike.md)
 for the React + Tauri and React + AppKit frontend lane comparison.
+See [docs/adr/ADR-001-react-tauri-primary.md](docs/adr/ADR-001-react-tauri-primary.md)
+for the accepted frontend path.
 
 ## Autonomous Agent Core
 
@@ -39,6 +41,17 @@ The primary agent path is provider-agnostic and run-oriented:
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned as a structured run event
 - default autonomy is assisted: reads, snapshots, scrolling, and same-domain navigation can run; typing, form submission, high-impact actions, denylisted domains, and suspicious page content stop for approval or blocking
+
+See [docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md](docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md)
+and [docs/stories/STORY-001-autonomous-browser-agent-core.md](docs/stories/STORY-001-autonomous-browser-agent-core.md)
+for the committed spec and acceptance trail.
+
+## Documentation Workflow
+
+Shared specs, stories, and architecture decisions are committed under `docs/specs/`,
+`docs/stories/`, and `docs/adr/`. Local process notes stay under
+`docs/notes/local/` and are ignored. See [docs/notes/README.md](docs/notes/README.md)
+for the promotion rules and local worklog path.
 
 ## Real Systems
 

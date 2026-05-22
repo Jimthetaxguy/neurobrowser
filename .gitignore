@@ -42,5 +42,11 @@ CLAUDE.md
 .opencode/
 ralph-plan-*.md
 
+# Local GitSpec working notes
+docs/notes/local/
+docs/notes/agents/local/
+docs/private/
+.ledger/local/
+
 # Local browser test artifacts
 .playwright-mcp/
