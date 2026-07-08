@@ -12,6 +12,10 @@ pub use agent::{
         PolicyOutcome, RiskFlag,
     },
     streaming::{AgentStatus, StreamEvent, StreamingAgent},
+    worker::{
+        CrossWorkerObservations, WorkerHandle, WorkerMessage, WorkerMessageKind, WorkerSnapshot,
+        WorkerSpec, WorkerStatus, WorkerSummary,
+    },
     AgentConfig, AgentMessage, AgentSnapshot, AgentState, ReActAgent,
 };
 pub use browser::{BrowserEngine, PageConfig, PageState};

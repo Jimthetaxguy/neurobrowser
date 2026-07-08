@@ -420,6 +420,29 @@ fn cancel_agent_run(state: State<'_, AppState>, run_id: String) -> Result<AgentR
 }
 
 #[tauri::command]
+fn list_workers(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<neurobrowser::WorkerSummary>, String> {
+    state
+        .session_manager
+        .list_workers(&session_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_worker(
+    state: State<'_, AppState>,
+    session_id: String,
+    worker_id: String,
+) -> Result<neurobrowser::WorkerSnapshot, String> {
+    state
+        .session_manager
+        .get_worker(&session_id, &worker_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn close_page(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -584,7 +607,9 @@ fn main() {
             get_action_policy,
             get_page_info,
             get_page_snapshot,
+            get_worker,
             list_sessions,
+            list_workers,
             navigate,
             set_active_page,
             set_action_policy,

@@ -63,6 +63,12 @@ export function createTauriHostAdapter() {
     async startAgentRun(sessionId, pageId, prompt) {
       return invoke("start_agent_run", { sessionId, pageId, prompt });
     },
+    async listWorkers(sessionId) {
+      return invoke("list_workers", { sessionId });
+    },
+    async getWorker(sessionId, workerId) {
+      return invoke("get_worker", { sessionId, workerId });
+    },
     async submitApproval(runId, approved, message = null) {
       return invoke("submit_approval", { runId, approved, message });
     },
