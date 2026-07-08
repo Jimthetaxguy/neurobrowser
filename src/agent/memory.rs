@@ -11,10 +11,19 @@ pub enum AgentEvent {
         content: String,
         timestamp: u64,
     },
+    LlmCall {
+        run_id: String,
+        model: String,
+        iteration: usize,
+        content_preview: String,
+        timestamp: u64,
+    },
     ToolCall {
+        run_id: String,
         tool: String,
-        arguments: serde_json::Value,
-        correlation_id: String,
+        arguments: std::collections::HashMap<String, String>,
+        success: bool,
+        result_preview: String,
         timestamp: u64,
     },
     ToolResult {
@@ -33,7 +42,19 @@ pub enum AgentEvent {
     },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+impl AgentEvent {
+    pub fn now(kind: &str) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or_else(|_| {
+                tracing::warn!("clock before unix epoch; emitting 0 for {kind} timestamp");
+                0
+            })
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct EpisodicMemory {
     pub events: Vec<AgentEvent>,
 }
@@ -60,7 +81,7 @@ impl EpisodicMemory {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SemanticMemory {
     pub items: Vec<SemanticItem>,
 }
@@ -93,7 +114,7 @@ impl Default for StateMemory {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AgentMemory {
     pub episodic: EpisodicMemory,
     pub semantic: SemanticMemory,

@@ -1,7 +1,8 @@
-use crate::tools::AgentError;
+use crate::tools::{AgentError, BrowserInterface};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +67,7 @@ pub trait StreamingAgent: Send + Sync {
     async fn execute_stream(
         &self,
         prompt: &str,
+        browser: Arc<dyn BrowserInterface>,
         sender: mpsc::Sender<StreamEvent>,
     ) -> Result<String, AgentError>;
 }
@@ -76,12 +78,13 @@ pub trait StreamingAgent: Send + Sync {
 pub async fn execute_with_timeout(
     agent: &dyn StreamingAgent,
     prompt: &str,
+    browser: Arc<dyn BrowserInterface>,
     sender: mpsc::Sender<StreamEvent>,
     timeout_secs: u64,
 ) -> Result<String, AgentError> {
     match tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),
-        agent.execute_stream(prompt, sender.clone()),
+        agent.execute_stream(prompt, browser, sender.clone()),
     )
     .await
     {

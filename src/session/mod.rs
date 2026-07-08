@@ -60,17 +60,20 @@ impl SessionManager {
     }
 
     pub fn create_page(&self, session_id: &str) -> Result<PageHandle, String> {
-        let mut sessions = self.sessions.lock().unwrap();
-
-        let session = sessions.get_mut(session_id).ok_or("Session not found")?;
+        // Allocate the page id *before* taking the sessions lock. Acquiring
+        // page_counter while holding sessions would deadlock if any other
+        // call path acquires sessions first and then page_counter (e.g. a
+        // future parallel-create helper or a test).
+        let page_id = {
+            let mut counter = self.page_counter.lock().unwrap();
+            let id = *counter;
+            *counter += 1;
+            id
+        };
 
         let agent_config = self.agent_config.lock().unwrap().clone();
         let provider = create_provider(&agent_config.provider_config);
         let agent = Arc::new(ReActAgent::new(agent_config, provider));
-
-        let mut counter = self.page_counter.lock().unwrap();
-        let page_id = *counter;
-        *counter += 1;
 
         let handle = PageHandle {
             id: page_id,
@@ -78,6 +81,8 @@ impl SessionManager {
             agent,
         };
 
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions.get_mut(session_id).ok_or("Session not found")?;
         session.pages.push(handle.clone());
         session.active_page = Some(page_id);
 

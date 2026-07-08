@@ -1,17 +1,30 @@
 pub mod memory;
+pub mod observability;
 pub mod policy;
 pub mod streaming;
 
+use crate::agent::memory::{AgentEvent, AgentMemory, EpisodicMemory, StateMemory};
+use crate::agent::observability::AgentMetrics;
 use crate::agent::policy::{
     ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, PolicyOutcome,
 };
+use crate::agent::streaming::{AgentStatus, StreamEvent, StreamingAgent};
 use crate::providers::{
-    create_provider, AiContext, AiProvider, ProviderConfig, ScrollPosition, ToolCall,
+    create_provider, AiContext, AiProvider, Message, ProviderConfig, ScrollPosition, ToolCall,
     ToolResult as AiToolResult,
 };
-use crate::tools::{BrowserInterface, BrowserTool, ToolRegistry};
+use crate::tools::{AgentError, BrowserInterface, BrowserTool, ToolRegistry};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, OnceLock};
+
+const CONVERSATION_WINDOW: usize = 20;
+
+static GLOBAL_METRICS: OnceLock<AgentMetrics> = OnceLock::new();
+
+pub fn metrics() -> &'static AgentMetrics {
+    GLOBAL_METRICS.get_or_init(AgentMetrics::default)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -33,7 +46,7 @@ pub struct AgentState {
     pub current_url: String,
     pub page_title: String,
     pub tool_results: Vec<AiToolResult>,
-    pub conversation: Vec<AgentMessage>,
+    pub conversation: VecDeque<AgentMessage>,
     pub iterations: usize,
 }
 
@@ -48,6 +61,7 @@ pub struct ReActAgent {
     provider: Mutex<Arc<dyn AiProvider + Send + Sync>>,
     tool_registry: Mutex<ToolRegistry>,
     state: Mutex<AgentState>,
+    memory: Mutex<AgentMemory>,
 }
 
 impl ReActAgent {
@@ -60,10 +74,21 @@ impl ReActAgent {
                 current_url: String::new(),
                 page_title: String::new(),
                 tool_results: Vec::new(),
-                conversation: Vec::new(),
+                conversation: VecDeque::with_capacity(CONVERSATION_WINDOW),
                 iterations: 0,
             }),
+            memory: Mutex::new(AgentMemory {
+                episodic: EpisodicMemory::default(),
+                semantic: Default::default(),
+                state: StateMemory::default(),
+            }),
         }
+    }
+
+    pub fn snapshot_state(&self) -> Result<AgentSnapshot, String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?.clone();
+        let memory = self.memory.lock().map_err(|e| e.to_string())?.clone();
+        Ok(AgentSnapshot { state, memory })
     }
 
     pub fn with_tools(self, tools: ToolRegistry) -> Self {
@@ -118,9 +143,16 @@ impl ReActAgent {
             state.page_title = page_info.title.clone();
             state.iterations = 0;
             state.tool_results.clear();
+            state.conversation.clear();
         }
 
-        let mut current_prompt = user_prompt.to_string();
+        // Seed the conversation with the user's intent. Subsequent iterations
+        // derive the LLM input from build_context (system + history + tool_results);
+        // the original user_prompt is preserved as the first user message.
+        self.push_conversation_bounded(AgentMessage {
+            role: "user".to_string(),
+            content: user_prompt.to_string(),
+        })?;
 
         let max_iterations = self
             .config
@@ -128,23 +160,37 @@ impl ReActAgent {
             .map_err(|e| e.to_string())?
             .max_iterations;
         let mut events = Vec::new();
+        metrics().record_request();
 
         for iteration in 0..max_iterations {
             let context = self.build_context(browser).await?;
             let provider = self.provider.lock().map_err(|e| e.to_string())?.clone();
 
+            // The LLM always sees the user's original prompt plus the
+            // accumulated tool results / conversation. We no longer overwrite
+            // current_prompt each iteration (the previous design's
+            // `current_prompt = format!("Observation: {result}")` discarded
+            // prior observations when a single response carried multiple
+            // tool calls).
             let response = provider
-                .complete(&current_prompt, &context)
+                .complete(user_prompt, &context)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| {
+                    self.record_error_metric();
+                    e.to_string()
+                })?;
 
-            {
-                let mut state = self.state.lock().map_err(|e| e.to_string())?;
-                state.conversation.push(AgentMessage {
-                    role: "assistant".to_string(),
-                    content: response.content.clone(),
-                });
-            }
+            self.push_conversation_bounded(AgentMessage {
+                role: "assistant".to_string(),
+                content: response.content.clone(),
+            })?;
+            self.push_episodic(AgentEvent::LlmCall {
+                run_id: run_id.clone(),
+                model: provider.provider_name().to_string(),
+                iteration,
+                content_preview: response.content.chars().take(200).collect(),
+                timestamp: AgentEvent::now("LlmCall"),
+            })?;
 
             if response.finish_reason == "stop" || response.tool_calls.is_empty() {
                 let answer = self.extract_final_answer(&response.content);
@@ -180,6 +226,7 @@ impl ReActAgent {
                         tool: tool_call.name.clone(),
                         decision,
                     });
+                    self.record_error_metric();
                     return Ok(AgentRunResult {
                         run_id,
                         status: AgentRunStatus::Blocked,
@@ -205,6 +252,7 @@ impl ReActAgent {
                             tool: tool_call.name.clone(),
                             decision,
                         });
+                        self.record_error_metric();
                         return Ok(AgentRunResult {
                             run_id,
                             status: AgentRunStatus::Blocked,
@@ -258,6 +306,15 @@ impl ReActAgent {
                     result: result.clone(),
                     success,
                 });
+                self.record_tool_call_metrics(&tool_call.name);
+                self.push_episodic(AgentEvent::ToolCall {
+                    run_id: run_id.clone(),
+                    tool: tool_call.name.clone(),
+                    arguments: tool_call.arguments.clone(),
+                    success,
+                    result_preview: result.chars().take(200).collect(),
+                    timestamp: AgentEvent::now("ToolCall"),
+                })?;
 
                 let tool_result = AiToolResult {
                     tool_name: tool_call.name.clone(),
@@ -269,17 +326,17 @@ impl ReActAgent {
                 {
                     let mut state = self.state.lock().map_err(|e| e.to_string())?;
                     state.tool_results.push(tool_result);
+                    // Reflect the latest navigation state from the browser so
+                    // build_context sees fresh url/title/scroll on the next
+                    // iteration without needing a full re-snapshot.
+                    state.current_url = snapshot.url.clone();
+                    state.page_title = snapshot.title.clone();
+                    state.iterations = iteration + 1;
                 }
-
-                current_prompt = format!("Observation: {}", result);
-            }
-
-            {
-                let mut state = self.state.lock().map_err(|e| e.to_string())?;
-                state.iterations = iteration + 1;
             }
         }
 
+        self.record_error_metric();
         Ok(AgentRunResult {
             run_id,
             status: AgentRunStatus::Failed,
@@ -404,7 +461,7 @@ impl ReActAgent {
                 state
                     .conversation
                     .iter()
-                    .map(|message| crate::providers::Message {
+                    .map(|message| Message {
                         role: message.role.clone(),
                         content: message.content.clone(),
                     })
@@ -467,5 +524,171 @@ impl ReActAgent {
             }
         }
         content.to_string()
+    }
+
+    fn push_conversation_bounded(&self, message: AgentMessage) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        if state.conversation.len() >= CONVERSATION_WINDOW {
+            state.conversation.pop_front();
+        }
+        state.conversation.push_back(message);
+        Ok(())
+    }
+
+    fn record_tool_call_metrics(&self, tool_name: &str) {
+        metrics().record_tool_call_named(tool_name);
+    }
+
+    fn record_error_metric(&self) {
+        metrics().record_error();
+    }
+
+    fn push_episodic(&self, event: AgentEvent) -> Result<(), String> {
+        let mut memory = self.memory.lock().map_err(|e| e.to_string())?;
+        memory.episodic.push(event);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSnapshot {
+    pub state: AgentState,
+    pub memory: AgentMemory,
+}
+
+#[async_trait::async_trait]
+impl StreamingAgent for ReActAgent {
+    async fn execute_stream(
+        &self,
+        prompt: &str,
+        browser: Arc<dyn BrowserInterface>,
+        sender: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> Result<String, AgentError> {
+        // The current execute_with_policy builds a complete event log; we
+        // run it once with the default policy and forward the resulting
+        // events through the streaming channel. This satisfies the trait
+        // contract; full incremental streaming is tracked for a follow-up.
+        let _ = sender
+            .send(StreamEvent::Status(AgentStatus::Thinking))
+            .await;
+
+        match self
+            .execute_with_policy(prompt, browser.as_ref(), &ActionPolicy::default())
+            .await
+        {
+            Ok(run) => {
+                for event in run.events {
+                    let mapped = map_run_event_to_stream(event);
+                    if let Some(mapped) = mapped {
+                        if sender.send(mapped).await.is_err() {
+                            // Receiver dropped — best-effort stop.
+                            break;
+                        }
+                    }
+                }
+                let final_answer = run
+                    .final_response
+                    .clone()
+                    .unwrap_or_else(|| "Run completed without a final response".to_string());
+
+                match run.status {
+                    AgentRunStatus::Completed => {
+                        let _ = sender
+                            .send(StreamEvent::Done {
+                                final_response: final_answer.clone(),
+                                iterations: run.iterations,
+                            })
+                            .await;
+                        Ok(final_answer)
+                    }
+                    AgentRunStatus::AwaitingApproval => {
+                        // Don't emit Done; the caller is expected to listen
+                        // for ApprovalRequested and either submit_approval or
+                        // cancel_agent_run.
+                        Ok("AwaitingApproval".to_string())
+                    }
+                    AgentRunStatus::Blocked => {
+                        let _ = sender.send(StreamEvent::Status(AgentStatus::Idle)).await;
+                        Ok("Blocked".to_string())
+                    }
+                    AgentRunStatus::Cancelled => {
+                        let _ = sender.send(StreamEvent::Status(AgentStatus::Idle)).await;
+                        Ok("Cancelled".to_string())
+                    }
+                    AgentRunStatus::Failed => {
+                        let _ = sender
+                            .send(StreamEvent::Error {
+                                code: "FAILED".to_string(),
+                                message: final_answer.clone(),
+                            })
+                            .await;
+                        Err(AgentError::Validation(final_answer))
+                    }
+                }
+            }
+            Err(error) => {
+                let _ = sender
+                    .send(StreamEvent::Error {
+                        code: "EXECUTION_ERROR".to_string(),
+                        message: error.clone(),
+                    })
+                    .await;
+                Err(AgentError::Validation(error))
+            }
+        }
+    }
+}
+
+fn map_run_event_to_stream(event: AgentRunEvent) -> Option<StreamEvent> {
+    use AgentRunEvent::*;
+    match event {
+        ToolCallStarted { tool, .. } => Some(StreamEvent::ToolCallStart {
+            tool,
+            arguments: serde_json::Value::Null,
+        }),
+        ToolCallResult {
+            tool,
+            result,
+            success,
+            ..
+        } => Some(StreamEvent::ToolCallResult {
+            tool,
+            result,
+            success,
+        }),
+        ToolCallBlocked { tool, decision, .. } => Some(StreamEvent::ToolCallBlocked {
+            run_id: String::new(),
+            tool,
+            reasons: decision.reasons,
+        }),
+        ApprovalRequested {
+            tool,
+            approval_id,
+            decision,
+            ..
+        } => {
+            let arguments = decision.redacted_arguments;
+            Some(StreamEvent::ApprovalRequested {
+                run_id: String::new(),
+                approval_id,
+                tool,
+                arguments,
+                reasons: decision.reasons,
+            })
+        }
+        ApprovalResolved {
+            approval_id,
+            approved,
+            ..
+        } => Some(StreamEvent::ApprovalResolved {
+            run_id: String::new(),
+            approval_id,
+            approved,
+        }),
+        RunCancelled { reason, .. } => Some(StreamEvent::RunCancelled {
+            run_id: String::new(),
+            reason,
+        }),
+        RunDone { .. } => None, // mapped at the call site
     }
 }

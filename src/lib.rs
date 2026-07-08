@@ -5,12 +5,14 @@ pub mod session;
 pub mod tools;
 
 pub use agent::{
+    memory::{AgentEvent, AgentMemory, EpisodicMemory, SemanticMemory, StateMemory},
+    observability::AgentMetrics,
     policy::{
         ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, AutonomyLevel, PolicyDecision,
         PolicyOutcome, RiskFlag,
     },
     streaming::{AgentStatus, StreamEvent, StreamingAgent},
-    AgentConfig, AgentMessage, AgentState, ReActAgent,
+    AgentConfig, AgentMessage, AgentSnapshot, AgentState, ReActAgent,
 };
 pub use browser::{BrowserEngine, PageConfig, PageState};
 pub use providers::{

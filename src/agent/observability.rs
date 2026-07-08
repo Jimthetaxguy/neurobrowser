@@ -76,6 +76,10 @@ pub struct AgentMetrics {
     pub total_tokens: AtomicU64,
     pub total_tool_calls: AtomicU64,
     pub total_errors: AtomicU64,
+    /// Per-tool-call counter map; keyed by tool name, accumulated into an
+    /// atomic via an external `Mutex<HashMap>` would be heavier than needed
+    /// here, so we keep a single coarse counter plus a side-table for names.
+    pub tool_call_counts: std::sync::Mutex<std::collections::HashMap<String, u64>>,
 }
 
 impl AgentMetrics {
@@ -91,8 +95,29 @@ impl AgentMetrics {
         self.total_tool_calls.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_tool_call_named(&self, name: &str) {
+        self.record_tool_call();
+        if let Ok(mut counts) = self.tool_call_counts.lock() {
+            *counts.entry(name.to_string()).or_insert(0) += 1;
+        }
+    }
+
     pub fn record_error(&self) {
         self.total_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> MetricsSnapshot {
+        MetricsSnapshot {
+            total_requests: self.get_requests(),
+            total_tokens: self.get_tokens(),
+            total_tool_calls: self.get_tool_calls(),
+            total_errors: self.get_errors(),
+            per_tool: self
+                .tool_call_counts
+                .lock()
+                .map(|c| c.clone())
+                .unwrap_or_default(),
+        }
     }
 
     pub fn get_requests(&self) -> u64 {
@@ -110,4 +135,13 @@ impl AgentMetrics {
     pub fn get_errors(&self) -> u64 {
         self.total_errors.load(Ordering::Relaxed)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsSnapshot {
+    pub total_requests: u64,
+    pub total_tokens: u64,
+    pub total_tool_calls: u64,
+    pub total_errors: u64,
+    pub per_tool: std::collections::HashMap<String, u64>,
 }
