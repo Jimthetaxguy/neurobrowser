@@ -2,9 +2,54 @@
 
 # Project Vision, Status, Roadmap and Goals
 
-version: "0.1.0"
+version: "0.1.1"
 created: "2026-02-23"
-updated: "2026-02-23"
+updated: "2026-07-08"
+
+# =============================================================================
+
+# v0.1.1 — DELTA (what shipped 2026-07-08)
+
+# =============================================================================
+
+> The body below documents the **v0.1.0** original snapshot. The actual
+> shipped state of the tree at `main@cea9af9` is **v0.1.1** — the result
+> of merging `codex-live-tauri-browser-runtime` into `main` and then
+> closing phases A–E of the v0.1 roadmap. Highlights:
+
+- **Tauri desktop shell:** React frontend with tab strip, URL bar,
+  chat panel, command palette, settings drawer — runs against a Rust
+  backend that owns a Tauri child webview per page (`src-tauri/src/runtime.rs`).
+- **Agent surface:** 12 structured tools (`snapshot`, `click`, `type_text`,
+  `submit_form`, `query_selector`, `evaluate`, `navigate`, `get_text`,
+  `get_attribute`, `wait_for`, `extract_text`, `screenshot`) plus
+  ref-based interaction (`@eN` references resolved through a `ref_map`).
+  See `docs/AGENT-SURFACE.md`.
+- **Action policy:** `ReadOnly` / `Assisted` / `HighAutonomy` modes with
+  per-domain allow/deny lists, sensitive-arg redaction, prompt-injection
+  detection, and three outcomes (`Allow`, `RequireApproval`, `Deny`).
+- **Headless daemon:** `cargo run --bin neurobrowser-headless --features headless`
+  exposes the same surface over a Unix Domain Socket or TCP for external
+  agents (ROSA, Claude Code, custom workers).
+- **Skill file:** `SKILL.md` at the repo root — the agent-loadable
+  invocation spec.
+- **Worker model (tabs-as-workers):** `src/agent/worker.rs` types plus
+  SessionManager-level worker registry, cross-worker observation ring,
+  in-session inbox routing. Tauri commands `list_workers`/`get_worker`
+  expose them. React sidebar (E5) and headless fan-out (E6) deferred to v0.2.
+- **Observability:** `AgentMetrics` global singleton, `AgentEvent`
+  episodic log, `MetricsSnapshot`, correlation spans (`llm_call_span`,
+  `tool_call_span`, `agent_iteration_span`).
+- **Streaming:** `StreamingAgent` trait, `ReActAgent` impl, integration
+  test in `tests/streaming_agent.rs`.
+- **Native tool calling:** deferred from Phase C — JSON-tool-call plumbing
+  is in place (`tools::ToolCall::parse_native`) but the agent loop still
+  consumes text-only tool invocations. v0.2.
+- **Test coverage:** 50 tests (8 integration, 42 unit) — `cargo test --all-targets`
+  green. `./verify.sh` runs fmt + clippy `-D warnings` + lib + integration +
+  Tauri frontend + headless release build.
+- **Documentation:** `docs/RUNBOOK-DEV.md`, `docs/TESTING-NOTES.md`,
+  `docs/AGENT-SURFACE.md`, `docs/references/prior-art.md`.
 
 # =============================================================================
 
@@ -117,15 +162,15 @@ product:
 # =============================================================================
 
 status:
-  overall: "foundation_complete_blocked_on_tauri"
-  build_status: "library_compiles_tauri_blocked"
-  last_updated: "2026-02-23"
-  
+  overall: "v0.1.1_shipped"
+  build_status: "verify_sh_green"
+  last_updated: "2026-07-08"
+
   components:
     - name: "Core Library"
-      path: "neurobrowser/"
-      status: "compiles"
-      notes: "All core modules implemented"
+      path: "src/"
+      status: "compiles_and_tested"
+      notes: "50 tests green; fmt + clippy -D warnings clean"
 
     - name: "AI Providers"
       path: "src/providers/"
@@ -134,7 +179,8 @@ status:
         - OpenAI (gpt-4o)
         - Anthropic (Claude)
         - Ollama (local models)
-        
+        - Custom (HTTP, OpenAI-compatible)
+
     - name: "ReAct Agent"
       path: "src/agent/"
       status: "implemented"
@@ -142,17 +188,24 @@ status:
         - Tool execution loop
         - Context building
         - Final answer extraction
-        
+        - AgentMemory (episodic/semantic/state)
+        - StreamingAgent implementation
+        - Process-global AgentMetrics
+        - Conversation-window bound (20 messages)
+        - Worker model (tabs-as-workers) — types + registry
+
     - name: "Browser Engine"
       path: "src/browser/"
       status: "implemented"
-      engine: "scraper (HTML parsing)"
+      engine: "scraper (HTML parsing) for headless daemon; Tauri child webview for desktop"
       features:
         - HTML parsing
         - DOM queries via CSS selectors
         - Link/Image/Form extraction
         - Price extraction via regex
-        
+        - Ref-based interaction (@eN) via runtime.js
+        - 12 agent-facing tools (snapshot/click/type/submit/etc.)
+
     - name: "Session Management"
       path: "src/session/"
       status: "implemented"
@@ -160,27 +213,46 @@ status:
         - Multi-session support
         - Page tracking
         - Session listing
-        
+        - Worker registry (workers/inbox/observations)
+
+    - name: "Action Policy"
+      path: "src/agent/policy.rs"
+      status: "implemented"
+      features:
+        - Three autonomy levels (ReadOnly/Assisted/HighAutonomy)
+        - Per-domain allow/deny
+        - Sensitive-arg redaction
+        - Prompt-injection detection
+        - Three outcomes (Allow/RequireApproval/Deny)
+        - 4 unit tests in tests/action_policy.rs
+
     - name: "DOM Tools"
       path: "src/tools/"
       status: "implemented"
-      tools_count: 10
-      
+      tools_count: 12
+
     - name: "Tauri Desktop Shell"
       path: "src-tauri/"
-      status: "blocked"
-      blockers:
-        - "Missing icons for bundle"
-        - "Config path issues"
-        
+      status: "green_build"
+      commands: 24
+      notes: "All commands wired through invoke_handler; capability allowlist in main.json"
+
     - name: "Frontend"
-      path: "src-tauri/index.html"
+      path: "src-tauri/dist/ (Vite build of src-tauri/src/App.jsx)"
       status: "implemented"
       features:
         - URL bar
-        - Tab UI
+        - Tab strip
         - Chat interface
-        - Tauri integration
+        - Settings drawer
+        - Command palette
+        - Streaming agent run events
+        - ActionPolicy panel
+
+    - name: "Headless Daemon"
+      path: "src-tauri/src/bin/headless.rs"
+      status: "implemented"
+      notes: "UDS/TCP, dispatches ping/policy.get/policy.set/policy.evaluate/snapshot/policy.snapshot"
 
 # =============================================================================
 
@@ -234,29 +306,36 @@ architecture:
 
 blockers:
 
-- id: "tauri_config"
-    severity: "high"
-    description: "Tauri build blocked - missing icons and config path issues"
-    location: "src-tauri/tauri.conf.json"
-    solution: "Add placeholder icons or fix config"
+# None active as of v0.1.1.
 
-- id: "fastrender_integration"
+resolved_in_v0_1_1:
+  - id: "tauri_config"
+    note: "Icons added, bundle config validated; tauri cargo check + release build green via verify.sh"
+
+  - id: "fastrender_integration"
+    note: "FastRender still not integrated (dependency conflicts). Desktop uses Tauri child webview; headless daemon uses scraper. JS execution works in desktop via the Tauri webview."
+
+  - id: "iframe_x_frame_options"
+    note: "Click interceptor scripts in src-tauri/src/runtime.rs (RUNTIME_INIT_SCRIPT) route navigations through Tauri commands; obsolete (we no longer render via blob-URL iframe)."
+
+  - id: "backend_command_mismatch"
+    note: "All 24 commands are wired in src-tauri/src/main.rs with matching implementations and capability permissions."
+
+remaining_for_v0_2:
+  - id: "native_tool_calling"
     severity: "medium"
-    description: "FastRender version conflicts - using scraper instead"
-    impact: "Static HTML only, no JavaScript execution"
-    solution: "Add JS support via alternative (e.g., headless chromium fallback)"
+    description: "Agent loop consumes text-only tool invocations. JSON tool-call parsing exists (tools::ToolCall::parse_native) but the ReActAgent prompt does not yet ask providers to emit structured JSON."
+    solution: "Update the build_context tool spec to require JSON emission when the provider supports tool calls (OpenAI/Anthropic tool_calls field)."
 
-- id: "iframe_x_frame_options"
-    severity: "medium"
-    description: "Blob URL iframe rendering is blocked by sites using X-Frame-Options: SAMEORIGIN"
-    impact: "Users clicking links inside the rendered iframe trigger a browser crash/block instead of routing through the Tauri backend."
-    solution: "Inject click interceptor scripts into HTML payload to proxy navigations via postMessage (implemented as a hotfix in index.html)."
+  - id: "worker_ui"
+    severity: "low"
+    description: "Worker types and SessionManager methods are in place; no React sidebar yet."
+    solution: "Add a Workers panel to App.jsx that calls listWorkers/getWorker."
 
-- id: "backend_command_mismatch"
-    severity: "high"
-    description: "Tauri commands exposed to the frontend don't always match the internal Rust structure implementations."
-    impact: "Commands like `set_provider` or `close_page` were declared in main.rs but not implemented in `ReActAgent` or `SessionManager`, causing fatal compile errors."
-    solution: "Ensure trait boundaries and implementations are synced before registering Tauri commands."
+  - id: "headless_fan_out"
+    severity: "low"
+    description: "Headless daemon exposes policy.get/set/evaluate but does not yet spawn workers across multiple sessions."
+    solution: "Add a worker.spawn command to headless.rs that creates a SessionManager worker and a worker.list command that calls SessionManager::list_workers."
 
 # =============================================================================
 
@@ -265,10 +344,29 @@ blockers:
 # =============================================================================
 
 roadmap:
+  v0_1_phases:
+    phase_a:
+      name: "Merge codex-live-tauri-browser-runtime into main"
+      status: "complete (commit 53e0e31, 2026-07-08)"
+    phase_b:
+      name: "Green Tauri desktop build + RUNBOOK-DEV.md"
+      status: "complete (commit 53e0e31, 2026-07-08)"
+    phase_c:
+      name: "Wire AgentMemory, StreamingAgent, AgentMetrics, conversation bound"
+      status: "complete (commit 53e0e31, 2026-07-08). Native function calling deferred to v0.2."
+    phase_d:
+      name: "Agent-native primitives (SKILL.md, headless daemon, ref-based tool surface)"
+      status: "complete (commit 53e0e31, 2026-07-08)"
+    phase_e:
+      name: "Worker model (tabs-as-workers)"
+      status: "complete (commit cea9af9, 2026-07-08). E5/E6 deferred to v0.2."
+    phase_f:
+      name: "Documentation sweep + triptych write-back"
+      status: "complete (this commit)"
+
   phase_1:
     name: "Foundation"
     status: "complete"
-    duration: "Week 1"
     deliverables:
       - "Project structure created"
       - "AI provider plugins working"
@@ -277,8 +375,7 @@ roadmap:
 
   phase_2:
     name: "Tools & Forms"
-    status: "in_progress"
-    duration: "Weeks 2-3"
+    status: "complete (v0.1)"
     deliverables:
       - "Full DOM query implementation"
       - "Form interaction (input, select, submit)"
@@ -287,31 +384,15 @@ roadmap:
 
   phase_3:
     name: "Parallelism"
-    status: "pending"
-    duration: "Week 4"
-    deliverables:
-      - "Tab pool (10 instances)"
-      - "Shared resource management"
-      - "Concurrent task orchestration"
+    status: "architecture_ready_v0_2"
 
   phase_4:
     name: "Desktop UI"
-    status: "pending"
-    duration: "Weeks 5-6"
-    deliverables:
-      - "Tauri app shell"
-      - "Tab management UI"
-      - "Settings/preferences"
-      - "Keyboard shortcuts"
+    status: "complete (v0.1)"
 
   phase_5:
     name: "CLI"
-    status: "pending"
-    duration: "Week 7"
-    deliverables:
-      - "Headless mode"
-      - "JSON output"
-      - "Script integration"
+    status: "complete_v0_1 (headless daemon), full CLI deferred to v0.2"
 
   phase_6:
     name: "Provider Ecosystem"
@@ -320,6 +401,17 @@ roadmap:
       - "Anthropic support (done)"
       - "Local models (Ollama)"
       - "Plugin SDK documentation"
+
+  phase_v0_2:
+    name: "v0.2 Roadmap"
+    status: "planned"
+    deliverables:
+      - "Native function calling in ReActAgent (structured JSON tool calls)"
+      - "React Workers sidebar (E5)"
+      - "Headless worker fan-out (E6) — worker.spawn + worker.list"
+      - "Full CLI wrapper over the headless daemon"
+      - "Visual regression tests against a fixture site"
+      - "Real-LLM end-to-end integration test (budget-capped via Infisical)"
 
 # =============================================================================
 

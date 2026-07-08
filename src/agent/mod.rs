@@ -2,6 +2,7 @@ pub mod memory;
 pub mod observability;
 pub mod policy;
 pub mod streaming;
+pub mod worker;
 
 use crate::agent::memory::{AgentEvent, AgentMemory, EpisodicMemory, StateMemory};
 use crate::agent::observability::AgentMetrics;
