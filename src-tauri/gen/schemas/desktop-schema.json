@@ -387,6 +387,270 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the ask command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ask",
+          "markdownDescription": "Enables the ask command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the browser_back command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-browser-back",
+          "markdownDescription": "Enables the browser_back command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the browser_forward command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-browser-forward",
+          "markdownDescription": "Enables the browser_forward command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the browser_reload command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-browser-reload",
+          "markdownDescription": "Enables the browser_reload command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the browser_runtime_report command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-browser-runtime-report",
+          "markdownDescription": "Enables the browser_runtime_report command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_agent_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-agent-run",
+          "markdownDescription": "Enables the cancel_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the close_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-close-page",
+          "markdownDescription": "Enables the close_page command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-page",
+          "markdownDescription": "Enables the create_page command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-session",
+          "markdownDescription": "Enables the create_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_action_policy command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-action-policy",
+          "markdownDescription": "Enables the get_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_page_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-page-info",
+          "markdownDescription": "Enables the get_page_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_page_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-page-snapshot",
+          "markdownDescription": "Enables the get_page_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_sessions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-sessions",
+          "markdownDescription": "Enables the list_sessions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the navigate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-navigate",
+          "markdownDescription": "Enables the navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_action_policy command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-action-policy",
+          "markdownDescription": "Enables the set_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_active_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-active-page",
+          "markdownDescription": "Enables the set_active_page command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_provider command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-provider",
+          "markdownDescription": "Enables the set_provider command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_agent_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-agent-run",
+          "markdownDescription": "Enables the start_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the submit_approval command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-submit-approval",
+          "markdownDescription": "Enables the submit_approval command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_browser_viewport command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-browser-viewport",
+          "markdownDescription": "Enables the sync_browser_viewport command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the validate_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-validate-url",
+          "markdownDescription": "Enables the validate_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the wait_for_page_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-wait-for-page-ready",
+          "markdownDescription": "Enables the wait_for_page_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ask command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ask",
+          "markdownDescription": "Denies the ask command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the browser_back command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-browser-back",
+          "markdownDescription": "Denies the browser_back command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the browser_forward command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-browser-forward",
+          "markdownDescription": "Denies the browser_forward command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the browser_reload command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-browser-reload",
+          "markdownDescription": "Denies the browser_reload command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the browser_runtime_report command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-browser-runtime-report",
+          "markdownDescription": "Denies the browser_runtime_report command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_agent_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-agent-run",
+          "markdownDescription": "Denies the cancel_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the close_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-close-page",
+          "markdownDescription": "Denies the close_page command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-page",
+          "markdownDescription": "Denies the create_page command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-session",
+          "markdownDescription": "Denies the create_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_action_policy command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-action-policy",
+          "markdownDescription": "Denies the get_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_page_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-page-info",
+          "markdownDescription": "Denies the get_page_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_page_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-page-snapshot",
+          "markdownDescription": "Denies the get_page_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_sessions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-sessions",
+          "markdownDescription": "Denies the list_sessions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the navigate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-navigate",
+          "markdownDescription": "Denies the navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_action_policy command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-action-policy",
+          "markdownDescription": "Denies the set_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_active_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-active-page",
+          "markdownDescription": "Denies the set_active_page command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_provider command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-provider",
+          "markdownDescription": "Denies the set_provider command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_agent_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-agent-run",
+          "markdownDescription": "Denies the start_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the submit_approval command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-submit-approval",
+          "markdownDescription": "Denies the submit_approval command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_browser_viewport command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-browser-viewport",
+          "markdownDescription": "Denies the sync_browser_viewport command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the validate_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-validate-url",
+          "markdownDescription": "Denies the validate_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the wait_for_page_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-wait-for-page-ready",
+          "markdownDescription": "Denies the wait_for_page_ready command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

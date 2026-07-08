@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolError {
@@ -65,38 +66,35 @@ impl From<ToolError> for String {
     }
 }
 
-#[derive(Debug)]
+/// Agent-level errors using thiserror derive.
+/// ToolError is intentionally a serializable struct, not an enum.
+#[derive(Debug, Error)]
 pub enum AgentError {
+    #[error("Provider error: {0}")]
     Provider(String),
+
+    #[error("Tool error: {0}")]
     Tool(String),
+
+    #[error("Validation error: {0}")]
     Validation(String),
+
+    #[error("Timeout: {0}")]
     Timeout(String),
+
+    #[error("Max iterations reached")]
     MaxIterationsReached,
 }
 
-impl std::fmt::Display for AgentError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentError::Provider(msg) => write!(f, "Provider error: {}", msg),
-            AgentError::Tool(msg) => write!(f, "Tool error: {}", msg),
-            AgentError::Validation(msg) => write!(f, "Validation error: {}", msg),
-            AgentError::Timeout(msg) => write!(f, "Timeout: {}", msg),
-            AgentError::MaxIterationsReached => write!(f, "Max iterations reached"),
-        }
-    }
-}
-
-impl std::error::Error for AgentError {}
-
 impl From<crate::providers::ProviderError> for AgentError {
     fn from(err: crate::providers::ProviderError) -> Self {
-        AgentError::Provider(err.to_string())
+        Self::Provider(err.to_string())
     }
 }
 
 impl From<ToolError> for AgentError {
     fn from(err: ToolError) -> Self {
-        AgentError::Tool(err.message)
+        Self::Tool(err.message)
     }
 }
 

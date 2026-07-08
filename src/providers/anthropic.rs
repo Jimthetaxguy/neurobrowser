@@ -1,4 +1,7 @@
-use crate::providers::{AiProvider, AiResponse, AiContext, ProviderConfig, ProviderError, ProviderResult, parse_tool_calls, build_system_prompt};
+use crate::providers::{
+    build_system_prompt, parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig,
+    ProviderError, ProviderResult,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use std::time::Duration;
@@ -14,11 +17,8 @@ impl AnthropicProvider {
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| Client::new());
-        
-        Self {
-            config,
-            client,
-        }
+
+        Self { config, client }
     }
 
     fn build_messages(&self, prompt: &str, context: &AiContext) -> Vec<serde_json::Value> {
@@ -28,30 +28,32 @@ impl AnthropicProvider {
         if context.tool_results.is_empty() {
             vec![
                 serde_json::json!({
-                    "role": "system", 
+                    "role": "system",
                     "content": system_prompt
                 }),
                 serde_json::json!({
-                    "role": "user", 
+                    "role": "user",
                     "content": prompt
-                })
+                }),
             ]
         } else {
             // Include tool results in the prompt
-            let tool_results_str = context.tool_results.iter()
+            let tool_results_str = context
+                .tool_results
+                .iter()
                 .map(|r| format!("{}: {}", r.tool_name, r.result))
                 .collect::<Vec<_>>()
                 .join("\n");
-            
+
             vec![
                 serde_json::json!({
-                    "role": "system", 
+                    "role": "system",
                     "content": system_prompt
                 }),
                 serde_json::json!({
                     "role": "user",
                     "content": format!("{}\n\nTool results:\n{}", prompt, tool_results_str)
-                })
+                }),
             ]
         }
     }
@@ -60,11 +62,13 @@ impl AnthropicProvider {
 #[async_trait]
 impl AiProvider for AnthropicProvider {
     async fn complete(&self, prompt: &str, context: &AiContext) -> ProviderResult<AiResponse> {
-        let api_key = self.config.api_key.as_ref()
-            .ok_or_else(|| ProviderError::NotConfigured("Anthropic API key not set".to_string()))?;
+        let api_key =
+            self.config.api_key.as_ref().ok_or_else(|| {
+                ProviderError::NotConfigured("Anthropic API key not set".to_string())
+            })?;
 
         let messages = self.build_messages(prompt, context);
-        
+
         let body = serde_json::json!({
             "model": self.config.model,
             "messages": messages,
@@ -72,7 +76,8 @@ impl AiProvider for AnthropicProvider {
             "temperature": self.config.temperature.unwrap_or(0.3),
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
@@ -88,10 +93,14 @@ impl AiProvider for AnthropicProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(ProviderError::RequestFailed(format!("Status {}: {}", status, text)));
+            return Err(ProviderError::RequestFailed(format!(
+                "Status {}: {}",
+                status, text
+            )));
         }
 
-        let json: serde_json::Value = response.json()
+        let json: serde_json::Value = response
+            .json()
             .await
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
