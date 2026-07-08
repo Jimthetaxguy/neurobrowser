@@ -3,16 +3,32 @@ name = "neurobrowser-tauri"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+# Headless daemon uses Tauri + a Tokio Unix Domain Socket listener. The
+# feature gates the bin and the additional deps so the desktop app build
+# stays slim.
+headless = []
+
+[[bin]]
+name = "neurobrowser-headless"
+path = "src/bin/headless.rs"
+required-features = ["headless"]
+
 [dependencies]
 neurobrowser = { path = "..", features = [] }
 tauri = { version = "2", features = ["devtools", "unstable"] }
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "net", "io-util", "macros", "rt-multi-thread", "sync"] }
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1", features = ["net"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
