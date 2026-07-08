@@ -443,9 +443,12 @@ competitors:
 
 references:
   source_repos:
-    - name: "agent-browser"
-      url: "<https://github.com/AIAnytime/agent-browser>"
-      use: "AI agent patterns, ReAct implementation"
+    - name: "agent-browser (vercel-labs)"
+      url: "https://github.com/vercel-labs/agent-browser"
+      use: "Agent-facing CLI patterns, ref-based snapshot model, SKILL.md distribution, encrypted profile persistence. See docs/references/prior-art.md."
+    - name: "agent-browser (AIAnytime)"
+      url: "https://github.com/AIAnytime/agent-browser"
+      use: "Earlier ReAct-pattern reference (legacy citation retained for provenance; vercel-labs/agent-browser is the current authoritative reference)"
 
     - name: "fastrender"
       url: "https://github.com/wilsonzlin/fastrender"
