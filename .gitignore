@@ -54,3 +54,6 @@ docs/private/
 # agent / local clutter (cleanup 2026-07-10)
 .cursor/
 _archive-*/
+
+# session notes (cleanup 2026-07-10)
+_working-files/

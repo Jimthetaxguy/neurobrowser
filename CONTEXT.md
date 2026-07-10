@@ -64,3 +64,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ## Cleanup note (2026-07-10)
 
 CONTEXT added for project-context-glossary compliance. Residual dirty: `Cargo.lock` + Tauri gen schemas (build noise); `.cursor/` and `_archive-*` should stay local.
+
+## Cargo.lock / Tauri gen schemas policy (2026-07-10)
+
+- **`Cargo.lock` is tracked** — commit intentional dependency resolution (e.g. `tempfile` for tests).
+- **`src-tauri/gen/schemas/*` is tracked** — regenerate via Tauri build when capabilities change; commit with the capability/IPC change that caused the regen (worker list permissions, etc.). Do not leave machine-local schema drift uncommitted if it reflects source-of-truth capability config.
+- **`_working-files/`** stays gitignored (session notes).
