@@ -31,10 +31,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use neurobrowser::agent::policy::{ActionPolicy, AutonomyLevel, RiskFlag};
+use neurobrowser::browser::default_tool_registry;
 use neurobrowser::providers::{
     create_provider, AiContext, AiProvider, ProviderConfig, ProviderType,
 };
-use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRisk};
+use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, ToolRisk};
 use neurobrowser::{AgentConfig, PageConfig, ReActAgent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -87,13 +88,19 @@ impl Response {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct SessionState {
     /// Per-session policy. Defaults to `Assisted` + no allow/deny lists.
     policy: Arc<Mutex<ActionPolicy>>,
     /// Optional provider for the `ask` method. Not used in v0.1 of the
     /// daemon beyond echo-style validation.
     agent: Arc<Mutex<Option<Arc<ReActAgent>>>>,
+    /// The real browser tool registry (navigate/click/type/submit_form/...),
+    /// used to resolve each tool's actual `ToolRisk` before handing it to
+    /// `policy.evaluate`. Built once per session rather than per request.
+    /// Not `#[derive(Default)]`-able: `ToolRegistry::default()` is an empty
+    /// registry, which would silently defeat this lookup for every tool.
+    tool_registry: Arc<ToolRegistry>,
 }
 
 impl SessionState {
@@ -101,6 +108,7 @@ impl SessionState {
         Self {
             policy: Arc::new(Mutex::new(ActionPolicy::default())),
             agent: Arc::new(Mutex::new(None)),
+            tool_registry: Arc::new(default_tool_registry()),
         }
     }
 
@@ -125,7 +133,19 @@ impl SessionState {
             interactive_ready: true,
         };
 
-        let tool_risk = ToolRisk::new(ToolAction::Read, RiskLevel::Low);
+        // Resolve the tool's *real* risk from the browser tool registry
+        // (type/submit_form/purchase are High/Critical + often sensitive)
+        // instead of hardcoding Read/Low, which made `policy.evaluate`
+        // treat every tool as a harmless read and silently Allow it under
+        // Assisted/HighAutonomy autonomy. Genuinely unknown tool names
+        // (not registered) fall back to a conservative, high-risk default
+        // so they always require approval (Assisted) or are blocked
+        // (ReadOnly) rather than defaulting to an auto-allowed Read.
+        let tool_risk = self
+            .tool_registry
+            .get(name)
+            .map(|tool| tool.definition().risk)
+            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive, RiskLevel::Critical));
 
         let policy = self.policy.lock().await;
         let decision = policy.evaluate(name, &tool_risk, args, &snapshot);
@@ -356,4 +376,115 @@ fn _touch_types_to_keep_them_in_scope() {
         conversation_history: Vec::new(),
     };
     let _provider_fn: fn(&ProviderConfig) -> std::sync::Arc<dyn AiProvider> = create_provider;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn evaluate_tool_call_requires_approval_for_high_risk_tool() {
+        // `type` is High risk + sensitive in the real registry. Under the
+        // old `ToolRisk::new(ToolAction::Read, RiskLevel::Low)` bug this
+        // would have been silently `Allow`ed in Assisted mode (the default
+        // policy autonomy level) because Read is in the Assisted allow-list.
+        let state = SessionState::new();
+        let mut args = HashMap::new();
+        args.insert("selector".to_string(), "#input".to_string());
+        args.insert("text".to_string(), "hunter2".to_string());
+
+        let response = state.evaluate_tool_call("test-1", "type", &args).await;
+
+        assert!(response.ok);
+        let result = response
+            .result
+            .expect("evaluate_tool_call always returns a result payload");
+        let outcome = result
+            .get("outcome")
+            .and_then(Value::as_str)
+            .expect("outcome field present");
+
+        assert_ne!(
+            outcome, "Allow",
+            "high-risk 'type' tool call was silently allowed: {result}"
+        );
+        assert_eq!(outcome, "RequireApproval");
+    }
+
+    #[tokio::test]
+    async fn evaluate_tool_call_requires_approval_for_submit_form() {
+        // Same check for `submit_form` (High risk, externally visible).
+        let state = SessionState::new();
+        let mut args = HashMap::new();
+        args.insert("selector".to_string(), "#checkout-form".to_string());
+
+        let response = state
+            .evaluate_tool_call("test-2", "submit_form", &args)
+            .await;
+
+        assert!(response.ok);
+        let result = response
+            .result
+            .expect("evaluate_tool_call always returns a result payload");
+        let outcome = result
+            .get("outcome")
+            .and_then(Value::as_str)
+            .expect("outcome field present");
+
+        assert_ne!(
+            outcome, "Allow",
+            "high-risk 'submit_form' tool call was silently allowed: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_tool_call_falls_back_to_conservative_risk_for_unknown_tools() {
+        // A genuinely-unknown tool name (not in `default_tool_registry`)
+        // must not fall back to Read/Low either — it should get the same
+        // conservative high-risk default so it can't slip through as an
+        // auto-allowed read.
+        let state = SessionState::new();
+        let args = HashMap::new();
+
+        let response = state
+            .evaluate_tool_call("test-3", "totally_unregistered_tool", &args)
+            .await;
+
+        assert!(response.ok);
+        let result = response
+            .result
+            .expect("evaluate_tool_call always returns a result payload");
+        let outcome = result
+            .get("outcome")
+            .and_then(Value::as_str)
+            .expect("outcome field present");
+
+        assert_ne!(
+            outcome, "Allow",
+            "unknown tool call was silently allowed: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_tool_call_still_allows_a_real_read_only_tool() {
+        // Sanity check the fix isn't over-broad: a genuinely low-risk,
+        // read-only tool (get_text) should still be allowed in Assisted
+        // mode, same as before.
+        let state = SessionState::new();
+        let mut args = HashMap::new();
+        args.insert("selector".to_string(), "h1".to_string());
+
+        let response = state.evaluate_tool_call("test-4", "get_text", &args).await;
+
+        assert!(response.ok);
+        let result = response
+            .result
+            .expect("evaluate_tool_call always returns a result payload");
+        let outcome = result
+            .get("outcome")
+            .and_then(Value::as_str)
+            .expect("outcome field present");
+
+        assert_eq!(outcome, "Allow");
+    }
 }

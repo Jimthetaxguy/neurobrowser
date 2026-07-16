@@ -197,7 +197,16 @@ impl BrowserInterface for BrowserEngine {
     }
 
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
-        tracing::info!("Static browser type fallback: '{}' -> {}", text, selector);
+        // `text` is the `.sensitive(true)` typed value (see `TypeTool`'s
+        // argument definition) — never log it verbatim, since tracing
+        // output flows to the log sink. Log a length-based confirmation
+        // instead, matching the redaction already applied to
+        // `TypeTool::execute`'s result string.
+        tracing::info!(
+            "Static browser type fallback: {} characters -> {}",
+            text.chars().count(),
+            selector
+        );
         Ok(())
     }
 
@@ -839,10 +848,15 @@ impl BrowserTool for TypeTool {
         let selector = args.get("selector").cloned().unwrap_or_default();
         let text = args.get("text").cloned().unwrap_or_default();
         match browser.type_text(&selector, &text).await {
+            // `text` is marked `.sensitive(true)` on this tool's argument
+            // definition — never echo the raw value back into the result
+            // string, since it flows unredacted into ToolCallResult,
+            // result_preview, and stored session context. Report a
+            // length-based confirmation instead.
             Ok(()) => crate::tools::ToolResult::success(
                 "type",
                 args,
-                format!("Typed '{}' successfully", text),
+                format!("Typed {} characters successfully", text.chars().count()),
             ),
             Err(error) => crate::tools::ToolResult::error("type", args, error),
         }
@@ -1180,5 +1194,68 @@ mod tests {
         assert_eq!(snapshot.forms.len(), 1);
         assert_eq!(snapshot.tables.len(), 1);
         assert!(snapshot.interactive_ready);
+    }
+
+    /// Minimal `BrowserInterface` stub for tool-level unit tests. Avoids
+    /// `BrowserEngine`, whose `reqwest::blocking::Client` spins up its own
+    /// nested Tokio runtime and panics on drop inside a `#[tokio::test]`
+    /// async context.
+    struct NoopBrowser;
+
+    #[async_trait]
+    impl BrowserInterface for NoopBrowser {
+        async fn navigate(&self, _url: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn query_selector(&self, _selector: &str) -> Result<Vec<ElementInfo>, String> {
+            Ok(Vec::new())
+        }
+        async fn get_text(&self, _selector: &str) -> Result<String, String> {
+            Ok(String::new())
+        }
+        async fn get_attributes(
+            &self,
+            _selector: &str,
+        ) -> Result<HashMap<String, String>, String> {
+            Ok(HashMap::new())
+        }
+        async fn click(&self, _selector: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn type_text(&self, _selector: &str, _text: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn submit_form(&self, _selector: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn scroll_to(&self, _selector: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn scroll_by(&self, _x: f32, _y: f32) -> Result<(), String> {
+            Ok(())
+        }
+        async fn snapshot(&self) -> Result<PageSnapshot, String> {
+            Ok(PageSnapshot::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn type_tool_result_does_not_leak_typed_text() {
+        let browser = NoopBrowser;
+        let mut args = HashMap::new();
+        args.insert("selector".to_string(), "#password".to_string());
+        args.insert(
+            "text".to_string(),
+            "super-secret-value-42".to_string(),
+        );
+
+        let result = TypeTool.execute(args, &browser).await;
+
+        assert!(result.success);
+        assert!(
+            !result.result.contains("super-secret-value-42"),
+            "type tool result leaked the raw sensitive text: {}",
+            result.result
+        );
     }
 }

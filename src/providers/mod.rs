@@ -123,7 +123,7 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
                 let name = name.trim();
                 let args_str = args_str.trim_end_matches(')').trim();
 
-                let arguments = parse_arguments(args_str);
+                let arguments = parse_arguments(name, args_str);
 
                 if !arguments.is_empty() {
                     calls.push(ToolCall {
@@ -163,14 +163,24 @@ fn parse_structured_tool_call(json_part: &str) -> Option<ToolCall> {
     })
 }
 
-fn parse_arguments(args_str: &str) -> HashMap<String, String> {
+fn parse_arguments(tool_name: &str, args_str: &str) -> HashMap<String, String> {
     let mut arguments = HashMap::new();
 
     if args_str.is_empty() {
         return arguments;
     }
 
+    // `split_arguments` already splits `args_str` on top-level commas, so by
+    // the time we get here each `arg` is a single token — there is never an
+    // embedded ',' left to split on. Positional (unlabeled) args are mapped
+    // by index to the tool's real, ordered parameter names (as declared on
+    // `BrowserTool::definition()`, e.g. `type` -> ["selector", "text"]) so
+    // multi-arg positional calls like `type(#input, hello)` land on the same
+    // keys `TypeTool::execute` reads, instead of every positional arg
+    // overwriting a single "value" key.
     let args = split_arguments(args_str);
+    let positional_names = positional_argument_names(tool_name);
+    let mut positional_index = 0usize;
 
     for arg in args {
         let arg = arg.trim();
@@ -182,18 +192,39 @@ fn parse_arguments(args_str: &str) -> HashMap<String, String> {
             let key = key.trim();
             let value = value.trim().trim_matches('"').trim_matches('\'');
             arguments.insert(key.to_string(), value.to_string());
-        } else if let Some((key, value)) = arg.split_once(',') {
-            let key = key.trim();
-            let value = value.trim().trim_matches('"').trim_matches('\'');
-            if !key.is_empty() && !value.is_empty() {
-                arguments.insert(key.to_string(), value.to_string());
-            }
         } else {
-            arguments.insert("value".to_string(), arg.to_string());
+            let value = arg.trim_matches('"').trim_matches('\'');
+            if !value.is_empty() {
+                let key = positional_names
+                    .get(positional_index)
+                    .cloned()
+                    .unwrap_or_else(|| format!("value{}", positional_index + 1));
+                arguments.insert(key, value.to_string());
+            }
+            positional_index += 1;
         }
     }
 
     arguments
+}
+
+/// Looks up the real, ordered argument names for `tool_name` from the
+/// browser tool registry (the same registry `ReActAgent` dispatches
+/// through) so legacy positional `Action: tool(a, b)` calls feed the same
+/// keys the tool's `execute()` reads. Falls back to an empty list for
+/// unknown tool names, in which case positional args get distinct
+/// `value1`, `value2`, ... keys rather than overwriting each other.
+fn positional_argument_names(tool_name: &str) -> Vec<String> {
+    crate::browser::default_tool_registry()
+        .get(tool_name)
+        .map(|tool| {
+            tool.definition()
+                .arguments
+                .into_iter()
+                .map(|argument| argument.name)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn split_arguments(args_str: &str) -> Vec<String> {
