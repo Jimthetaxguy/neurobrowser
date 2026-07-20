@@ -1,6 +1,6 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig,
-    ProviderError, ProviderResult,
+    build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, AiProvider, AiResponse,
+    ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -50,9 +50,15 @@ impl AiProvider for OpenAiProvider {
             "max_tokens": self.config.max_tokens.unwrap_or(4096),
         });
 
+        let endpoint = resolve_endpoint(
+            self.config.base_url.as_deref(),
+            "https://api.openai.com",
+            "/v1/chat/completions",
+        );
+
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(endpoint)
             .bearer_auth(api_key)
             .json(&body)
             .send()

@@ -173,8 +173,14 @@ impl SessionState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Honor RUST_LOG when set (e.g. `RUST_LOG=debug`), falling back to the
+    // default filter. Previously the filter was a hardcoded string literal, so
+    // RUST_LOG had no effect (FA-8 operability).
     tracing_subscriber::fmt()
-        .with_env_filter("neurobrowser=info,headless=info")
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("neurobrowser=info,headless=info")),
+        )
         .init();
 
     let socket_path = std::env::var("NEUROBROWSER_SOCKET")

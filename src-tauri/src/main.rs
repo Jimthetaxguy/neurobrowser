@@ -629,8 +629,15 @@ fn set_provider(
 }
 
 fn main() {
+    // Honor RUST_LOG when set (e.g. `RUST_LOG=debug`), falling back to the
+    // default filter. Previously the filter was a hardcoded string literal, so
+    // RUST_LOG had no effect — operators could not raise verbosity without a
+    // rebuild (FA-8 operability).
     tracing_subscriber::fmt()
-        .with_env_filter("neurobrowser=info")
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("neurobrowser=info")),
+        )
         .init();
 
     let browser_config = PageConfig::default();
