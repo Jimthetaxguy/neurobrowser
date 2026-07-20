@@ -6,12 +6,12 @@
     "gate": { "fmt_ok": false, "clippy_ok": true, "test_ok": true, "tauri_ok": true },
     "panel": { "unwrap_count": 31, "expect_count": 22, "clone_count": 133, "todo_fixme_count": 0, "unsafe_count": 0, "src_loc": 6475, "tests_passed": 52 }
   },
-  "best_run": 2,
-  "current_run": 2,
+  "best_run": 3,
+  "current_run": 3,
   "next_mutation": {
-    "target": "SG2 security P0 batch (awaiting cadence decision from James)",
+    "target": "SG3 correctness P0 batch",
     "operator": "fix-with-test",
-    "hypothesis": "Close the 6 security P0s: policy injection HTML scan (policy.rs:346), scheme bypass (policy.rs:374), SSRF guard (browser/mod.rs:120), ask command policy bypass (main.rs:299), navigate command validate_url (main.rs:243), headless socket auth (headless.rs:210). Each with a regression test; keep gate green."
+    "hypothesis": "stale post-nav URL fed to model (agent/mod.rs:333), no-op interactive tools report success (browser/mod.rs:194), dead dom_snapshot/accessibility_tree never reach the prompt (agent/mod.rs:487), spawn_worker never resolves pinned_page_id (session/mod.rs:189). Each with a regression test; keep gate green."
   },
   "runs": [
     {
@@ -30,6 +30,17 @@
       "result": "KEEP",
       "gate_pass": true,
       "note": "fmt RED->GREEN; tests unaffected.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 3,
+      "operator": "fix-with-test batch (SG2 security P0s)",
+      "target": "src/agent/policy.rs, src/browser/mod.rs, src-tauri/src/main.rs, src-tauri/src/bin/headless.rs",
+      "target_metric": "6 security P0s closed: injection scans text+html; javascript:/data:/file: navigation blocked; SSRF guard rejects loopback/private/link-local; navigate command enforces validate_url; ask command routes through execute_with_policy; control socket chmod 0600",
+      "change": "policy.rs: snapshot_contains_prompt_injection scans text+html; added unsafe_navigation_scheme guard in evaluate. browser/mod.rs: ssrf_blocked_reason + is_blocked_ip guard in navigate. main.rs: navigate enforces validate_url; ask uses execute_with_policy + registers pending approvals. headless.rs: chmod 0600 on the control socket (#[cfg(unix)]). +3 regression tests (2 policy, 1 SSRF). Full peer-cred authz spun off as a follow-up task.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Full gate green: fmt clean, clippy --all-targets -D warnings clean, 58 tests pass (55+3), tauri check clean.",
       "timestamp": "2026-07-20"
     },
     {

@@ -207,6 +207,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("NEUROBROWSER_LISTENING=unix://{}", socket_path.display());
 
+    // Restrict the control socket to the owning user. This is defense-in-depth;
+    // full per-connection peer-credential authz (SO_PEERCRED same-uid + per-client
+    // session state) is tracked as a follow-up.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(error) =
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+        {
+            tracing::warn!(?error, "failed to restrict control-socket permissions");
+        }
+    }
+
     let session_state = SessionState::new();
     loop {
         let (stream, _) = listener.accept().await?;

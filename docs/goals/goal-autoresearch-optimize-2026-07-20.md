@@ -96,13 +96,24 @@ Validation set (canary — must stay green every cycle): the 8 files under `test
 |---|---|---|---|
 | SG0 | Baseline + charter | Verify real state, branch, harness, backlogs, this Goal | **complete** |
 | SG1 | Provider correctness P0 | Anthropic `system` key + finish_reason normalization; multi-block parse | **complete (iter 2)** |
-| SG2 | Security P0 batch | injection HTML scan, scheme/SSRF guards, `ask`/`navigate` policy, headless auth | queued |
-| SG3 | Correctness P0 batch | stale post-nav URL, no-op interactive tools, unused dom_snapshot, spawn_worker pin | queued |
+| SG2 | Security P0 batch | injection HTML scan, scheme/SSRF guards, `ask`/`navigate` policy, headless socket chmod (+ authz follow-up) | **complete (iter 3)** |
+| SG3 | Correctness P0 batch | stale post-nav URL, no-op interactive tools, unused dom_snapshot, spawn_worker pin | in progress |
 | SG4 | P1 sweep | memory bound, stream run_id/args, key+value redaction, blocking reqwest→async, tool-list from registry | queued |
 | SG5 | Net-new specs | Graduate NB-1/2/3/5/6 into `docs/specs/` + `docs/stories/` | queued |
 | SG6 | Doc reconciliation | AIAnytime, fastrender, PROJECT.md observability claim | queued |
 
 ## Run Log (reverse-chronological)
+
+### Iteration 3 — 2026-07-20 — KEEP — `security-p0-batch` (SG2)
+- **Operator:** fix-with-test batch. **Closed all 6 security P0s:**
+  1. `policy.rs` — injection scanner now reads **text + HTML** (was `text.or(html)`, so attribute/comment-hidden payloads bypassed it).
+  2. `policy.rs` — `evaluate` blocks `javascript:`/`data:`/`file:`/`vbscript:`/`blob:` navigation (hostless schemes previously skipped the whole allow/deny check).
+  3. `browser/mod.rs` — `ssrf_blocked_reason` rejects loopback/private/link-local hosts (incl. `169.254.169.254`) before any request leaves the process.
+  4. `main.rs` — `navigate` command enforces `validate_url` server-side (was reachable directly with a `javascript:` target).
+  5. `main.rs` — `ask` command routes through `execute_with_policy` (was calling raw `execute`, bypassing ActionPolicy entirely); approval-gated tools are surfaced, not silently run.
+  6. `headless.rs` — control socket `chmod 0600` (`#[cfg(unix)]`). Full peer-cred authz + per-connection session isolation spun off as a **follow-up task**.
+- **Tests:** +3 regression (HTML-attribute injection, `javascript:` scheme block, SSRF-host rejection).
+- **Result:** full gate green — fmt clean, clippy `-D warnings` clean, **58 tests pass**, tauri check clean. **KEEP.**
 
 ### Iteration 2 — 2026-07-20 — KEEP — `anthropic-provider-p0` (SG1)
 - **Operator:** fix-with-test. **Target:** `src/providers/anthropic.rs`.

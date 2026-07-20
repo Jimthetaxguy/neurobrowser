@@ -247,8 +247,17 @@ async fn navigate(
     page_id: usize,
     url: String,
 ) -> Result<(), String> {
+    // Enforce URL validation server-side (dangerous-scheme rejection + normalization)
+    // regardless of any frontend check, so the command can't be invoked directly to
+    // reach a javascript:/data: target.
+    let validation = validate_url(url.clone());
+    if !validation.valid {
+        return Err(validation
+            .error
+            .unwrap_or_else(|| "Invalid URL".to_string()));
+    }
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.navigate(&url).await
+    browser.navigate(&validation.normalized_url).await
 }
 
 #[tauri::command]
@@ -296,12 +305,58 @@ async fn ask(
     prompt: String,
 ) -> Result<AskResult, String> {
     let (page, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    let response = page.agent.execute(&prompt, &browser).await?;
+    let policy = state
+        .action_policy
+        .lock()
+        .map(|policy| policy.clone())
+        .map_err(|e| e.to_string())?;
+    // Route through the policy-aware path (was calling the raw `execute`, which
+    // bypassed ActionPolicy entirely). Approval-gated tools are surfaced, not run.
+    let result = page
+        .agent
+        .execute_with_policy(&prompt, &browser, &policy)
+        .await?;
+
+    if result.status == AgentRunStatus::AwaitingApproval {
+        if let (Some(tool_call), Some(approval_id)) =
+            (result.pending_tool_call.clone(), result.approval_id.clone())
+        {
+            state
+                .pending_approvals
+                .lock()
+                .map_err(|e| e.to_string())?
+                .insert(
+                    result.run_id.clone(),
+                    PendingApproval {
+                        session_id,
+                        page_id,
+                        tool_call,
+                        approval_id,
+                    },
+                );
+        }
+    }
+
+    let tools_used = result
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            AgentRunEvent::ToolCallResult { tool, .. } => Some(tool.clone()),
+            _ => None,
+        })
+        .collect();
+    let response = result.final_response.clone().unwrap_or_else(|| match result.status {
+        AgentRunStatus::AwaitingApproval => {
+            "This action needs your approval before it can run.".to_string()
+        }
+        AgentRunStatus::Blocked => "This action was blocked by the active policy.".to_string(),
+        _ => String::new(),
+    });
 
     Ok(AskResult {
         response,
-        tools_used: vec![],
-        iterations: 1,
+        tools_used,
+        iterations: result.iterations,
     })
 }
 

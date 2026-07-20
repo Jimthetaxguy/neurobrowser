@@ -190,6 +190,25 @@ impl ActionPolicy {
             );
         }
 
+        // Navigation to hostless schemes (javascript:/data:/file:/...) can't be
+        // governed by the domain allow/deny list (target_domain returns None for
+        // them), so it must be guarded explicitly rather than silently skipped.
+        if tool_name.eq_ignore_ascii_case("navigate") {
+            if let Some(scheme) = arguments
+                .get("url")
+                .and_then(|url| unsafe_navigation_scheme(url))
+            {
+                reasons.push(format!("Navigation to a '{scheme}:' URL is blocked"));
+                flags.push(RiskFlag::DomainDenied);
+                return PolicyDecision::with_outcome(
+                    PolicyOutcome::Block,
+                    reasons,
+                    flags,
+                    redacted_arguments,
+                );
+            }
+        }
+
         if let Some(domain) = target_domain(tool_name, arguments, snapshot) {
             if self
                 .denied_domains
@@ -340,12 +359,19 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
-    let text = snapshot
-        .text
-        .as_deref()
-        .or(snapshot.html.as_deref())
-        .unwrap_or_default()
-        .to_lowercase();
+    // Scan BOTH the rendered text AND the raw HTML. Injection payloads are often
+    // hidden in attributes/comments that never become DOM text nodes; the previous
+    // `text.or(html)` left the HTML branch dead (text is virtually always present),
+    // so attribute/comment-hidden payloads were invisible to the detector.
+    let mut haystack = String::new();
+    if let Some(text) = snapshot.text.as_deref() {
+        haystack.push_str(text);
+        haystack.push('\n');
+    }
+    if let Some(html) = snapshot.html.as_deref() {
+        haystack.push_str(html);
+    }
+    let text = haystack.to_lowercase();
     [
         "ignore previous instructions",
         "ignore all previous instructions",
@@ -359,6 +385,17 @@ fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
     ]
     .iter()
     .any(|pattern| text.contains(pattern))
+}
+
+/// Returns the scheme (without the trailing colon) when `url` uses one that must
+/// never be navigated to programmatically. These execute script or read local
+/// resources and carry no host, so the domain allow/deny list cannot govern them.
+fn unsafe_navigation_scheme(url: &str) -> Option<String> {
+    let lowered = url.trim().to_ascii_lowercase();
+    ["javascript", "data", "vbscript", "file", "blob"]
+        .into_iter()
+        .find(|scheme| lowered.starts_with(&format!("{scheme}:")))
+        .map(str::to_string)
 }
 
 fn target_domain(
