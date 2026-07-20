@@ -6,15 +6,26 @@
     "gate": { "fmt_ok": false, "clippy_ok": true, "test_ok": true, "tauri_ok": true },
     "panel": { "unwrap_count": 31, "expect_count": 22, "clone_count": 133, "todo_fixme_count": 0, "unsafe_count": 0, "src_loc": 6475, "tests_passed": 52 }
   },
-  "best_run": 4,
-  "current_run": 4,
+  "best_run": 5,
+  "current_run": 5,
   "next_mutation": {
-    "target": "SG3b correctness P0s (remaining) + candidate per-tool-risk reprioritization",
+    "target": "FA-8 honesty/operability batch: wire ProviderConfig.base_url into the OpenAI + Anthropic request URLs (currently a dead field, verified openai.rs:55 / anthropic.rs:103); fix RUST_LOG so it works (replace the hardcoded env-filter string literal with EnvFilter::from_default_env() in src-tauri/src/main.rs + bin/headless.rs).",
     "operator": "fix-with-test",
-    "hypothesis": "SG3b: no-op interactive tools report success (browser/mod.rs:194), dead dom_snapshot/accessibility_tree never reach the prompt (agent/mod.rs:487). Candidate pull-up (pending James): wire RiskLevel into ActionPolicy (dead-risklevel P1) + fail-safe default tool risk (default-tool-risk-low P2) — validated by external macos-mcp-rs real-world review.",
-    "process_note": "Do NOT kill concurrent cargo builds — it corrupts the incremental target dir and yields stale/false test results (observed in run 4 diagnosis). Run one gate at a time; let it finish."
+    "hypothesis": "Same 'reports success but no-ops' honesty class as the SG3b interactive-tool fix, one layer down: pointing OpenAI/Custom at Azure/a gateway silently does nothing, and RUST_LOG=debug has no effect. Small, verified, high-signal. Then the FA-10 enabling code-health slice, then FA-6 runtime robustness — per the substrate-first re-sequenced roadmap.",
+    "process_note": "Do NOT kill concurrent cargo builds — it corrupts the incremental target dir and yields stale/false test results (observed in run 4 diagnosis). Run one gate at a time; let it finish. Full gate = cargo fmt --check + cargo clippy --all-targets -D warnings + cargo test --all-targets + CARGO_TARGET_DIR=/tmp/neurobrowser-tauri-target cargo check --manifest-path src-tauri/Cargo.toml."
   },
   "runs": [
+    {
+      "run": 5,
+      "operator": "fix-with-test (SG3b part 1) + goal-expansion workflow",
+      "target": "src/browser/mod.rs; docs/goals/*",
+      "target_metric": "interactive actions on the static BrowserEngine return an honest, actionable error instead of a fake Ok(); goals expanded from 5 focus areas to 10 (FA-6..10) via a grounded 8-dimension quality audit",
+      "change": "browser/mod.rs: click/type_text/submit_form/scroll_to/scroll_by now return static_interaction_error (distinguishes invalid-selector / no-match / found-but-uneffective) instead of logging a 'fallback' and returning Ok(()); type_text no longer touches the sensitive value; +3 unit tests on the pure helper. Expansion: 9-agent read-only workflow produced 52 grounded findings across reliability/perf/observability/dx/packaging/config/state/code-health; synthesized into FA-6 (Runtime Robustness), FA-7 (Durable State), FA-8 (Operability), FA-9 (Distribution), FA-10 (Code Health) + FA-1..5 enrichments + a substrate-first 8-step roadmap. Raw audit in docs/goals/quality-audit-2026-07-20.md.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Full gate green: fmt clean, clippy --all-targets -D warnings clean, 63 tests pass (60+3), src-tauri check clean. Commit ce29e7a. base_url + RUST_LOG claims independently re-verified before enshrining in the docs.",
+      "timestamp": "2026-07-20"
+    },
     {
       "run": 0,
       "operator": "baseline",

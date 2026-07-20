@@ -13,7 +13,8 @@ related_artifacts:
   - docs/goals/optimization-backlog-2026-07-20.md   # 69 confirmed + 4 plausible existing-code optimizations
   - docs/goals/feature-backlog-2026-07-20.md         # 18 ranked net-new features + patterns + prior-art resolutions
   - docs/specs/programmatic-surface-design-2026-07-20.md  # wired daemon + MCP + CLI + library API design
-  - docs/goals/focus-areas-2026-07-20.md             # the 5 key focus areas for NeuroBrowser
+  - docs/goals/focus-areas-2026-07-20.md             # 10 focus areas (FA-1..5 + FA-6..10 end-to-end expansion) + roadmap
+  - docs/goals/quality-audit-2026-07-20.md           # raw grounded 8-dimension audit (52 findings) behind FA-6..10
   - .autoresearch/config.json                        # loop config (gate + fitness panel)
   - .autoresearch/eval.sh                            # offline measurement harness
   - .autoresearch/state.json                         # run log / disk-persisted loop state
@@ -101,13 +102,28 @@ Validation set (canary — must stay green every cycle): the 8 files under `test
 | SG1 | Provider correctness P0 | Anthropic `system` key + finish_reason normalization; multi-block parse | **complete (iter 2)** |
 | SG2 | Security P0 batch | injection HTML scan, scheme/SSRF guards, `ask`/`navigate` policy, headless socket chmod (+ authz follow-up) | **complete (iter 3)** |
 | SG3a | Correctness P0 (part a) | stale post-nav URL, spawn_worker pin (+ lock-scope P1) | **complete (iter 4)** |
-| SG3b | Correctness P0 (part b) | no-op interactive tools report success, dead `dom_snapshot`/accessibility_tree | queued |
+| SG3b | Correctness P0 (part b) | **part a done (iter 5):** static-engine interactive tools now error honestly instead of faking `Ok`. **Part b queued:** wire real page structure/selectors (`dom_snapshot`) into the prompt (also FA-4). | **part a complete (iter 5)** |
+| SG-expand | Goals expansion (this Goal itself) | 8-dimension end-to-end quality workflow → FA-6..10 + FA-1..5 enrichments + substrate-first roadmap; raw audit persisted | **complete (iter 5)** |
+| SG-fa8 | FA-8 honesty/operability (next) | wire `base_url` into OpenAI/Anthropic request URL; fix `RUST_LOG` (from_default_env) | **next** |
 | SG-risk | Per-tool risk (candidate pull-up) | wire `RiskLevel` into ActionPolicy (P1), fail-safe default tool risk (P2) — validated by external review | proposed |
 | SG4 | P1 sweep | memory bound, stream run_id/args, key+value redaction, blocking reqwest→async, tool-list from registry | queued |
 | SG5 | Net-new specs | Graduate NB-1/2/3/5/6 into `docs/specs/` + `docs/stories/` | queued |
 | SG6 | Doc reconciliation | AIAnytime, fastrender, PROJECT.md observability claim | queued |
 
+> **Roadmap note (2026-07-20 expansion).** The FA-6…FA-10 audit re-sequenced the strategy
+> **substrate-first** (code-health → observability → robustness → durability → distribution →
+> secure → callable → functional depth). SG4/SG5/SG6 remain valid; the new FA-6/7/9/10 work
+> (cancellation, persistence, cross-platform CI, structural split) is folded into that ordering.
+> See [focus-areas](./focus-areas-2026-07-20.md) "Re-sequenced roadmap".
+
 ## Run Log (reverse-chronological)
+
+### Iteration 5 — 2026-07-20 — KEEP — `interactive-honesty (SG3b-a)` + `goals-expansion`
+- **Operator:** fix-with-test + a read-only breadth workflow. Two threads, one gate.
+- **Code (SG3b part a):** `src/browser/mod.rs` — the static `BrowserEngine`'s `click`/`type_text`/`submit_form`/`scroll_to`/`scroll_by` logged a "fallback" and returned `Ok(())`, so the tool layer reported success for an action that never happened (an agent that lies about acting is worse than one that errors). They now return `static_interaction_error`, which distinguishes an invalid selector, a selector that matches nothing, and a real element the static engine simply cannot act on — an actionable signal the ReAct loop can adapt to. `type_text` no longer touches the sensitive value. **+3 unit tests** on the pure helper (sidestepping the documented `BrowserEngine`-in-`#[tokio::test]` runtime panic). Commit `ce29e7a`.
+- **Goals expansion:** a 9-agent read-only workflow audited 8 end-to-end quality dimensions (reliability, performance, observability, DX/API, packaging, config/secrets, state/concurrency, code-health) → **52 grounded findings** → synthesized into **FA-6 Runtime Robustness · FA-7 Durable State · FA-8 Operability · FA-9 Distribution · FA-10 Code Health**, plus enrichments to FA-1…5 and a **substrate-first re-sequenced roadmap**. Raw audit persisted at [quality-audit-2026-07-20.md](./quality-audit-2026-07-20.md); synthesis folded into [focus-areas](./focus-areas-2026-07-20.md). Two load-bearing findings (`base_url` dead field, `RUST_LOG` no-op) independently re-verified before enshrining.
+- **Tests:** 60 → **63**. **Gate:** fmt / clippy `-D warnings` / `cargo test --all-targets` (63 pass) / `src-tauri` check — all green.
+- **Next:** FA-8 `base_url` + `RUST_LOG` honesty/operability fixes (same "reports success but no-ops" class, one layer down).
 
 ### Iteration 4 — 2026-07-20 — KEEP — `correctness-p0-part-a` (SG3a)
 - **Operator:** fix-with-test. **Closed 2 correctness P0s (+ folded-in P1/P2):**
