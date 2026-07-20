@@ -118,6 +118,13 @@ Validation set (canary — must stay green every cycle): the 8 files under `test
 
 ## Run Log (reverse-chronological)
 
+### Iteration 6 — 2026-07-20 — KEEP — `base_url + RUST_LOG honesty/operability` (FA-8)
+- **Operator:** fix-with-test. Two "reports success but silently no-ops" defects — the same class as iteration 5's interactive-tool fix, one layer down.
+  1. `ProviderConfig.base_url` (from `CUSTOM_PROVIDER_BASE_URL`) was read into config but **ignored** — OpenAI/Anthropic hardcoded the request URL — so pointing OpenAI/Custom at Azure, a gateway, or a proxy did nothing. Added a shared `resolve_endpoint(base_url, default_origin, path)` (origin override, trailing-slash trim, blank fallback), wired into both providers (`Custom` routes through OpenAI, so covered). **+3 unit tests.**
+  2. `RUST_LOG` had no effect: the tracing env-filter was a hardcoded string literal in `main.rs` + `headless.rs`. Now `EnvFilter::try_from_default_env()` with the literal as fallback, so `RUST_LOG=debug` raises verbosity without a rebuild.
+- **Tests:** 63 → **66**. **Gate:** fmt / clippy `-D warnings` / `cargo test --all-targets` (66) / `src-tauri` check — all green. Commit `0d4e814`.
+- **Next:** FA-8 observability wiring (dead tracing spans + `PolicyDecision` logging) — makes the downstream robustness/durability work debuggable.
+
 ### Iteration 5 — 2026-07-20 — KEEP — `interactive-honesty (SG3b-a)` + `goals-expansion`
 - **Operator:** fix-with-test + a read-only breadth workflow. Two threads, one gate.
 - **Code (SG3b part a):** `src/browser/mod.rs` — the static `BrowserEngine`'s `click`/`type_text`/`submit_form`/`scroll_to`/`scroll_by` logged a "fallback" and returned `Ok(())`, so the tool layer reported success for an action that never happened (an agent that lies about acting is worse than one that errors). They now return `static_interaction_error`, which distinguishes an invalid selector, a selector that matches nothing, and a real element the static engine simply cannot act on — an actionable signal the ReAct loop can adapt to. `type_text` no longer touches the sensitive value. **+3 unit tests** on the pure helper (sidestepping the documented `BrowserEngine`-in-`#[tokio::test]` runtime panic). Commit `ce29e7a`.

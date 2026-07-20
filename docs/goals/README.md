@@ -31,16 +31,19 @@ gated green (`verify.sh`) and committed per phase.
 | `0247d49` | — | Programmatic-surface design doc |
 | `c951ef0` | — | Focus areas (FA-1…5) + docs index |
 | `ce29e7a` | SG3b | Interactive-tool honesty — static engine errors instead of faking success |
+| `2c3d579` | — | Goals expanded to FA-6…10 (end-to-end quality charter) + raw audit |
+| `0d4e814` | FA-8 | `base_url` honored + `RUST_LOG` works (honesty/operability) |
 
-Tests: 55 → **63** (14 new regression tests). Security P0s open: 6 → **0**.
+Tests: 55 → **66** (17 new regression tests). Security P0s open: 6 → **0**.
 
 **Goals expanded 2026-07-20:** an 8-dimension end-to-end quality workflow (9 agents, 52 grounded
 findings) added **FA-6…FA-10** (Runtime Robustness · Durable State · Operability · Distribution ·
 Code Health) + enrichments to FA-1…5 + a substrate-first re-sequenced roadmap. See
 [focus-areas](./focus-areas-2026-07-20.md) + [quality-audit](./quality-audit-2026-07-20.md).
 
-**Next (per the re-sequenced roadmap):** `base_url` + `RUST_LOG` honesty/operability fixes (FA-8,
-immediate next iter), then the FA-10 enabling code-health slice, then FA-6 runtime robustness.
+**Next (per the re-sequenced roadmap):** FA-8 observability wiring (wire the dead tracing spans +
+log every `PolicyDecision`) so the downstream robustness/durability work is debuggable, then the
+FA-10 enabling code-health slice, then FA-6 runtime robustness.
 
 ## Follow-up tasks spun off
 
