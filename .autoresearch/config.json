@@ -1,0 +1,32 @@
+{
+  "target": "NeuroBrowser Rust codebase (composite: src/ + src-tauri/src/)",
+  "scope": "Optimize existing code — correctness, maintainability, performance, observability, security — without regressing the green verify gate or changing external behavior.",
+  "context": "Must keep verify.sh green (fmt clean; clippy --all-targets -D warnings clean; cargo test --all-targets all pass; src-tauri cargo check clean). Real-systems-only (no mock providers/browser in product paths). No new dependencies without explicit justification. Every change surgical, reviewable, and behavior-preserving unless the run is an explicit behavior fix with a test. Mutate from the last KEEP, never a discard.",
+  "gate_criteria": [
+    "C1: cargo fmt -- --check is clean",
+    "C2: cargo clippy --all-targets -- -D warnings is clean",
+    "C3: cargo test --all-targets — all tests pass, none removed/ignored to pass",
+    "C4: cargo check --manifest-path src-tauri/Cargo.toml is clean"
+  ],
+  "fitness_panel": {
+    "minimize": ["pedantic_warnings", "unwrap_count", "expect_count", "clone_count", "todo_fixme_count", "allow_attr_count"],
+    "maximize": ["tests_passed"],
+    "note": "Each loop iteration targets ONE backlog item with its own objective metric (from optimizations backlog in the Goal artifact). The gate is the universal hard floor: any candidate with gate_pass=false is DISCARDED regardless of panel movement. KEEP requires gate_pass=true AND the target metric improved AND no panel regression AND validation set green."
+  },
+  "eval_command": ".autoresearch/eval.sh",
+  "eval_command_quick": ".autoresearch/eval.sh --quick",
+  "validation_set": [
+    "tests/action_policy.rs",
+    "tests/agent_memory_metrics.rs",
+    "tests/autonomous_agent.rs",
+    "tests/error_types.rs",
+    "tests/headless_daemon.rs",
+    "tests/streaming.rs",
+    "tests/streaming_agent.rs",
+    "tests/workers.rs"
+  ],
+  "max_runs": 30,
+  "plateau_threshold": 10,
+  "branch": "agent/claude-autoresearch-optimize-2026-07-20",
+  "goal_artifact": "docs/goals/goal-autoresearch-optimize-2026-07-20.md"
+}

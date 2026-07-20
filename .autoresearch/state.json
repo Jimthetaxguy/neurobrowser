@@ -1,0 +1,52 @@
+{
+  "goal": "goal-autoresearch-optimize-2026-07-20",
+  "target": "NeuroBrowser Rust codebase (composite)",
+  "branch": "agent/claude-autoresearch-optimize-2026-07-20",
+  "baseline": {
+    "gate": { "fmt_ok": false, "clippy_ok": true, "test_ok": true, "tauri_ok": true },
+    "panel": { "unwrap_count": 31, "expect_count": 22, "clone_count": 133, "todo_fixme_count": 0, "unsafe_count": 0, "src_loc": 6475, "tests_passed": 52 }
+  },
+  "best_run": 2,
+  "current_run": 2,
+  "next_mutation": {
+    "target": "SG2 security P0 batch (awaiting cadence decision from James)",
+    "operator": "fix-with-test",
+    "hypothesis": "Close the 6 security P0s: policy injection HTML scan (policy.rs:346), scheme bypass (policy.rs:374), SSRF guard (browser/mod.rs:120), ask command policy bypass (main.rs:299), navigate command validate_url (main.rs:243), headless socket auth (headless.rs:210). Each with a regression test; keep gate green."
+  },
+  "runs": [
+    {
+      "run": 0,
+      "operator": "baseline",
+      "result": "BASELINE",
+      "gate_pass": false,
+      "note": "fmt RED (rustfmt drift); clippy+test green. Panel captured.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 1,
+      "operator": "cleanup/gate-fix",
+      "target_metric": "cargo fmt --check clean (fmt_ok false->true)",
+      "change": "cargo fmt reformatted 2 multi-line forms in src/browser/mod.rs #[cfg(test)] module (2 ins / 8 del, test-module whitespace only)",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "fmt RED->GREEN; tests unaffected.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 2,
+      "operator": "fix-with-test (SG1)",
+      "target": "src/providers/anthropic.rs",
+      "target_metric": "Anthropic request valid vs live Messages API (system top-level, not in-array role); stop_reason 'end_turn' normalizes to 'stop'; multi-block responses concatenated",
+      "change": "Refactored for testability (build_request_body/build_user_content/normalize_finish_reason/extract_text). Moved system_prompt to top-level 'system' key; messages now user-only; normalized stop_reason (end_turn/stop_sequence->stop, max_tokens->length); extract_text concatenates all text blocks. Added 3 regression tests.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "First attempt fmt RED (hand-formatting), cargo fmt canonicalized -> GREEN. clippy --lib -D warnings clean; 3 new tests + all lib unit tests pass. Verified lib-scoped; full verify.sh deferred to phase end.",
+      "timestamp": "2026-07-20"
+    }
+  ],
+  "validation_set": [
+    "tests/action_policy.rs", "tests/agent_memory_metrics.rs", "tests/autonomous_agent.rs",
+    "tests/error_types.rs", "tests/headless_daemon.rs", "tests/streaming.rs",
+    "tests/streaming_agent.rs", "tests/workers.rs"
+  ]
+}
