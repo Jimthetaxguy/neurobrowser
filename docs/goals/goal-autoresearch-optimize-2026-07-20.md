@@ -9,8 +9,11 @@ created: 2026-07-20
 branch: agent/claude-autoresearch-optimize-2026-07-20
 loop: autoresearch (.autoresearch/, KEEP/DISCARD on green gate)
 related_artifacts:
+  - docs/goals/README.md                             # index + live status of this optimization effort
   - docs/goals/optimization-backlog-2026-07-20.md   # 69 confirmed + 4 plausible existing-code optimizations
   - docs/goals/feature-backlog-2026-07-20.md         # 18 ranked net-new features + patterns + prior-art resolutions
+  - docs/specs/programmatic-surface-design-2026-07-20.md  # wired daemon + MCP + CLI + library API design
+  - docs/goals/focus-areas-2026-07-20.md             # the 5 key focus areas for NeuroBrowser
   - .autoresearch/config.json                        # loop config (gate + fitness panel)
   - .autoresearch/eval.sh                            # offline measurement harness
   - .autoresearch/state.json                         # run log / disk-persisted loop state

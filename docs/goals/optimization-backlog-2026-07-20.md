@@ -7,6 +7,18 @@
 **Coverage gap:** the *tests* subsystem's verification pass hit the StructuredOutput retry cap and is not included here; its concerns are largely covered by feature items NB-5/NB-6/NB-14 (eval harness). Re-run separately for a dedicated test-coverage backlog.
 
 
+## Status (updated 2026-07-20)
+
+**Shipped so far** (branch `agent/claude-autoresearch-optimize-2026-07-20`, each gated green + committed):
+- **SG1** — Anthropic provider correctness (`system` key, `finish_reason` normalization, multi-block parse). Commit `dfecd0e`.
+- **SG2** — all 6 **security P0s**: injection HTML scan, `javascript:`/`data:` scheme block, SSRF guard, `navigate`/`ask` policy enforcement, socket chmod. Commit `78fb62b`. (Full socket peer-cred authz spun off as a follow-up task.)
+- **SG3a** — 2 correctness P0s: stale post-navigation URL, `spawn_worker` page-pin (+ a folded-in lock-scope P1). Commit `7f6641c`.
+- **Iteration 1** — fmt gate fix. Commit `ce64c46`.
+
+**Remaining P0s** (next): the interactive-tool no-ops (`browser/mod.rs` click/type/scroll report success without acting) and the dead `dom_snapshot`/accessibility_tree wiring (SG3b), plus the native provider tool-calling migration (its own track).
+
+See [README.md](./README.md) for the live dashboard and [focus-areas-2026-07-20.md](./focus-areas-2026-07-20.md) for how these map to strategic priorities.
+
 ## P0 - correctness / security (do first) (13)
 
 - [ ] **[correctness] agent-loop** — Agent state's current_url/page_title are updated from the pre-tool-execution snapshot, not post-execution, so the LLM is perpetually told a stale URL after any navigating tool
