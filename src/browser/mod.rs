@@ -51,6 +51,34 @@ fn get_price_regex() -> &'static Regex {
     PRICE_REGEX.get_or_init(|| Regex::new(r"\$[\d,]+(?:\.\d{1,2})?").expect("invalid price regex"))
 }
 
+/// Honest failure for an interactive action attempted on the static HTTP engine.
+///
+/// `BrowserEngine` fetches and parses HTML but renders no live DOM and executes
+/// no JavaScript, so click/type/submit/scroll cannot actually happen. Returning
+/// `Ok(())` would be a lie: the tool layer reports success for an action that
+/// never occurred, and the agent then proceeds on a false premise (FA-2 "engine
+/// honesty"). Instead we return an actionable error, distinguishing an invalid
+/// selector, a selector that matches nothing, and a real element this engine
+/// simply cannot act on — so the ReAct loop gets a signal it can adapt to.
+fn static_interaction_error(html: &str, action: &str, selector: &str) -> String {
+    match Selector::parse(selector) {
+        Err(_) => format!("Cannot {action}: invalid CSS selector '{selector}'"),
+        Ok(parsed) => {
+            if Html::parse_document(html).select(&parsed).next().is_some() {
+                format!(
+                    "Cannot {action} '{selector}': the static HTTP engine renders no live DOM \
+                     and executes no JavaScript, so interactive actions have no effect. Use the \
+                     interactive runtime to {action}."
+                )
+            } else {
+                format!(
+                    "Cannot {action}: no element matches selector '{selector}' on the current page"
+                )
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageConfig {
     pub viewport_width: u32,
@@ -230,37 +258,35 @@ impl BrowserInterface for BrowserEngine {
     }
 
     async fn click(&self, selector: &str) -> Result<(), String> {
-        tracing::info!("Static browser click fallback: {}", selector);
-        Ok(())
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "click", selector))
     }
 
-    async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
-        // `text` is the `.sensitive(true)` typed value (see `TypeTool`'s
-        // argument definition) — never log it verbatim, since tracing
-        // output flows to the log sink. Log a length-based confirmation
-        // instead, matching the redaction already applied to
-        // `TypeTool::execute`'s result string.
-        tracing::info!(
-            "Static browser type fallback: {} characters -> {}",
-            text.chars().count(),
-            selector
-        );
-        Ok(())
+    async fn type_text(&self, selector: &str, _text: &str) -> Result<(), String> {
+        // `_text` is the `.sensitive(true)` typed value (see `TypeTool`'s
+        // argument definition); it is intentionally unused and never logged,
+        // since tracing output flows to the log sink. The static engine cannot
+        // type into a live DOM, so report that honestly instead of the old
+        // success-reporting no-op.
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "type into", selector))
     }
 
     async fn submit_form(&self, selector: &str) -> Result<(), String> {
-        tracing::info!("Static browser submit fallback: {}", selector);
-        Ok(())
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "submit", selector))
     }
 
     async fn scroll_to(&self, selector: &str) -> Result<(), String> {
-        tracing::info!("Static browser scroll_to fallback: {}", selector);
-        Ok(())
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "scroll to", selector))
     }
 
     async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String> {
-        tracing::info!("Static browser scroll_by fallback: {}, {}", x, y);
-        Ok(())
+        Err(format!(
+            "Cannot scroll by ({x}, {y}): the static HTTP engine has no live viewport, so \
+             scrolling has no effect. Use the interactive runtime to scroll."
+        ))
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
@@ -1300,6 +1326,41 @@ mod tests {
             !result.result.contains("super-secret-value-42"),
             "type tool result leaked the raw sensitive text: {}",
             result.result
+        );
+    }
+
+    #[test]
+    fn static_interaction_error_reports_matched_element_as_uneffective() {
+        // Element exists, but the static engine still cannot act on it: the
+        // message must say so honestly rather than imply success.
+        let html = r#"<html><body><button id="go">Go</button></body></html>"#;
+        let message = static_interaction_error(html, "click", "#go");
+        assert!(
+            message.contains("no live DOM") && message.contains("click"),
+            "matched-element error should explain the engine cannot act: {message}"
+        );
+        assert!(
+            !message.contains("successfully"),
+            "honest error must not imply success: {message}"
+        );
+    }
+
+    #[test]
+    fn static_interaction_error_reports_missing_element() {
+        let html = r#"<html><body><button id="go">Go</button></body></html>"#;
+        let message = static_interaction_error(html, "click", "#missing");
+        assert!(
+            message.contains("no element matches"),
+            "unmatched selector should say so: {message}"
+        );
+    }
+
+    #[test]
+    fn static_interaction_error_reports_invalid_selector() {
+        let message = static_interaction_error("<html></html>", "type into", ">>bad<<");
+        assert!(
+            message.contains("invalid CSS selector"),
+            "invalid selector should be flagged distinctly: {message}"
         );
     }
 }
