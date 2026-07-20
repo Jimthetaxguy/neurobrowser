@@ -6,12 +6,13 @@
     "gate": { "fmt_ok": false, "clippy_ok": true, "test_ok": true, "tauri_ok": true },
     "panel": { "unwrap_count": 31, "expect_count": 22, "clone_count": 133, "todo_fixme_count": 0, "unsafe_count": 0, "src_loc": 6475, "tests_passed": 52 }
   },
-  "best_run": 3,
-  "current_run": 3,
+  "best_run": 4,
+  "current_run": 4,
   "next_mutation": {
-    "target": "SG3 correctness P0 batch",
+    "target": "SG3b correctness P0s (remaining) + candidate per-tool-risk reprioritization",
     "operator": "fix-with-test",
-    "hypothesis": "stale post-nav URL fed to model (agent/mod.rs:333), no-op interactive tools report success (browser/mod.rs:194), dead dom_snapshot/accessibility_tree never reach the prompt (agent/mod.rs:487), spawn_worker never resolves pinned_page_id (session/mod.rs:189). Each with a regression test; keep gate green."
+    "hypothesis": "SG3b: no-op interactive tools report success (browser/mod.rs:194), dead dom_snapshot/accessibility_tree never reach the prompt (agent/mod.rs:487). Candidate pull-up (pending James): wire RiskLevel into ActionPolicy (dead-risklevel P1) + fail-safe default tool risk (default-tool-risk-low P2) — validated by external macos-mcp-rs real-world review.",
+    "process_note": "Do NOT kill concurrent cargo builds — it corrupts the incremental target dir and yields stale/false test results (observed in run 4 diagnosis). Run one gate at a time; let it finish."
   },
   "runs": [
     {
@@ -30,6 +31,17 @@
       "result": "KEEP",
       "gate_pass": true,
       "note": "fmt RED->GREEN; tests unaffected.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 4,
+      "operator": "fix-with-test (SG3a correctness P0s)",
+      "target": "src/agent/mod.rs, src/session/mod.rs",
+      "target_metric": "model sees POST-navigation URL next iteration (was fed stale pre-exec snapshot URL); spawn_worker rejects an unknown pinned_page_id (was silently binding to a non-existent page)",
+      "change": "agent/mod.rs: re-snapshot AFTER tool execution (outside the state lock) to update state.current_url/page_title, so a navigating tool updates what the model sees next iteration. session/mod.rs: spawn_worker validates pinned_page_id against session.pages (Err if absent), resolves None->active_page, and builds the agent before taking the sessions lock (folds in a P1 lock-scope fix); removed now-stale #[allow(dead_code)] on active_page. +2 regression tests.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Clean gate green: fmt, clippy -D warnings, 60 tests pass (58+2), tauri check. NOTE: an earlier gate falsely reported the stale-URL test failing due to a corrupted incremental build after concurrent cargo processes were killed; fix confirmed correct via instrumentation + clean rebuild.",
       "timestamp": "2026-07-20"
     },
     {

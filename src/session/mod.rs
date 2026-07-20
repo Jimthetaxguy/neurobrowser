@@ -20,7 +20,6 @@ struct SessionState {
     id: String,
     created_at: u64,
     pages: Vec<PageHandle>,
-    #[allow(dead_code)]
     active_page: Option<usize>,
     workers: HashMap<String, WorkerHandle>,
     inbox: Vec<WorkerMessage>,
@@ -186,17 +185,37 @@ impl SessionManager {
     /// of either an explicitly pinned page or, if `pinned_page_id` is
     /// None, the session's currently-active page. Returns a `WorkerHandle`
     /// with a fresh `worker_id`.
-    pub fn spawn_worker(&self, session_id: &str, spec: WorkerSpec) -> Result<WorkerHandle, String> {
+    pub fn spawn_worker(
+        &self,
+        session_id: &str,
+        mut spec: WorkerSpec,
+    ) -> Result<WorkerHandle, String> {
+        // Build the provider/agent BEFORE taking the global sessions lock
+        // (mirrors create_page — don't do heavy construction under the lock).
+        let agent_config = self.agent_config.lock().map_err(|e| e.to_string())?.clone();
+        let provider = create_provider(&agent_config.provider_config);
+        let agent = Arc::new(ReActAgent::new(agent_config, provider));
+
         let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| "Session not found".to_string())?;
 
-        let agent_config = self.agent_config.lock().map_err(|e| e.to_string())?.clone();
-        let provider = create_provider(&agent_config.provider_config);
-        let agent = Arc::new(ReActAgent::new(agent_config, provider));
+        // Bind the worker to a page: an explicit pin must refer to a real page;
+        // otherwise inherit the session's active page. Previously `pinned_page_id`
+        // was never read, so a worker could silently bind to a non-existent page
+        // despite the doc comment promising otherwise.
+        spec.pinned_page_id = match spec.pinned_page_id {
+            Some(pid) => {
+                if !session.pages.iter().any(|page| page.id == pid) {
+                    return Err(format!("Page {pid} not found in session"));
+                }
+                Some(pid)
+            }
+            None => session.active_page,
+        };
 
-        let handle = WorkerHandle::new(session_id.to_string(), spec, agent.clone());
+        let handle = WorkerHandle::new(session_id.to_string(), spec, agent);
         session
             .workers
             .insert(handle.worker_id.clone(), handle.clone());

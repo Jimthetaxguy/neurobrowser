@@ -324,14 +324,17 @@ impl ReActAgent {
                     success,
                 };
 
+                // Re-snapshot AFTER the tool ran so a navigating tool updates the
+                // url/title the model sees on the next iteration. The pre-execution
+                // `snapshot` (used above for policy evaluation) is stale here after
+                // a navigate. Taken outside the state lock to avoid holding it
+                // across `.await`.
+                let post_snapshot = browser.snapshot().await?;
                 {
                     let mut state = self.state.lock().map_err(|e| e.to_string())?;
                     state.tool_results.push(tool_result);
-                    // Reflect the latest navigation state from the browser so
-                    // build_context sees fresh url/title/scroll on the next
-                    // iteration without needing a full re-snapshot.
-                    state.current_url = snapshot.url.clone();
-                    state.page_title = snapshot.title.clone();
+                    state.current_url = post_snapshot.url;
+                    state.page_title = post_snapshot.title;
                     state.iterations = iteration + 1;
                 }
             }

@@ -68,6 +68,34 @@ fn spawn_worker_yields_unique_id_and_lists_in_session() {
 }
 
 #[test]
+fn spawn_worker_with_unknown_pinned_page_errors() {
+    let manager = SessionManager::new(
+        PageConfig::default(),
+        AgentConfig {
+            max_iterations: 5,
+            provider_config: stub_provider_config(),
+        },
+    );
+    let sid = manager.create_session();
+    // No pages exist in this fresh session, so pinning page 999 must fail rather
+    // than silently binding the worker to a non-existent page.
+    let result = manager.spawn_worker(
+        &sid,
+        WorkerSpec {
+            name: "pinned".to_string(),
+            goal: String::new(),
+            policy: ActionPolicy::default(),
+            max_iterations: 1,
+            pinned_page_id: Some(999),
+        },
+    );
+    match result {
+        Err(e) => assert!(e.contains("not found"), "unexpected error: {e}"),
+        Ok(_) => panic!("expected spawn_worker to reject an unknown pinned page"),
+    }
+}
+
+#[test]
 fn get_worker_returns_snapshot_with_goal_and_policy() {
     let manager = SessionManager::new(
         PageConfig::default(),

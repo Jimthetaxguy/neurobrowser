@@ -97,12 +97,22 @@ Validation set (canary — must stay green every cycle): the 8 files under `test
 | SG0 | Baseline + charter | Verify real state, branch, harness, backlogs, this Goal | **complete** |
 | SG1 | Provider correctness P0 | Anthropic `system` key + finish_reason normalization; multi-block parse | **complete (iter 2)** |
 | SG2 | Security P0 batch | injection HTML scan, scheme/SSRF guards, `ask`/`navigate` policy, headless socket chmod (+ authz follow-up) | **complete (iter 3)** |
-| SG3 | Correctness P0 batch | stale post-nav URL, no-op interactive tools, unused dom_snapshot, spawn_worker pin | in progress |
+| SG3a | Correctness P0 (part a) | stale post-nav URL, spawn_worker pin (+ lock-scope P1) | **complete (iter 4)** |
+| SG3b | Correctness P0 (part b) | no-op interactive tools report success, dead `dom_snapshot`/accessibility_tree | queued |
+| SG-risk | Per-tool risk (candidate pull-up) | wire `RiskLevel` into ActionPolicy (P1), fail-safe default tool risk (P2) — validated by external review | proposed |
 | SG4 | P1 sweep | memory bound, stream run_id/args, key+value redaction, blocking reqwest→async, tool-list from registry | queued |
 | SG5 | Net-new specs | Graduate NB-1/2/3/5/6 into `docs/specs/` + `docs/stories/` | queued |
 | SG6 | Doc reconciliation | AIAnytime, fastrender, PROJECT.md observability claim | queued |
 
 ## Run Log (reverse-chronological)
+
+### Iteration 4 — 2026-07-20 — KEEP — `correctness-p0-part-a` (SG3a)
+- **Operator:** fix-with-test. **Closed 2 correctness P0s (+ folded-in P1/P2):**
+  1. `agent/mod.rs` — the agent updated `state.current_url`/`page_title` from the **pre**-tool-execution snapshot, so after a `navigate` the model saw the **stale** URL next iteration. Now re-snapshots **after** the tool runs (outside the state lock).
+  2. `session/mod.rs` — `spawn_worker` never read `pinned_page_id` (its doc comment promised page-binding). Now validates the pin against `session.pages` (errors if absent), resolves `None`→active page, **and** constructs the agent before taking the sessions lock (folds in the P1 lock-scope fix); removed the now-stale `#[allow(dead_code)]` on `active_page`.
+- **Tests:** +2 regression (`post_navigation_url_reaches_model_next_iteration`, `spawn_worker_with_unknown_pinned_page_errors`).
+- **Result:** clean gate green — fmt, clippy `-D warnings`, **60 tests pass**, tauri check. **KEEP.**
+- **Process note:** an earlier gate falsely flagged the stale-URL test as failing — root cause was a **corrupted incremental build** after two concurrent `cargo` processes were killed. Fix was confirmed correct via instrumentation; lesson recorded in `state.json` (never kill concurrent cargo builds).
 
 ### Iteration 3 — 2026-07-20 — KEEP — `security-p0-batch` (SG2)
 - **Operator:** fix-with-test batch. **Closed all 6 security P0s:**
