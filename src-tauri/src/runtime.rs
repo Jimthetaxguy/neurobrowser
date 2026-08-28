@@ -658,6 +658,11 @@ impl TauriBrowserRuntime {
     }
 }
 
+/// How long a navigation may take before the runtime reports it did not complete.
+/// Generous enough for an ordinary slow page; short enough that a wedged load surfaces
+/// as an error the agent can act on rather than an indefinite hang.
+const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
+
 #[async_trait]
 impl BrowserInterface for TauriBrowserRuntime {
     async fn navigate(&self, url: &str) -> Result<(), String> {
@@ -672,7 +677,15 @@ impl BrowserInterface for TauriBrowserRuntime {
         }
         let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
         self.registry.set_loading(self.page_id, true);
-        self.webview()?.navigate(parsed).map_err(|e| e.to_string())
+        self.webview()?
+            .navigate(parsed)
+            .map_err(|e| e.to_string())?;
+        // Await the load before returning. Previously this returned as soon as the
+        // webview was TOLD to navigate, so a caller's next `snapshot()` raced the page
+        // transition: it could capture the old URL, or fail outright while the old
+        // document unloaded. Navigation is not complete until the page is ready, and
+        // the trait's contract is "navigate", not "start navigating".
+        self.wait_for_navigation().await
     }
 
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
@@ -768,7 +781,13 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn wait_for_navigation(&self) -> Result<(), String> {
-        self.wait_for_ready(3_000).await.or_else(|_| Ok(()))
+        // Honest failure. This previously swallowed the timeout with
+        // `.or_else(|_| Ok(()))`, so a page that never finished loading reported
+        // success and every caller proceeded on a false premise — the same
+        // silent-success family as the static engine's click/type/submit no-ops that
+        // this branch fixes elsewhere. A slow page is a real condition the caller is
+        // entitled to know about and can retry.
+        self.wait_for_ready(NAVIGATION_READY_TIMEOUT_MS).await
     }
 }
 
