@@ -8,44 +8,10 @@ use regex_lite::Regex;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 static PRICE_REGEX: OnceLock<Regex> = OnceLock::new();
-
-/// SSRF guard: returns `Some(reason)` when `url`'s host is (or resolves to) a
-/// loopback / private / link-local address. Agents can be steered to fetch
-/// arbitrary URLs from page content, so a same-host or cloud-metadata target
-/// (`169.254.169.254`) must be refused before any request leaves the process.
-fn ssrf_blocked_reason(url: &str) -> Option<String> {
-    use url::Host;
-    let parsed = url::Url::parse(url).ok()?;
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    let blocked_host = match parsed.host()? {
-        Host::Ipv4(ip) => is_blocked_ip(&IpAddr::V4(ip)).then(|| ip.to_string()),
-        Host::Ipv6(ip) => is_blocked_ip(&IpAddr::V6(ip)).then(|| ip.to_string()),
-        Host::Domain(domain) => (domain, port)
-            .to_socket_addrs()
-            .ok()?
-            .find(|addr| is_blocked_ip(&addr.ip()))
-            .map(|_| domain.to_string()),
-    };
-    blocked_host.map(|host| format!("Refusing to fetch internal/loopback address (host '{host}')"))
-}
-
-fn is_blocked_ip(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-        }
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
-    }
-}
 
 fn get_price_regex() -> &'static Regex {
     PRICE_REGEX.get_or_init(|| Regex::new(r"\$[\d,]+(?:\.\d{1,2})?").expect("invalid price regex"))
@@ -124,6 +90,11 @@ impl BrowserEngine {
         let http_client = reqwest::blocking::Client::builder()
             .user_agent(config.user_agent.clone())
             .timeout(std::time::Duration::from_secs(30))
+            // Every redirect hop is re-validated. Without this the guard below only
+            // inspects the URL we were ASKED for, and a public host answering
+            // `302 -> http://169.254.169.254/` is followed and its body returned as
+            // page content.
+            .redirect(crate::netguard::redirect_policy())
             .build()
             .expect("failed to create HTTP client");
 
@@ -179,12 +150,12 @@ impl BrowserEngine {
 #[async_trait]
 impl BrowserInterface for BrowserEngine {
     async fn navigate(&self, url: &str) -> Result<(), String> {
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err("Only http:// and https:// URLs are allowed".to_string());
-        }
-        if let Some(reason) = ssrf_blocked_reason(url) {
-            tracing::warn!("Blocked SSRF-risk navigation to {}: {}", url, reason);
-            return Err(reason);
+        // Shared boundary — the same check the Tauri runtime performs. Covers scheme,
+        // literal addresses, every resolved address, and fails closed on parse or
+        // resolution failure.
+        if let Some(reason) = crate::netguard::blocked_reason(url) {
+            tracing::warn!("Blocked navigation to {}: {}", url, reason);
+            return Err(reason.to_string());
         }
 
         let response = self.http_client.get(url).send().map_err(|e| {
@@ -1230,16 +1201,22 @@ impl BrowserTool for ReloadTool {
 mod tests {
     use super::*;
 
+    /// The canonical SSRF vectors live in `crate::netguard::tests` (IPv4-mapped,
+    /// unique-local, fail-closed, redirect). This test's job is narrower and still
+    /// worth keeping: prove the engine path is wired to that shared boundary at all,
+    /// so a later refactor cannot quietly unhook it.
     #[test]
-    fn ssrf_guard_blocks_internal_hosts() {
-        // cloud metadata endpoint (link-local) and loopback/private literals
-        assert!(ssrf_blocked_reason("http://169.254.169.254/latest/meta-data/").is_some());
-        assert!(ssrf_blocked_reason("http://127.0.0.1:8080/").is_some());
-        assert!(ssrf_blocked_reason("http://10.0.0.5/").is_some());
-        assert!(ssrf_blocked_reason("http://192.168.1.1/").is_some());
-        assert!(ssrf_blocked_reason("http://[::1]/").is_some());
+    fn ssrf_guard_blocks_internal_hosts_via_shared_boundary() {
+        use crate::netguard::blocked_reason;
+        assert!(blocked_reason("http://169.254.169.254/latest/meta-data/").is_some());
+        assert!(blocked_reason("http://127.0.0.1:8080/").is_some());
+        assert!(blocked_reason("http://10.0.0.5/").is_some());
+        assert!(blocked_reason("http://192.168.1.1/").is_some());
+        assert!(blocked_reason("http://[::1]/").is_some());
+        // The spelling that used to get through.
+        assert!(blocked_reason("http://[::ffff:169.254.169.254]/").is_some());
         // a normal public IP literal is allowed through
-        assert!(ssrf_blocked_reason("http://93.184.216.34/").is_none());
+        assert!(blocked_reason("http://93.184.216.34/").is_none());
     }
 
     #[test]

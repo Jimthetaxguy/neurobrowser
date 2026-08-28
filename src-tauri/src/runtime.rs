@@ -659,6 +659,15 @@ impl TauriBrowserRuntime {
 #[async_trait]
 impl BrowserInterface for TauriBrowserRuntime {
     async fn navigate(&self, url: &str) -> Result<(), String> {
+        // The SAME shared boundary the static engine uses. This path was previously
+        // unguarded: the SSRF check lived privately inside `BrowserEngine`, so the
+        // interactive runtime — the one that actually drives a browser, and the one an
+        // agent steered by page content reaches — handed URLs straight to the webview.
+        // A guard only one implementation calls is not a boundary.
+        if let Some(reason) = neurobrowser::netguard::blocked_reason(url) {
+            tracing::warn!("Blocked navigation to {}: {}", url, reason);
+            return Err(reason.to_string());
+        }
         let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
         self.registry.set_loading(self.page_id, true);
         self.webview()?.navigate(parsed).map_err(|e| e.to_string())

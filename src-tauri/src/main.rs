@@ -592,11 +592,17 @@ fn validate_url(url: String) -> ValidateUrlResult {
         };
     };
 
-    if normalized.contains("javascript:") || normalized.contains("data:") {
+    // Scheme and destination are judged by the shared netguard boundary, not by
+    // substring. The previous `contains("javascript:")` check was wrong twice: it
+    // missed `file:`/`blob:`/`vbscript:` and casing, and it rejected legitimate https
+    // URLs that merely mention a scheme in a query string. It also performed no
+    // address check at all, so this command was not an SSRF guard despite reading
+    // like one.
+    if let Some(reason) = neurobrowser::netguard::blocked_reason(&normalized) {
         return ValidateUrlResult {
             valid: false,
             normalized_url: normalized,
-            error: Some("Dangerous URL scheme blocked".to_string()),
+            error: Some(reason.to_string()),
         };
     }
 
