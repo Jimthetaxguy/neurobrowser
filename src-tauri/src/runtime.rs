@@ -622,7 +622,9 @@ impl TauriBrowserRuntime {
         }
 
         let value = match tokio::time::timeout(REQUEST_TIMEOUT, receiver).await {
-            Ok(result) => result.map_err(|_| "Browser runtime response channel closed".to_string())??,
+            Ok(result) => {
+                result.map_err(|_| "Browser runtime response channel closed".to_string())??
+            }
             Err(_) => {
                 self.registry.cancel_request(&request_id);
                 return Err(format!(
@@ -785,7 +787,18 @@ pub fn create_runtime_page(
 
     let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
         .initialization_script(RUNTIME_INIT_SCRIPT)
-        .on_navigation(move |_url| {
+        // EVERY hop, not just the one `navigate()` was asked for. The webview follows
+        // 302s, JS redirects, and clicked links on its own; checking only the entry
+        // point meant an attacker-controlled public origin could redirect the live
+        // webview to http://169.254.169.254/ or file:// and `snapshot()` would return
+        // the contents to the model. Returning false here cancels the load, so this is
+        // the hop-level equivalent of the static engine's redirect policy.
+        .on_navigation(move |url| {
+            if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
+                tracing::warn!("Blocked webview navigation to {}: {}", url, reason);
+                registry_for_nav.set_loading(page_id, false);
+                return false;
+            }
             registry_for_nav.set_loading(page_id, true);
             true
         })

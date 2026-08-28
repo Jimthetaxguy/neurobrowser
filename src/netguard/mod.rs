@@ -345,3 +345,124 @@ mod tests {
         );
     }
 }
+
+/// A `reqwest` DNS resolver that refuses to hand back blocked addresses.
+///
+/// This closes the DNS-rebinding TOCTOU that a pre-flight check cannot: previously
+/// `blocked_reason` resolved a hostname, judged it, and then reqwest performed a
+/// *second, independent* lookup to connect. A name answering public on the first
+/// lookup and loopback on the second was fetched anyway.
+///
+/// Filtering inside the resolver removes the gap by construction — the addresses that
+/// are judged are the addresses the connector receives, because they are the same
+/// resolution. There is no second lookup to disagree with the first.
+///
+/// This is a *narrowed* TOCTOU, not an eliminated one: a name resolving to several
+/// addresses could in principle be re-resolved by a connection retry outside this
+/// resolver. Naming it honestly rather than claiming immunity.
+pub struct GuardedResolver {
+    inner: std::sync::Arc<dyn reqwest::dns::Resolve>,
+}
+
+impl GuardedResolver {
+    pub fn new(inner: std::sync::Arc<dyn reqwest::dns::Resolve>) -> Self {
+        Self { inner }
+    }
+}
+
+impl reqwest::dns::Resolve for GuardedResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            let addrs = inner.resolve(name).await?;
+            let kept: Vec<std::net::SocketAddr> =
+                addrs.filter(|addr| !is_blocked_ip(&addr.ip())).collect();
+            if kept.is_empty() {
+                // Every candidate was internal (or there were none). Refuse rather than
+                // return an empty set, so the failure is legible instead of a generic
+                // connect error.
+                return Err(Box::<dyn std::error::Error + Send + Sync>::from(
+                    "refusing to connect: host resolves only to internal/loopback addresses",
+                ));
+            }
+            Ok(Box::new(kept.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// Default system resolver wrapped in the guard. Used by `BrowserEngine`'s client.
+pub fn guarded_resolver() -> std::sync::Arc<GuardedResolver> {
+    std::sync::Arc::new(GuardedResolver::new(std::sync::Arc::new(SystemResolver)))
+}
+
+/// Minimal blocking-friendly system resolver: `ToSocketAddrs` on a blocking thread.
+struct SystemResolver;
+
+impl reqwest::dns::Resolve for SystemResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let host = name.as_str().to_string();
+            let addrs = tokio::task::spawn_blocking(move || {
+                // Port 0: reqwest overrides it with the scheme/URL port.
+                (host.as_str(), 0u16)
+                    .to_socket_addrs()
+                    .map(|it| it.collect::<Vec<_>>())
+            })
+            .await
+            .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?
+            .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?;
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::*;
+    use reqwest::dns::{Name, Resolve};
+    use std::net::SocketAddr;
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    /// Stand-in for a rebinding DNS server: returns whatever we tell it to.
+    struct FixedResolver(Vec<SocketAddr>);
+    impl Resolve for FixedResolver {
+        fn resolve(&self, _name: Name) -> reqwest::dns::Resolving {
+            let addrs = self.0.clone();
+            Box::pin(async move { Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs) })
+        }
+    }
+
+    fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
+        let addrs: Vec<SocketAddr> = inner.iter().map(|s| s.parse().unwrap()).collect();
+        let guarded = GuardedResolver::new(Arc::new(FixedResolver(addrs)));
+        let name = Name::from_str("example.test").unwrap();
+        futures::executor::block_on(async {
+            match guarded.resolve(name).await {
+                Ok(it) => Ok(it.collect()),
+                Err(e) => Err(e.to_string()),
+            }
+        })
+    }
+
+    #[test]
+    fn resolver_strips_internal_addresses_returned_by_dns() {
+        // The rebinding case: DNS answers with a public AND a loopback address.
+        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"]).expect("some kept");
+        assert_eq!(kept.len(), 1, "internal address must be filtered out");
+        assert_eq!(kept[0].ip().to_string(), "93.184.216.34");
+    }
+
+    #[test]
+    fn resolver_refuses_when_every_address_is_internal() {
+        let err = resolve_all(vec!["169.254.169.254:80", "10.0.0.1:80"])
+            .expect_err("must refuse, not return an empty set");
+        assert!(err.contains("internal/loopback"), "got: {err}");
+    }
+
+    #[test]
+    fn resolver_passes_ordinary_public_addresses_through() {
+        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"]).expect("kept");
+        assert_eq!(kept.len(), 2);
+    }
+}

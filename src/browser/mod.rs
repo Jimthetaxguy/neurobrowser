@@ -95,6 +95,12 @@ impl BrowserEngine {
             // `302 -> http://169.254.169.254/` is followed and its body returned as
             // page content.
             .redirect(crate::netguard::redirect_policy())
+            // Filter blocked addresses inside the RESOLVER, not only in a pre-flight
+            // check. A pre-flight resolve-then-judge is a TOCTOU: reqwest performs its
+            // own second lookup to connect, and a name can answer public once and
+            // loopback the next time. Judging inside the resolver makes the addresses
+            // checked and the addresses connected to the same resolution.
+            .dns_resolver(crate::netguard::guarded_resolver())
             .build()
             .expect("failed to create HTTP client");
 
