@@ -1,5 +1,14 @@
 # NeuroBrowser — Current State Analysis
 
+> **⚠️ SUPERSEDED (2026-07-20).** This document describes `main` as a pre-merge
+> "fossil" — that snapshot is stale. The `codex-live-tauri-browser-runtime`
+> branch was merged and phases A–F shipped (v0.1.1). For the current, verified
+> state and the live optimization effort see
+> [docs/goals/README.md](docs/goals/README.md),
+> [docs/goals/goal-autoresearch-optimize-2026-07-20.md](docs/goals/goal-autoresearch-optimize-2026-07-20.md),
+> and [docs/goals/focus-areas-2026-07-20.md](docs/goals/focus-areas-2026-07-20.md).
+> Kept for historical provenance.
+
 **Date:** 2026-07-01
 **Scope:** end-to-end audit of the codebase as it sits on `main` today, plus the parallel `origin/codex-live-tauri-browser-runtime` branch that contains the most substantial unfinished work
 **Inputs:** `cargo check`, `cargo test`, `git log`, full source read

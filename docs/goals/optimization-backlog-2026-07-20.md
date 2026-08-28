@@ -1,0 +1,319 @@
+# NeuroBrowser — Optimization Backlog (existing code)
+
+> Generated 2026-07-20 from the `neurobrowser-audit` workflow (10 Sonnet subsystem readers -> Opus adversarial verification).
+> Companion to [goal-autoresearch-optimize-2026-07-20.md](./goal-autoresearch-optimize-2026-07-20.md). Each item is an autoresearch target: apply on the branch, keep the verify gate green, score against the stated metric, KEEP/DISCARD.
+
+**Totals:** 69 confirmed - 4 plausible - 0 rejected - across 9 subsystems.
+**Coverage gap:** the *tests* subsystem's verification pass hit the StructuredOutput retry cap and is not included here; its concerns are largely covered by feature items NB-5/NB-6/NB-14 (eval harness). Re-run separately for a dedicated test-coverage backlog.
+
+
+## Status (updated 2026-07-20)
+
+**Shipped so far** (branch `agent/claude-autoresearch-optimize-2026-07-20`, each gated green + committed):
+- **SG1** — Anthropic provider correctness (`system` key, `finish_reason` normalization, multi-block parse). Commit `dfecd0e`.
+- **SG2** — all 6 **security P0s**: injection HTML scan, `javascript:`/`data:` scheme block, SSRF guard, `navigate`/`ask` policy enforcement, socket chmod. Commit `78fb62b`. (Full socket peer-cred authz spun off as a follow-up task.)
+- **SG3a** — 2 correctness P0s: stale post-navigation URL, `spawn_worker` page-pin (+ a folded-in lock-scope P1). Commit `7f6641c`.
+- **Iteration 1** — fmt gate fix. Commit `ce64c46`.
+
+**Remaining P0s** (next): the interactive-tool no-ops (`browser/mod.rs` click/type/scroll report success without acting) and the dead `dom_snapshot`/accessibility_tree wiring (SG3b), plus the native provider tool-calling migration (its own track).
+
+See [README.md](./README.md) for the live dashboard and [focus-areas-2026-07-20.md](./focus-areas-2026-07-20.md) for how these map to strategic priorities.
+
+## P0 - correctness / security (do first) (13)
+
+- [ ] **[correctness] agent-loop** — Agent state's current_url/page_title are updated from the pre-tool-execution snapshot, not post-execution, so the LLM is perpetually told a stale URL after any navigating tool
+  - **loc:** `src/agent/mod.rs:333`
+  - **metric:** Add a test with a mock BrowserInterface whose snapshot() URL changes after a `navigate` tool call; assert that the AiContext returned by build_context on the following iteration has current_url equal to the post-navigation URL, not the pre-navigation one.
+  - **fix:** Either (a) take a fresh `browser.snapshot().await?` immediately after `execute_tool_with_handle` completes and use that for the state update, or (b) simplify by having build_context always source current_url/page_title from the `page_info` it already fetches fresh at line 454 instead of from cached state at all (the cached copy becomes redundant once build_context always re-snapshots).
+- [ ] **[dead-code] agent-loop** — dom_snapshot and accessibility_tree are computed every iteration but never read by any provider's prompt builder
+  - **loc:** `src/agent/mod.rs:487`
+  - **metric:** grep build_system_prompt's output for 'Links:' or a selector string after the fix (0 hits today, >=1 after); or simpler, a unit test asserting the string returned by build_system_prompt contains a link's selector when context.tool_results/dom_snapshot contains one.
+  - **fix:** Wire dom_snapshot (ideally upgraded to include real element selectors, not just counts) and accessibility_tree into build_system_prompt so the fetched data actually reaches the model; if accessibility_tree is not yet implemented for any real browser backend, skip calling it (or make it opt-in) rather than paying an async round trip for a value that's always None.
+- [ ] **[security] agent policy** — Prompt-injection scanner never actually inspects raw HTML; attribute/comment-hidden payloads bypass detection
+  - **loc:** `src/agent/policy.rs:346`
+  - **metric:** New test: snapshot with injection phrase placed only inside a tag attribute (not visible text) — currently Allow, should Block after fix.
+  - **fix:** Scan the concatenation of `text` AND `html` (not `.or`), so hidden-but-parseable payloads in attributes/comments are still substring-matched even though they aren't DOM text nodes.
+- [ ] **[security] agent policy** — denied_domains/allowed_domains provide zero protection for javascript:/data:/about:/file: URLs because target_domain returns None for hostless schemes
+  - **loc:** `src/agent/policy.rs:374`
+  - **metric:** New test: navigate to "javascript:alert(1)" under a policy with allowed_domains=["example.com"] — currently Allow, should Block/DomainNotAllowed after fix.
+  - **fix:** Treat a hostless target URL as policy-significant rather than a silent no-op: either block non-http(s) navigation outright unless explicitly allowed, or fold the scheme into the matched string (e.g. "javascript:") so existing allowed_domains/denied_domains rules can govern it, defaulting to deny when allowed_domains is non-empty and no host is present.
+- [ ] **[correctness] browser-engine** — click/type_text/submit_form/scroll_to/scroll_by never touch engine state but always report success
+  - **loc:** `src/browser/mod.rs:194`
+  - **metric:** Add unit tests (using BrowserEngine directly, not NoopBrowser) asserting get_state().scroll_x/scroll_y change after scroll_by, and state.url changes after click("a[href]") on a loaded page with a link. Currently 0 such assertions exist.
+  - **fix:** At minimum, scroll_to/scroll_by should mutate state.scroll_x/scroll_y since the fields already exist and are read back by snapshot() — there is no reason for them not to. click on an `a[href]` should resolve the target via the existing scraper-based query helpers and call self.navigate() on the href so link-driven navigation actually works against the static engine. Where a real DOM/JS mutation genuinely can't happen (e.g. clicking a JS-only button), the tool should return an explicit 'not supported' error rather than a hardcoded success string, matching the honesty of the trait's other default-Err methods (src/tools/mod.rs:72-90).
+- [ ] **[security] browser-engine** — navigate() only validates URL scheme, not destination host
+  - **loc:** `src/browser/mod.rs:120`
+  - **metric:** Add a unit/integration test asserting navigate("http://169.254.169.254/") and navigate("http://127.0.0.1:PORT/") return Err before any request is sent.
+  - **fix:** Resolve the URL's host before dispatching and reject requests targeting loopback/private/link-local ranges by default (with an explicit allowlist opt-in for legitimate internal testing), the same pattern used by most agent-facing URL-fetch tools to prevent SSRF when the target URL can be influenced by page content the agent read elsewhere.
+- [ ] **[correctness] providers** — Anthropic provider builds a request the real Messages API rejects (system prompt as an in-array role)
+  - **loc:** `src/providers/anthropic.rs:29`
+  - **metric:** A live (or httpmock-stubbed) POST /v1/messages call returns 200 instead of 400 ("role 'system' is not supported on this model" or a role-ordering validation error).
+  - **fix:** Move `system_prompt` to a top-level `"system"` key in the JSON body; restrict `messages` to `role: "user"`/`"assistant"` entries only.
+- [ ] **[correctness] providers** — Anthropic's finish_reason can never equal "stop", breaking cross-provider consistency of the trait contract
+  - **loc:** `src/providers/anthropic.rs:112`
+  - **metric:** Unit test: AnthropicProvider given a stubbed response with `stop_reason: "end_turn"` returns `AiResponse.finish_reason == "stop"`.
+  - **fix:** Normalize each provider's native stop/finish reason into one shared vocabulary before constructing AiResponse (e.g. map Anthropic's `end_turn` and `stop_sequence` to "stop", `max_tokens` to "length").
+- [ ] **[correctness] session** — spawn_worker never resolves pinned_page_id or the session's active page, contradicting its own doc comment
+  - **loc:** `src/session/mod.rs:189`
+  - **metric:** grep for pinned_page_id inside spawn_worker's body goes from 0 occurrences to >=1; add a test asserting spawn_worker with a pinned_page_id that doesn't exist in the session returns Err, and/or that the resulting WorkerHandle is actually tied to the correct page.
+  - **fix:** In spawn_worker, if spec.pinned_page_id is Some(pid), look up session.pages.iter().find(|p| p.id == pid) and return Err("Page not found") if absent (mirroring get_page's existing error), then associate the worker with that page's agent/context instead of always minting an independent one; if None, resolve session.active_page the same way. If workers are intentionally meant to run independent agents (not the page's own), update the doc comment to stop claiming page-binding behavior that doesn't exist.
+- [ ] **[security] tauri-runtime** — ask command bypasses the configured ActionPolicy
+  - **loc:** `src-tauri/src/main.rs:299`
+  - **metric:** Test: set_action_policy with a denied tool, then call ask attempting that tool — result must be Blocked, not silently executed under ActionPolicy::default().
+  - **fix:** Have ask look up state.action_policy the same way start_agent_run does and call execute_with_policy, surfacing pending_tool_call/approval_id on AwaitingApproval instead of a plain string; or remove ask in favor of always routing through the policy-aware path.
+- [ ] **[correctness] tauri-runtime** — cancel_agent_run cannot stop an in-flight, non-approval-blocked run
+  - **loc:** `src-tauri/src/main.rs:398`
+  - **metric:** Integration test: start a multi-iteration run against a mock provider with an artificial delay, call cancel_agent_run mid-run, assert no further ToolCall/LlmCall events are emitted afterward.
+  - **fix:** Store a CancellationToken (or JoinHandle) per run_id when start_agent_run begins; have the iteration loop select! on it each pass; make cancel_agent_run trigger that token instead of only clearing pending_approvals.
+- [ ] **[security] tauri-runtime** — navigate never invokes validate_url's dangerous-scheme check
+  - **loc:** `src-tauri/src/main.rs:243`
+  - **metric:** Test invoking the navigate command directly with a javascript: URL (bypassing any frontend check) must return Err instead of reaching browser.navigate.
+  - **fix:** Call validate_url's logic inside navigate itself before invoking browser.navigate, returning an error on rejection, so the check is enforced server-side regardless of frontend behavior.
+- [ ] **[security] tauri-runtime** — Headless daemon socket has no authentication and shares one mutable policy across every client
+  - **loc:** `src-tauri/src/bin/headless.rs:210`
+  - **metric:** Test: a connection presenting no/wrong token is rejected before any method dispatches; a policy.set from one simulated client is verified not to affect a concurrently-open second client's session.
+  - **fix:** Add a shared-secret or SO_PEERCRED (same-uid) check before dispatching any request, tighten the Unix socket file permissions after bind (chmod 0600), and give each connection its own SessionState instead of one process-wide singleton shared via clone.
+
+## P1 - real perf / maintainability impact (24)
+
+- [ ] **[correctness] agent-loop** — conversation_history is built, bounded, and passed in AiContext but neither provider ever sends it to the model
+  - **loc:** `src/agent/mod.rs:493`
+  - **metric:** A test using a fake HTTP transport that captures the outgoing request body on iteration 2 of a multi-tool run, asserting it contains the assistant text produced on iteration 1.
+  - **fix:** In both anthropic.rs and openai.rs, append `context.conversation_history` as prior turns in the `messages` array sent to the API (mapping AgentMessage/Message role/content directly), ahead of the final user/tool-results message.
+- [ ] **[error-handling] agent-loop** — Provider/browser errors mid-loop return a bare Err(String) and silently drop the events collected so far, unlike every other exit path
+  - **loc:** `src/agent/mod.rs:176`
+  - **metric:** A test with a provider mock that errors on the 2nd call after the 1st call already executed a tool; assert the returned value is Ok(AgentRunResult) with the first tool's ToolCallStarted/ToolCallResult events present and status Failed, rather than an Err.
+  - **fix:** Convert both error sites to construct and return `Ok(AgentRunResult{ status: AgentRunStatus::Failed, run_id, iterations: iteration+1, events, final_response: Some(error_string), pending_tool_call: None, approval_id: None })` instead of propagating with `?`, matching the pattern already used for the max-iterations case at the bottom of the loop.
+- [ ] **[maintainability] agent-loop** — System prompt's tool list is hand-maintained text, duplicating the real ToolRegistry the agent dispatches through
+  - **loc:** `src/providers/mod.rs:298`
+  - **metric:** Delete the 17 hardcoded lines; line count of build_system_prompt's tool-list section drops from ~18 static lines to a loop over registry.definitions() -- verified by a test that registers a new tool and asserts its name appears in build_system_prompt's output without any prompt-string edit.
+  - **fix:** Replace the hardcoded string block in build_system_prompt with a rendering of ToolRegistry::definitions() (name, description, ordered argument names) passed in via AiContext or a build_system_prompt parameter, so adding/removing/renaming a tool in the registry automatically updates what the model is told.
+- [ ] **[correctness] memory-observability** — EpisodicMemory.events grows without bound across the lifetime of a long-lived worker
+  - **loc:** `src/agent/mod.rs:547`
+  - **metric:** memory.episodic.events.len() stays below a fixed cap (e.g. <= 500) after an arbitrarily long-running worker session in a new test, instead of growing linearly with iteration count forever.
+  - **fix:** Cap EpisodicMemory with a bounded ring buffer (e.g. VecDeque with the same CONVERSATION_WINDOW-style eviction pattern already used for state.conversation at mod.rs:530-537), or add an explicit eviction/rotation policy (max N events or max age) applied in push_episodic().
+- [ ] **[dead-code] memory-observability** — llm_call_span/tool_call_span/agent_iteration_span and CorrelationContext are defined but never called anywhere
+  - **loc:** `src/agent/observability.rs:46`
+  - **metric:** grep for llm_call_span|tool_call_span|agent_iteration_span shows at least one call site outside observability.rs, OR (if removed) the functions/struct no longer exist and PROJECT.md no longer claims them as shipped.
+  - **fix:** Either wire the spans into execute_with_policy (e.g. build one CorrelationContext per run_id, `.instrument(agent_iteration_span(...))` around the per-iteration body, `.instrument(llm_call_span(...))` around `provider.complete(...)`, `.instrument(tool_call_span(...))` around `execute_tool_with_handle(...)`), or delete the dead functions/struct and correct the PROJECT.md claim to avoid future audits re-discovering the same gap.
+- [ ] **[correctness] streaming-worker** — map_run_event_to_stream hardcodes run_id to empty string on every non-terminal event
+  - **loc:** `src/agent/mod.rs:660`
+  - **metric:** For each mapped StreamEvent variant carrying a run_id field, StreamEvent.run_id equals the source AgentRunEvent.run_id (currently always "" regardless of input) -- verifiable with a unit test asserting non-empty round-trip equality.
+  - **fix:** Bind `run_id` in each match arm instead of discarding it via `..`, and pass the real value through to the constructed StreamEvent (e.g. `ToolCallBlocked { run_id, tool, decision } => Some(StreamEvent::ToolCallBlocked { run_id, tool, reasons: decision.reasons })`).
+- [ ] **[correctness] streaming-worker** — ToolCallStart mapping discards real tool arguments, replacing them with Null
+  - **loc:** `src/agent/mod.rs:646`
+  - **metric:** StreamEvent::ToolCallStart.arguments equals the source (redacted) HashMap<String,String> after JSON conversion for any non-empty tool call, instead of always being Null.
+  - **fix:** Bind `arguments` in the match arm and convert it: `ToolCallStarted { tool, arguments, .. } => Some(StreamEvent::ToolCallStart { tool, arguments: serde_json::to_value(arguments).unwrap_or(serde_json::Value::Null) })`.
+- [ ] **[security] agent policy** — contains_sensitive_argument/redact_arguments only inspect argument KEYS, never VALUES, so PII/secrets under an innocuous key name are neither redacted nor escalated
+  - **loc:** `src/agent/policy.rs:328`
+  - **metric:** New test: arguments={"notes": "4111111111111111"} on a non-sensitive tool — currently Allow/unredacted, RequireApproval+redacted after fix.
+  - **fix:** Add a value-pattern check (regex for card-number-like digit runs, SSN shape \d{3}-\d{2}-\d{4}, common secret-token prefixes like sk-/ghp_/eyJ) that flags SensitiveArgument and triggers redaction based on VALUE content, as a defense-in-depth layer alongside the existing key-based check.
+- [ ] **[security] agent policy** — ToolArgumentDefinition.sensitive (per-argument contract metadata) is defined and set but never consulted by policy.rs's redaction/approval logic
+  - **loc:** `src/agent/policy.rs:230`
+  - **metric:** Hypothetical tool with a `.sensitive(true)` argument named "value" (not matching any is_sensitive_key keyword) — currently unredacted, redacted after fix.
+  - **fix:** Thread the tool's argument-definition list (or the whole ToolDefinition) into evaluate()/redact_arguments() so redaction and RequireApproval can be driven per-argument by ToolArgumentDefinition.sensitive, in addition to the keyword heuristic.
+- [ ] **[perf] browser-engine** — reqwest::blocking::Client used inside an async trait method
+  - **loc:** `src/browser/mod.rs:57`
+  - **metric:** grep for `reqwest::blocking` in src/browser/mod.rs goes from 1 hit to 0; the NoopBrowser workaround comment (1199-1202) becomes unnecessary and BrowserEngine can be exercised directly in #[tokio::test]s.
+  - **fix:** Switch http_client to reqwest::Client (async) and .await the request inside navigate(), or at minimum wrap the blocking call in tokio::task::spawn_blocking. reqwest's builder API is essentially identical between blocking::Client and Client, so the swap is low-risk and removes both the worker-thread-stall risk under concurrent daemon load and the nested-runtime-panic-on-drop issue documented in the tests.
+- [ ] **[correctness] browser-engine** — Extraction helpers never produce a selector unique to the matched element
+  - **loc:** `src/browser/mod.rs:395`
+  - **metric:** Add a test with two structurally-identical `<input name="qty">` elements in different rows; assert the two returned FormInputInfo.selector values differ and each, when re-queried via query_selector_from_html, resolves to exactly 1 element (today it resolves to N).
+  - **fix:** Build a stable, unique-enough selector per matched element (id first, else an attribute-based or nth-of-type ancestor chain — mirroring the approach already implemented for the real webview in src-tauri/src/runtime.rs's buildSelector) and populate LinkInfo/FormInputInfo/TableInfo/ElementInfo.selector with that instead of the fixed tag-level string.
+- [ ] **[correctness] browser-engine** — GetTablesTool reports only row/column counts, never the extracted cell content
+  - **loc:** `src/browser/mod.rs:756`
+  - **metric:** For a page with a known 2-column, 3-row table, GetTablesTool's result string should contain the actual cell text values (currently it can only ever contain the literal substrings "headers" and "rows").
+  - **fix:** Include the actual header labels and row cell values in the formatted result (e.g. render each table as a compact text/markdown grid, or JSON-encode TableInfo), consistent with how GetLinksTool/GetPricesTool already expose real content rather than metadata-only counts.
+- [ ] **[perf] browser-engine** — Every read-only tool call reparses the full HTML document and re-runs all extraction from scratch
+  - **loc:** `src/browser/mod.rs:228`
+  - **metric:** Number of Html::parse_document calls for a 3-tool-call sequence (get_links, get_prices, get_tables) against one unchanged page drops from 3 to 1 (or 0 if fully memoized after the initial navigate/load_html parse).
+  - **fix:** Cache the parsed Html document (or the fully-populated PageSnapshot) alongside PageState, invalidating only on navigate()/load_html(); have snapshot() return the cached result (patched with current scroll_x/scroll_y/title) instead of recomputing extraction from scratch on every call.
+- [ ] **[api-design] browser-engine** — default_tool_registry() registers 5 tools that always error against BrowserEngine
+  - **loc:** `src/browser/mod.rs:244`
+  - **metric:** Fraction of tools in the registry actually served by BrowserEngine goes from 12/17 to 16/17 (screenshot remaining honestly unsupported without a renderer) or the registry composition explicitly reflects only tools the constructed engine supports.
+  - **fix:** Either provide an engine-specific registry variant (e.g. a leaner static_tool_registry() for BrowserEngine that omits the 5 always-failing tools, or the subset ScreenshotTool omits universally since no engine currently implements screenshot), or implement minimal real behavior for the ones that don't strictly need a renderer (browser_reload can just re-run navigate(&state.url); browser_back/forward could work once a history stack exists, see gap-nav-history).
+- [ ] **[correctness] providers** — Anthropic response parsing reads only content[0]["text"], dropping other content blocks
+  - **loc:** `src/providers/anthropic.rs:107`
+  - **metric:** Unit test: a stubbed multi-block response like `[{type:"thinking",...},{type:"text",text:"hello"}]` yields `AiResponse.content == "hello"` instead of `""`.
+  - **fix:** Iterate all `content` blocks and concatenate the `text`-typed ones (with room to separately capture `thinking` blocks — see the reasoning-plumbing gap) instead of indexing content[0] unconditionally.
+- [ ] **[error-handling] providers** — parse_structured_tool_call silently discards malformed tool-call JSON with no diagnostic
+  - **loc:** `src/providers/mod.rs:148`
+  - **metric:** Test: feeding a slightly-malformed `ToolCall: {...}` string produces a warning log entry (or another distinguishable signal) instead of a silent empty Vec.
+  - **fix:** Log (e.g. tracing::warn!) on JSON parse failure inside parse_structured_tool_call so a malformed-but-attempted tool call is diagnosable instead of silently indistinguishable from no tool call at all.
+- [ ] **[correctness] providers** — parse_tool_calls only inspects single trimmed lines, so multi-line/pretty-printed tool-call JSON fails to parse
+  - **loc:** `src/providers/mod.rs:109`
+  - **metric:** Unit test: a multi-line pretty-printed `ToolCall:` JSON block yields 1 parsed ToolCall instead of 0.
+  - **fix:** Make the parser tolerant of multi-line JSON blocks after a `ToolCall:` prefix (e.g. scan forward to the matching closing brace) rather than assuming single-line output, or explicitly instruct/enforce single-line JSON in the system prompt and document the constraint.
+- [ ] **[correctness] tools-contracts** — ToolArgumentDefinition.required is declared but never enforced before execute()
+  - **loc:** `src/browser/mod.rs:492`
+  - **metric:** A test calling click() with no 'selector' key returns an explicit invalid-argument error instead of invoking browser.click(""); count of tools whose execute() can silently run on empty-string substitutes drops from 17 to 0.
+  - **fix:** Add a shared pre-dispatch check (e.g. in ToolRegistry::get or a wrapper called from agent/mod.rs::execute_tool_with_handle, src/agent/mod.rs:502-514) that walks `tool.definition().arguments` and rejects the call with a ToolError::invalid_input("missing required argument '{name}'") before calling execute() if any required key is absent from the args map.
+- [ ] **[correctness] tools-contracts** — ToolRisk.level (RiskLevel) is set on every tool but never read by the policy engine
+  - **loc:** `src/agent/policy.rs:256`
+  - **metric:** Grep count of `tool_risk.level` / `RiskLevel::` reads inside policy.rs goes from 0 to >0 (if wired in) or the field is deleted from contracts.rs (if removed) — either way the count of 'dead' RiskLevel assignments (currently 17) goes to 0.
+  - **fix:** Either wire RiskLevel into policy.rs (e.g. force PolicyOutcome::RequireApproval whenever level is High/Critical regardless of action, so a future/uncatalogued ToolAction still gets appropriate scrutiny), or remove RiskLevel from ToolRisk/ToolDefinition and stop threading it through 17 call sites that currently imply it matters.
+- [ ] **[duplication] tools-contracts** — tools::ToolResult and providers::ToolResult are field-identical duplicate structs requiring manual conversion
+  - **loc:** `src/providers/mod.rs:54`
+  - **metric:** One of the two duplicate struct definitions removed (or a From impl added) and the 2 hand-rolled struct literals in agent/mod.rs replaced by `.into()`; duplicate-type count for ToolResult goes from 2 to 1.
+  - **fix:** Add `impl From<crate::tools::ToolResult> for crate::providers::ToolResult` and have `execute_tool_with_handle` return the original `tools::ToolResult` (or propagate it) instead of collapsing it to `Result<String,String>` and rebuilding an equivalent struct twice by hand in agent/mod.rs.
+- [ ] **[error-handling] tools-contracts** — ToolError's structured fields (code/retryable/details) never reach the agent loop
+  - **loc:** `src/tools/errors.rs:4`
+  - **metric:** Count of production (non-test) call sites constructing a ToolError goes from 0 to ≥1.
+  - **fix:** Route at least one real failure path through ToolError (e.g. have `BrowserInterface` trait methods return `Result<T, ToolError>` instead of `Result<T, String>`, or wrap the string error in `ToolError::new(...)` before building `ToolResult::error`), so retry/backoff logic and any future UI can use the `retryable` flag instead of pattern-matching error text.
+- [ ] **[error-handling] session** — Core session methods panic on Mutex poisoning while worker methods added later handle it gracefully
+  - **loc:** `src/session/mod.rs:47`
+  - **metric:** Count of .lock().unwrap() call sites in this file drops from 6+ to 0.
+  - **fix:** Align the earlier methods to the same map_err pattern (or a small fn lock_sessions(&self) -> Result<MutexGuard<'_, HashMap<String, SessionState>>, String> helper) so a single panic while holding the sessions lock doesn't permanently brick the whole SessionManager (poisoned std Mutex never recovers) for the remaining lifetime of a long-running desktop process.
+- [ ] **[perf] session** — spawn_worker constructs the provider and agent while holding the global sessions lock, unlike create_page's documented pattern
+  - **loc:** `src/session/mod.rs:190`
+  - **metric:** No create_provider/ReActAgent::new call appears between the sessions.lock() call and its release in spawn_worker (structurally verifiable by reading the reordered function).
+  - **fix:** Hoist the agent_config clone + create_provider + ReActAgent::new calls before acquiring self.sessions.lock(), exactly mirroring create_page's staged pattern; only take the sessions lock to validate the session exists and insert the finished WorkerHandle.
+- [ ] **[correctness] tauri-runtime** — headless.rs unconditionally uses Unix-only APIs, contradicting its own non-Unix TCP fallback claim
+  - **loc:** `src-tauri/src/bin/headless.rs:43`
+  - **metric:** cargo check --features headless cross-compiled to a Windows target succeeds.
+  - **fix:** Gate the UnixListener import/usage and wait_for_signal's SIGTERM/SIGINT handling behind #[cfg(unix)], and provide a #[cfg(windows)] alternative (e.g. tokio::signal::ctrl_c()) so the documented non-Unix TCP fallback path actually compiles.
+
+## P2 - cleanups (22)
+
+- [ ] **[correctness] agent-loop** — extract_final_answer looks for a 'Final Answer:' line that build_system_prompt never asks the model to produce
+  - **loc:** `src/agent/mod.rs:516`
+  - **metric:** grep build_system_prompt's rendered output for the string 'Final Answer' (0 occurrences today, >=1 after); add a unit test feeding extract_final_answer a string with a 'Final Answer:' line plus trailing text and asserting only the marked portion is returned.
+  - **fix:** Add an explicit instruction to build_system_prompt telling the model to prefix its concluding answer with 'Final Answer:' when no more tool calls are needed, so extract_final_answer's parsing actually has something reliable to match against.
+- [ ] **[dead-code] memory-observability** — SemanticMemory/SemanticItem and memory::StateMemory are declared and cloned through snapshots but never populated
+  - **loc:** `src/agent/memory.rs:84`
+  - **metric:** Either a test demonstrates memory.state or memory.semantic changing from Default after a real execute_with_policy run, or the dead fields are removed and AgentMemory shrinks to only the fields that are written.
+  - **fix:** Either wire real writers (e.g. populate StateMemory.current_url/page_title/scroll_position from the same browser.snapshot() call already made in build_context/execute_with_policy, and populate SemanticMemory when a summarization/embedding step exists) or remove the two unused fields/types until a real producer exists, so AgentMemory's shape matches what's actually maintained.
+- [ ] **[correctness] streaming-worker** — WorkerSpec.pinned_page_id is stored but never read or validated
+  - **loc:** `src/session/mod.rs:189`
+  - **metric:** spawn_worker returns Err for a pinned_page_id that doesn't exist in the session (currently succeeds silently regardless of the value); add a regression test asserting this.
+  - **fix:** At minimum, validate that spec.pinned_page_id (when Some) refers to an existing page in session.pages and return an error otherwise, as a stepping stone toward actually binding the worker's agent execution to that page's BrowserInterface (full binding is the larger worker-fanout-engine gap).
+- [ ] **[perf] streaming-worker** — Single Vec-based session inbox costs O(n) per-worker drain instead of O(1)
+  - **loc:** `src/session/mod.rs:267`
+  - **metric:** drain_inbox for a specific worker touches only the messages destined for that worker (O(k) in that worker's own queue) rather than scanning all N pending session-wide messages; demonstrable via a benchmark/test with 1000 unrelated messages plus 1 targeted message.
+  - **fix:** Store the inbox as HashMap<String, VecDeque<WorkerMessage>> keyed by recipient worker_id (SessionState.inbox, session/mod.rs:26); send_message does inbox.entry(to).or_default().push_back(msg); drain_inbox does std::mem::take on the specific worker's queue (or drains all queues when worker_id is None).
+- [ ] **[correctness] streaming-worker** — WorkerHandle.status can go stale on the value returned by spawn_worker
+  - **loc:** `src/agent/worker.rs:54`
+  - **metric:** A test that retains the WorkerHandle returned by spawn_worker, calls set_worker_status, and asserts the retained handle's .status (not a fresh get_worker fetch) reflects the update -- currently fails, passes after the fix.
+  - **fix:** Wrap status in Arc<Mutex<WorkerStatus>> (or otherwise make it shared/interior-mutable) so both the registry's entry and any retained clones observe the same mutable cell; alternatively remove status from WorkerHandle entirely and require all status reads to go through SessionManager::get_worker/list_workers.
+- [ ] **[observability] agent policy** — ExternalNavigation risk flag is computed but silently discarded whenever the final outcome is Allow
+  - **loc:** `src/agent/policy.rs:68`
+  - **metric:** Test: cross-domain navigate under AutonomyLevel::ReadOnly — decision.risk_flags currently does not contain ExternalNavigation, would after fix.
+  - **fix:** Change PolicyDecision::allow to accept and pass through the accumulated `flags: Vec<RiskFlag>` (mirroring with_outcome) instead of hardcoding an empty vec.
+- [ ] **[correctness] browser-engine** — Price regex accepts comma-only sequences with no digits
+  - **loc:** `src/browser/mod.rs:17`
+  - **metric:** Add a unit test asserting extract_prices("cost: $,,, today") returns an empty Vec; currently it would return one PriceInfo{value:"$,,,", ...}.
+  - **fix:** Require at least one digit, e.g. `\$\d[\d,]*(?:\.\d{1,2})?` (or an equivalent lookahead), so a bare '$' followed only by commas is never reported as a price.
+- [ ] **[dead-code] browser-engine** — PageConfig.enable_javascript is set but never read anywhere
+  - **loc:** `src/browser/mod.rs:25`
+  - **metric:** grep -rn enable_javascript src/ src-tauri/ shows a read site in addition to the two write/default sites (currently 2 hits, both writes).
+  - **fix:** Either wire this field to actually gate a rendering path (see gap-js-rendering) or remove it from PageConfig until there's a real implementation behind it, so the config surface doesn't imply a capability that doesn't exist.
+- [ ] **[observability] browser-engine** — extract_prices silently caps results at 50 with no truncation signal
+  - **loc:** `src/browser/mod.rs:445`
+  - **metric:** For a synthetic page with 60 distinct '$X.XX' strings, the tool output (or snapshot) now indicates 10 were dropped, versus today's silent 50-item cutoff with no signal.
+  - **fix:** Surface whether truncation happened (e.g. a truncated: bool alongside the Vec<PriceInfo>, or a total_matches count) so an agent doing exhaustive price comparison on a long listing page knows results are incomplete rather than assuming it saw everything.
+- [ ] **[error-handling] providers** — No provider retries transient failures or honors Retry-After on 429
+  - **loc:** `src/providers/openai.rs:53`
+  - **metric:** Unit/integration test with a mock server returning 429 then 200 succeeds on retry instead of erroring immediately.
+  - **fix:** Add a small shared retry-with-backoff helper (2-3 attempts, exponential backoff, honoring Retry-After when present) usable by all three providers, e.g. as a helper function in mod.rs called from each complete().
+- [ ] **[maintainability] providers** — 30-second HTTP timeout is hardcoded in all three providers despite ProviderConfig existing
+  - **loc:** `src/providers/openai.rs:17`
+  - **metric:** A configured non-default timeout is observably applied (e.g. a test asserting the constructed reqwest Client's timeout via its Debug output or a wrapped config check).
+  - **fix:** Add an optional `timeout_secs: Option<u64>` field to ProviderConfig (default 30) and thread it through each provider constructor's Client::builder().
+- [ ] **[security] tools-contracts** — BrowserTool::definition() default silently classifies unclassified tools as low-risk Read
+  - **loc:** `src/tools/mod.rs:46`
+  - **metric:** cargo build after removing the default forces every current and future BrowserTool impl to supply definition() explicitly (compile error otherwise) instead of relying on a silent runtime default; alternatively grep for `ToolRisk::new(ToolAction::Read, RiskLevel::Low)` should only appear at explicit, intentional call sites.
+  - **fix:** Remove the default body and make `definition()` a required trait method (no default), so any future BrowserTool impl fails to compile until it declares a real risk — or, if a default must stay for ergonomics, change it to the fail-safe `ToolRisk::new(ToolAction::Destructive, RiskLevel::Critical)` already used as the fallback pattern in headless.rs:148.
+- [ ] **[dead-code] tools-contracts** — schemars dependency declared but never used — the missing piece for LLM-facing JSON schema
+  - **loc:** `Cargo.toml:20`
+  - **metric:** schemars reference count in src/**/*.rs goes from 0 to >0 (if implemented) or the dependency line is removed from Cargo.toml (if deferred).
+  - **fix:** Either add `#[derive(JsonSchema)]` to ToolDefinition/ToolArgumentDefinition in contracts.rs and use it to emit a real `tools` JSON array to OpenAI/Anthropic (see gap #1 below), or drop the dependency until that work is scheduled, to stop signaling unfinished intent and shrink the dependency/compile surface.
+- [ ] **[maintainability] tools-contracts** — LLM-facing tool list is a hand-maintained string disconnected from the tool registry
+  - **loc:** `src/providers/mod.rs:293`
+  - **metric:** The tool-list portion of build_system_prompt's line count becomes `registry.list().len()`-derived rather than a fixed 17-line literal; no test in tests/ asserts the exact prompt string today (confirmed via grep), so this is a safe drop-in replacement.
+  - **fix:** Replace the hardcoded block with a loop over `registry.list()` (name, description) — or `registry.definitions()` once arguments/schema are wanted — so adding/removing a tool from `default_tool_registry()` automatically updates what the LLM sees.
+- [ ] **[correctness] session** — session.inbox has no size cap, unlike the sibling CrossWorkerObservations window
+  - **loc:** `src/session/mod.rs:26`
+  - **metric:** A test sending >200 messages to a never-draining worker shows inbox length capped rather than growing to 200+.
+  - **fix:** Apply the same sliding-window discipline used for observations — cap total inbox size (or per-recipient count) and drop oldest/return an error once the cap is exceeded.
+- [ ] **[correctness] session** — send_message validates the recipient exists but never validates the sender
+  - **loc:** `src/session/mod.rs:258`
+  - **metric:** New test sending a message with a nonexistent from id asserts Err; all existing tests (which use real worker ids for from) continue to pass unchanged.
+  - **fix:** Add if !session.workers.contains_key(&message.from) { return Err("Sender worker not found".into()) } alongside the existing recipient check.
+- [ ] **[maintainability] session** — All public methods return Result<_, String> instead of a typed error enum
+  - **loc:** `src/session/mod.rs:72`
+  - **metric:** Number of ad-hoc .to_string()/string-literal error return sites in this file drops from ~15 to 0, replaced by enum variant construction; callers can matches!(err, SessionError::WorkerNotFound).
+  - **fix:** Introduce a SessionError enum (e.g. via thiserror) with variants for each failure mode, implement std::error::Error/Display, and change signatures to Result<T, SessionError>.
+- [ ] **[perf] session** — One process-wide Mutex guards the entire session HashMap, serializing unrelated sessions
+  - **loc:** `src/session/mod.rs:12`
+  - **metric:** Two concurrent operations on different session_ids no longer block on the same lock (verifiable via a test/benchmark holding one session's lock and confirming another session's call proceeds).
+  - **fix:** Shard the lock per session, e.g. sessions: Mutex<HashMap<String, Arc<Mutex<SessionState>>>> or a concurrent map (DashMap) with one Mutex per entry, so unrelated sessions no longer contend on the same lock.
+- [ ] **[api-design] session** — active_page can be set but is never surfaced to callers, and its dead_code allow looks stale
+  - **loc:** `src/session/mod.rs:24`
+  - **metric:** A test that calls set_active_page then get_session asserts the returned SessionInfo.active_page matches.
+  - **fix:** Remove the stale #[allow(dead_code)] (verify the lint is actually clean without it) and add pub active_page: Option<usize> to SessionInfo, populated in get_session/list_sessions from s.active_page.
+- [ ] **[error-handling] tauri-runtime** — BrowserRuntimeRegistry uses 17 raw Mutex::lock().unwrap() calls with no poison recovery
+  - **loc:** `src-tauri/src/runtime.rs:441`
+  - **metric:** A test that panics while holding one registry lock (in a spawned task) followed by a normal registry call on another thread must not panic.
+  - **fix:** Recover from poison explicitly (.unwrap_or_else(|e| e.into_inner())) or switch BrowserRuntimeRegistry's internal locks to parking_lot::Mutex, which does not poison.
+- [ ] **[duplication] tauri-runtime** — browser_back/forward/reload commands duplicate TauriBrowserRuntime's trait methods with divergent wait behavior
+  - **loc:** `src-tauri/src/main.rs:485`
+  - **metric:** main.rs line count drops by the duplicated block (~30 lines); a single shared implementation is exercised by both UI- and agent-triggered navigation.
+  - **fix:** Have the three main.rs commands call browser_for_page(...) and then browser.browser_back()/browser_forward()/browser_reload() (the existing BrowserInterface impl), removing the duplicated eval logic and making both call paths behave identically.
+- [ ] **[dead-code] tauri-runtime** — headless.rs SessionState.agent/ReActAgent import is dead code with no ask method implemented
+  - **loc:** `src-tauri/src/bin/headless.rs:97`
+  - **metric:** grep for `.agent` usage outside its declaration returns zero hits today; after the fix it either returns >0 (wired up) or the field is gone entirely.
+  - **fix:** Either wire up a real 'ask' dispatch method that constructs/uses a ReActAgent, or remove the field and import until that work is scheduled, so the code doesn't imply support that doesn't exist.
+
+## P3 - nits (10)
+
+- [ ] **[perf] agent-loop** — ReActAgent::new clones an already-owned AgentConfig instead of moving it
+  - **loc:** `src/agent/mod.rs:71`
+  - **metric:** One fewer heap-allocating clone (AgentConfig contains a ProviderConfig with several Strings) per ReActAgent construction; cargo clippy -W clippy::redundant_clone would flag the removed line.
+  - **fix:** Change to Mutex::new(config) (move instead of clone).
+- [ ] **[dead-code] memory-observability** — EpisodicMemory::get_tool_history() is defined but never called
+  - **loc:** `src/agent/memory.rs:71`
+  - **metric:** grep for get_tool_history shows a call site outside memory.rs, or the dead method is removed.
+  - **fix:** Either call it from somewhere useful (e.g. expose it through snapshot_state consumers or build_context to give the LLM a compact tool-history view) or remove it until a caller exists.
+- [ ] **[maintainability] agent policy** — target_domain's tool_name=="navigate" check is case-sensitive, inconsistent with eq_ignore_ascii_case used elsewhere in the same file
+  - **loc:** `src/agent/policy.rs:369`
+  - **metric:** No observable behavior change given current call sites; purely consistency/defense-in-depth.
+  - **fix:** Use tool_name.eq_ignore_ascii_case("navigate") for consistency and defense-in-depth against any future case-insensitive tool lookup path.
+- [ ] **[maintainability] browser-engine** — #[allow(dead_code)] on BrowserEngine.config looks stale given the field is actively read
+  - **loc:** `src/browser/mod.rs:53`
+  - **metric:** cargo check produces no new dead_code warning for BrowserEngine::config after removing the attribute.
+  - **fix:** Verify (via a local cargo check with the attribute temporarily removed, not blocked by the concurrent baseline build) whether the warning it suppresses still fires; if not, delete the attribute so a genuinely-dead field wouldn't be masked in the future.
+- [ ] **[observability] browser-engine** — navigate() error messages don't distinguish timeout/DNS/connect failures
+  - **loc:** `src/browser/mod.rs:124`
+  - **metric:** A forced-timeout test and a forced-connection-refused test produce visibly different error strings; today both produce the same generic prefix.
+  - **fix:** Branch on the reqwest::Error classification to give the calling agent an actionable, distinguishable message (e.g. "timed out after 30s" vs "connection refused" vs "DNS resolution failed"), which matters for an agent loop deciding whether to retry.
+- [ ] **[duplication] providers** — HTTP client construction and 429/error-status handling are duplicated near-verbatim across all three providers
+  - **loc:** `src/providers/openai.rs:16`
+  - **metric:** Duplicated boilerplate across the 3 files drops from ~30 lines to ~6 (one call site each), with no behavior change (existing tests, if any, stay green).
+  - **fix:** Extract `fn build_http_client(timeout: Duration) -> Client` and `async fn handle_response_errors(response: Response) -> ProviderResult<Response>` shared helpers into mod.rs and call them from each provider.
+- [ ] **[correctness] providers** — OllamaProvider::is_configured() unconditionally returns true, unlike the other two providers
+  - **loc:** `src/providers/ollama.rs:127`
+  - **metric:** N/A for the doc fix; if a lightweight check is added, a test can assert is_configured() reflects at least gross misconfiguration (e.g. an empty/invalid base_url).
+  - **fix:** At minimum, document the limitation inline and consider a cheap non-network sanity check (e.g. base_url parses as a valid URL) rather than an unconditional `true`; a real reachability check requires promoting this to an async health-check (see the corresponding gap below).
+- [ ] **[dead-code] session** — browser_config field is stored but never referenced in page creation
+  - **loc:** `src/session/mod.rs:14`
+  - **metric:** The #[allow(dead_code)] annotation is removed and the crate still compiles warning-free, or browser_config gains at least one real read site.
+  - **fix:** Either wire browser_config into actual page/browser construction if that responsibility belongs here, or remove the field (and the constructor parameter) if it's genuinely vestigial.
+- [ ] **[correctness] session** — page_counter increments and agent/provider construction happen before confirming the session exists
+  - **loc:** `src/session/mod.rs:77`
+  - **metric:** No page_id gap is created on a Session-not-found error path (verifiable via a test that calls create_page on a bogus id twice then a real session, asserting the resulting id isn't skipped) — or, if left as-is, this is documented as an accepted tradeoff.
+  - **fix:** Check sessions.contains_key(session_id) (a cheap lock+lookup) before allocating the page id and constructing the agent, or accept the current wasted-id/wasted-construction tradeoff explicitly in a comment since it's not user-visible.
+- [ ] **[security] tauri-runtime** — Single capability grants all 24 commands with no least-privilege split
+  - **loc:** `src-tauri/capabilities/main.json:5`
+  - **metric:** After the split, the remote-scoped capability's resolved permissions array (gen/schemas/capabilities.json) contains exactly 1 command permission instead of 24.
+  - **fix:** Split into a full-access capability for the app's own local frontend, and — if/when a 'remote' grant is added per the related finding — a second, minimal capability scoped to just allow-browser-runtime-report for the runtime webviews.
+
+## Plausible - needs triage before action (4)
+
+- [ ] [P3/correctness] AgentEvent variants UserMessage/AssistantMessage/ToolResult/Decision/Navigation are never constructed — `src/agent/memory.rs:5`
+  - verifier note: The factual core is correct: the live execute_with_policy loop only constructs AgentEvent::LlmCall (188) and ToolCall (311). But the enum is not dead in the way the finding implies: it is a shared type consumed by the public SessionManager::record_observation API (session/mod.rs:307-316), which pushes arbitrary AgentEvents into a separate cross-worker observations store, and tests/workers.rs:115 constructs AgentEvent::Navigation through it. So the 'trim the enum to two variants' arm of the fix would break tests/workers.rs, and the variants aren't unused. The 'push missing kinds' arm is a reasonable enhancement, not a bug fix, so the P2/correctness framing is weak (design/coverage gap, not incorrect behavior). Real observation, but the proposed change needs care and the 'unused' characterization overstates the case.
+- [ ] [P1/security] Episodic memory stores raw (unredacted) tool arguments even though the corresponding user-facing event uses decision.redacted_arguments — `src/agent/mod.rs:314`
+  - verifier note: The headline inconsistency is real and confirmed: agent/mod.rs:314 pushes AgentEvent::ToolCall with raw tool_call.arguments.clone() while the user-facing ToolCallStarted event (288-292) uses decision.redacted_arguments, and AgentEvent derives Serialize. For sensitively-KEYED args (password/token/secret/etc.) episodic memory would leak values the event redacts, so switching to decision.redacted_arguments is a sound consistency fix. BUT the finding misdiagnoses its own flagship case: redact_arguments/is_sensitive_key (policy.rs:315-340) are KEY-based, and 'text' is not a sensitive key, so a TypeTool secret keyed 'text' is NOT redacted in decision.redacted_arguments either. Therefore the proposed fix does NOT stop the 'text' leak and the proposed metric test (assert episodic has no unredacted secret after a type call) would still FAIL after the fix. Location correct; impact/mechanism and verification metric are partly wrong.
+- [ ] [P2/dead-code] 3 of 5 AgentError variants and both From impls are never constructed outside tests — `src/tools/errors.rs:71`
+  - verifier note: Dead-code observation is CONFIRMED: only AgentError::Validation (agent/mod.rs:626,637) and AgentError::Timeout (streaming.rs:99) are constructed in app code; Provider/Tool/MaxIterationsReached and both From impls are test-only. BUT the proposed fix and its metric are NOT sound: (1) the current call site at agent/mod.rs:177-182 is `.map_err(|e| { self.record_error_metric(); e.to_string() })?` — replacing with `.map_err(AgentError::from)?` DROPS the record_error_metric() side effect; (2) the claim 'ProviderError::to_string() equals what AgentError::Provider wraps' is FALSE — AgentError::Provider has #[error("Provider error: {0}")], adding a 'Provider error: ' prefix, so the error string WOULD change; (3) the enclosing fn execute_with_policy returns Result<_, String>, so `?` with AgentError won't compile without a signature change. Real issue, but the fix needs care.
+- [ ] [P1/correctness] Capability config has no remote grant, likely blocking the runtime IPC bridge on real websites — `src-tauri/capabilities/main.json:3`
+  - verifier note: Config evidence verified: capabilities/main.json declares only windows:["main"] with no remote block. Runtime webviews load WebviewUrl::External (runtime.rs:770,777) and the injected RUNTIME_INIT_SCRIPT calls invoke('browser_runtime_report',...) from the remote page context (runtime.rs:145-171). In Tauri 2 remote origins only receive a capability's permissions via an explicit remote.urls grant, so the bridge plausibly fails once a runtime webview navigates to a real URL. Marked PLAUSIBLE not CONFIRMED because the finding itself is not runtime-verified, and there is an unresolved subtlety: the capability is keyed to the window label 'main' while runtime webviews carry distinct labels (runtime_id), so it is unclear whether they inherit this capability at all. The remedy (a minimal remote-scoped capability) is security-sensitive and needs care.

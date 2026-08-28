@@ -17,6 +17,34 @@ fn get_price_regex() -> &'static Regex {
     PRICE_REGEX.get_or_init(|| Regex::new(r"\$[\d,]+(?:\.\d{1,2})?").expect("invalid price regex"))
 }
 
+/// Honest failure for an interactive action attempted on the static HTTP engine.
+///
+/// `BrowserEngine` fetches and parses HTML but renders no live DOM and executes
+/// no JavaScript, so click/type/submit/scroll cannot actually happen. Returning
+/// `Ok(())` would be a lie: the tool layer reports success for an action that
+/// never occurred, and the agent then proceeds on a false premise (FA-2 "engine
+/// honesty"). Instead we return an actionable error, distinguishing an invalid
+/// selector, a selector that matches nothing, and a real element this engine
+/// simply cannot act on — so the ReAct loop gets a signal it can adapt to.
+fn static_interaction_error(html: &str, action: &str, selector: &str) -> String {
+    match Selector::parse(selector) {
+        Err(_) => format!("Cannot {action}: invalid CSS selector '{selector}'"),
+        Ok(parsed) => {
+            if Html::parse_document(html).select(&parsed).next().is_some() {
+                format!(
+                    "Cannot {action} '{selector}': the static HTTP engine renders no live DOM \
+                     and executes no JavaScript, so interactive actions have no effect. Use the \
+                     interactive runtime to {action}."
+                )
+            } else {
+                format!(
+                    "Cannot {action}: no element matches selector '{selector}' on the current page"
+                )
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageConfig {
     pub viewport_width: u32,
@@ -62,6 +90,17 @@ impl BrowserEngine {
         let http_client = reqwest::blocking::Client::builder()
             .user_agent(config.user_agent.clone())
             .timeout(std::time::Duration::from_secs(30))
+            // Every redirect hop is re-validated. Without this the guard below only
+            // inspects the URL we were ASKED for, and a public host answering
+            // `302 -> http://169.254.169.254/` is followed and its body returned as
+            // page content.
+            .redirect(crate::netguard::redirect_policy())
+            // Filter blocked addresses inside the RESOLVER, not only in a pre-flight
+            // check. A pre-flight resolve-then-judge is a TOCTOU: reqwest performs its
+            // own second lookup to connect, and a name can answer public once and
+            // loopback the next time. Judging inside the resolver makes the addresses
+            // checked and the addresses connected to the same resolution.
+            .dns_resolver(crate::netguard::guarded_resolver())
             .build()
             .expect("failed to create HTTP client");
 
@@ -117,8 +156,12 @@ impl BrowserEngine {
 #[async_trait]
 impl BrowserInterface for BrowserEngine {
     async fn navigate(&self, url: &str) -> Result<(), String> {
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err("Only http:// and https:// URLs are allowed".to_string());
+        // Shared boundary — the same check the Tauri runtime performs. Covers scheme,
+        // literal addresses, every resolved address, and fails closed on parse or
+        // resolution failure.
+        if let Some(reason) = crate::netguard::blocked_reason(url) {
+            tracing::warn!("Blocked navigation to {}: {}", url, reason);
+            return Err(reason.to_string());
         }
 
         let response = self.http_client.get(url).send().map_err(|e| {
@@ -192,37 +235,35 @@ impl BrowserInterface for BrowserEngine {
     }
 
     async fn click(&self, selector: &str) -> Result<(), String> {
-        tracing::info!("Static browser click fallback: {}", selector);
-        Ok(())
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "click", selector))
     }
 
-    async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
-        // `text` is the `.sensitive(true)` typed value (see `TypeTool`'s
-        // argument definition) — never log it verbatim, since tracing
-        // output flows to the log sink. Log a length-based confirmation
-        // instead, matching the redaction already applied to
-        // `TypeTool::execute`'s result string.
-        tracing::info!(
-            "Static browser type fallback: {} characters -> {}",
-            text.chars().count(),
-            selector
-        );
-        Ok(())
+    async fn type_text(&self, selector: &str, _text: &str) -> Result<(), String> {
+        // `_text` is the `.sensitive(true)` typed value (see `TypeTool`'s
+        // argument definition); it is intentionally unused and never logged,
+        // since tracing output flows to the log sink. The static engine cannot
+        // type into a live DOM, so report that honestly instead of the old
+        // success-reporting no-op.
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "type into", selector))
     }
 
     async fn submit_form(&self, selector: &str) -> Result<(), String> {
-        tracing::info!("Static browser submit fallback: {}", selector);
-        Ok(())
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "submit", selector))
     }
 
     async fn scroll_to(&self, selector: &str) -> Result<(), String> {
-        tracing::info!("Static browser scroll_to fallback: {}", selector);
-        Ok(())
+        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
+        Err(static_interaction_error(&html, "scroll to", selector))
     }
 
     async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String> {
-        tracing::info!("Static browser scroll_by fallback: {}, {}", x, y);
-        Ok(())
+        Err(format!(
+            "Cannot scroll by ({x}, {y}): the static HTTP engine has no live viewport, so \
+             scrolling has no effect. Use the interactive runtime to scroll."
+        ))
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
@@ -1166,6 +1207,24 @@ impl BrowserTool for ReloadTool {
 mod tests {
     use super::*;
 
+    /// The canonical SSRF vectors live in `crate::netguard::tests` (IPv4-mapped,
+    /// unique-local, fail-closed, redirect). This test's job is narrower and still
+    /// worth keeping: prove the engine path is wired to that shared boundary at all,
+    /// so a later refactor cannot quietly unhook it.
+    #[test]
+    fn ssrf_guard_blocks_internal_hosts_via_shared_boundary() {
+        use crate::netguard::blocked_reason;
+        assert!(blocked_reason("http://169.254.169.254/latest/meta-data/").is_some());
+        assert!(blocked_reason("http://127.0.0.1:8080/").is_some());
+        assert!(blocked_reason("http://10.0.0.5/").is_some());
+        assert!(blocked_reason("http://192.168.1.1/").is_some());
+        assert!(blocked_reason("http://[::1]/").is_some());
+        // The spelling that used to get through.
+        assert!(blocked_reason("http://[::ffff:169.254.169.254]/").is_some());
+        // a normal public IP literal is allowed through
+        assert!(blocked_reason("http://93.184.216.34/").is_none());
+    }
+
     #[test]
     fn enrich_snapshot_extracts_prices_from_text() {
         let mut snapshot = PageSnapshot {
@@ -1213,10 +1272,7 @@ mod tests {
         async fn get_text(&self, _selector: &str) -> Result<String, String> {
             Ok(String::new())
         }
-        async fn get_attributes(
-            &self,
-            _selector: &str,
-        ) -> Result<HashMap<String, String>, String> {
+        async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
             Ok(HashMap::new())
         }
         async fn click(&self, _selector: &str) -> Result<(), String> {
@@ -1244,10 +1300,7 @@ mod tests {
         let browser = NoopBrowser;
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#password".to_string());
-        args.insert(
-            "text".to_string(),
-            "super-secret-value-42".to_string(),
-        );
+        args.insert("text".to_string(), "super-secret-value-42".to_string());
 
         let result = TypeTool.execute(args, &browser).await;
 
@@ -1256,6 +1309,41 @@ mod tests {
             !result.result.contains("super-secret-value-42"),
             "type tool result leaked the raw sensitive text: {}",
             result.result
+        );
+    }
+
+    #[test]
+    fn static_interaction_error_reports_matched_element_as_uneffective() {
+        // Element exists, but the static engine still cannot act on it: the
+        // message must say so honestly rather than imply success.
+        let html = r#"<html><body><button id="go">Go</button></body></html>"#;
+        let message = static_interaction_error(html, "click", "#go");
+        assert!(
+            message.contains("no live DOM") && message.contains("click"),
+            "matched-element error should explain the engine cannot act: {message}"
+        );
+        assert!(
+            !message.contains("successfully"),
+            "honest error must not imply success: {message}"
+        );
+    }
+
+    #[test]
+    fn static_interaction_error_reports_missing_element() {
+        let html = r#"<html><body><button id="go">Go</button></body></html>"#;
+        let message = static_interaction_error(html, "click", "#missing");
+        assert!(
+            message.contains("no element matches"),
+            "unmatched selector should say so: {message}"
+        );
+    }
+
+    #[test]
+    fn static_interaction_error_reports_invalid_selector() {
+        let message = static_interaction_error("<html></html>", "type into", ">>bad<<");
+        assert!(
+            message.contains("invalid CSS selector"),
+            "invalid selector should be flagged distinctly: {message}"
         );
     }
 }

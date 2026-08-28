@@ -622,7 +622,9 @@ impl TauriBrowserRuntime {
         }
 
         let value = match tokio::time::timeout(REQUEST_TIMEOUT, receiver).await {
-            Ok(result) => result.map_err(|_| "Browser runtime response channel closed".to_string())??,
+            Ok(result) => {
+                result.map_err(|_| "Browser runtime response channel closed".to_string())??
+            }
             Err(_) => {
                 self.registry.cancel_request(&request_id);
                 return Err(format!(
@@ -656,12 +658,34 @@ impl TauriBrowserRuntime {
     }
 }
 
+/// How long a navigation may take before the runtime reports it did not complete.
+/// Generous enough for an ordinary slow page; short enough that a wedged load surfaces
+/// as an error the agent can act on rather than an indefinite hang.
+const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
+
 #[async_trait]
 impl BrowserInterface for TauriBrowserRuntime {
     async fn navigate(&self, url: &str) -> Result<(), String> {
+        // The SAME shared boundary the static engine uses. This path was previously
+        // unguarded: the SSRF check lived privately inside `BrowserEngine`, so the
+        // interactive runtime — the one that actually drives a browser, and the one an
+        // agent steered by page content reaches — handed URLs straight to the webview.
+        // A guard only one implementation calls is not a boundary.
+        if let Some(reason) = neurobrowser::netguard::blocked_reason(url) {
+            tracing::warn!("Blocked navigation to {}: {}", url, reason);
+            return Err(reason.to_string());
+        }
         let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
         self.registry.set_loading(self.page_id, true);
-        self.webview()?.navigate(parsed).map_err(|e| e.to_string())
+        self.webview()?
+            .navigate(parsed)
+            .map_err(|e| e.to_string())?;
+        // Await the load before returning. Previously this returned as soon as the
+        // webview was TOLD to navigate, so a caller's next `snapshot()` raced the page
+        // transition: it could capture the old URL, or fail outright while the old
+        // document unloaded. Navigation is not complete until the page is ready, and
+        // the trait's contract is "navigate", not "start navigating".
+        self.wait_for_navigation().await
     }
 
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
@@ -757,7 +781,13 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn wait_for_navigation(&self) -> Result<(), String> {
-        self.wait_for_ready(3_000).await.or_else(|_| Ok(()))
+        // Honest failure. This previously swallowed the timeout with
+        // `.or_else(|_| Ok(()))`, so a page that never finished loading reported
+        // success and every caller proceeded on a false premise — the same
+        // silent-success family as the static engine's click/type/submit no-ops that
+        // this branch fixes elsewhere. A slow page is a real condition the caller is
+        // entitled to know about and can retry.
+        self.wait_for_ready(NAVIGATION_READY_TIMEOUT_MS).await
     }
 }
 
@@ -776,7 +806,18 @@ pub fn create_runtime_page(
 
     let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
         .initialization_script(RUNTIME_INIT_SCRIPT)
-        .on_navigation(move |_url| {
+        // EVERY hop, not just the one `navigate()` was asked for. The webview follows
+        // 302s, JS redirects, and clicked links on its own; checking only the entry
+        // point meant an attacker-controlled public origin could redirect the live
+        // webview to http://169.254.169.254/ or file:// and `snapshot()` would return
+        // the contents to the model. Returning false here cancels the load, so this is
+        // the hop-level equivalent of the static engine's redirect policy.
+        .on_navigation(move |url| {
+            if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
+                tracing::warn!("Blocked webview navigation to {}: {}", url, reason);
+                registry_for_nav.set_loading(page_id, false);
+                return false;
+            }
             registry_for_nav.set_loading(page_id, true);
             true
         })

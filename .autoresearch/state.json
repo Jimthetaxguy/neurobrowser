@@ -1,0 +1,97 @@
+{
+  "goal": "goal-autoresearch-optimize-2026-07-20",
+  "target": "NeuroBrowser Rust codebase (composite)",
+  "branch": "agent/claude-autoresearch-optimize-2026-07-20",
+  "baseline": {
+    "gate": { "fmt_ok": false, "clippy_ok": true, "test_ok": true, "tauri_ok": true },
+    "panel": { "unwrap_count": 31, "expect_count": 22, "clone_count": 133, "todo_fixme_count": 0, "unsafe_count": 0, "src_loc": 6475, "tests_passed": 52 }
+  },
+  "best_run": 6,
+  "current_run": 6,
+  "next_mutation": {
+    "target": "FA-8 observability wiring (make a failed run diagnosable): wire the already-implemented but call-less tracing spans + CorrelationContext (llm_call_span/tool_call_span/agent_iteration_span, observability.rs) into execute_with_policy, and log every PolicyDecision (outcome/reasons/risk_flags/tool_name) at production time so verdicts are visible. Alternative if scoped smaller: the FA-10 enabling slice (merge the two field-identical ToolResult structs; extract a shared test_support::FakeBrowser).",
+    "operator": "fix-with-test",
+    "hypothesis": "Per the substrate-first roadmap, observability is step 2 because it makes steps 3-7 (robustness, durability) debuggable instead of black boxes. The scaffolding already exists (spans/correlation are dead code with zero callers, verified in the FA-6/FA-8 audit) so wiring is low-risk and high-signal.",
+    "process_note": "Do NOT kill concurrent cargo builds — it corrupts the incremental target dir and yields stale/false test results (observed in run 4 diagnosis). Run one gate at a time; let it finish. Full gate = cargo fmt --check + cargo clippy --all-targets -D warnings + cargo test --all-targets + CARGO_TARGET_DIR=/tmp/neurobrowser-tauri-target cargo check --manifest-path src-tauri/Cargo.toml."
+  },
+  "runs": [
+    {
+      "run": 6,
+      "operator": "fix-with-test (FA-8 honesty/operability)",
+      "target": "src/providers/mod.rs, src/providers/openai.rs, src/providers/anthropic.rs, src-tauri/src/main.rs, src-tauri/src/bin/headless.rs",
+      "target_metric": "ProviderConfig.base_url now controls the OpenAI + Anthropic request URL (was a dead field); RUST_LOG now controls tracing verbosity (was a hardcoded literal)",
+      "change": "Added resolve_endpoint(base_url, default_origin, path) in providers/mod.rs (treats base_url as API origin, trims trailing slash, falls back on blank) + 3 unit tests; wired it into OpenAiProvider (covers Custom too) and AnthropicProvider, replacing the hardcoded api.openai.com / api.anthropic.com URLs. Replaced the hardcoded with_env_filter string literal in main.rs + headless.rs with EnvFilter::try_from_default_env().unwrap_or_else(fallback) so RUST_LOG=debug works.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Full gate green: fmt, clippy --all-targets -D warnings, 66 tests (63+3), src-tauri check. Commit 0d4e814. Both defects independently verified before the fix. Same 'reports success but no-ops' class as SG3b, one layer down.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 5,
+      "operator": "fix-with-test (SG3b part 1) + goal-expansion workflow",
+      "target": "src/browser/mod.rs; docs/goals/*",
+      "target_metric": "interactive actions on the static BrowserEngine return an honest, actionable error instead of a fake Ok(); goals expanded from 5 focus areas to 10 (FA-6..10) via a grounded 8-dimension quality audit",
+      "change": "browser/mod.rs: click/type_text/submit_form/scroll_to/scroll_by now return static_interaction_error (distinguishes invalid-selector / no-match / found-but-uneffective) instead of logging a 'fallback' and returning Ok(()); type_text no longer touches the sensitive value; +3 unit tests on the pure helper. Expansion: 9-agent read-only workflow produced 52 grounded findings across reliability/perf/observability/dx/packaging/config/state/code-health; synthesized into FA-6 (Runtime Robustness), FA-7 (Durable State), FA-8 (Operability), FA-9 (Distribution), FA-10 (Code Health) + FA-1..5 enrichments + a substrate-first 8-step roadmap. Raw audit in docs/goals/quality-audit-2026-07-20.md.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Full gate green: fmt clean, clippy --all-targets -D warnings clean, 63 tests pass (60+3), src-tauri check clean. Commit ce29e7a. base_url + RUST_LOG claims independently re-verified before enshrining in the docs.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 0,
+      "operator": "baseline",
+      "result": "BASELINE",
+      "gate_pass": false,
+      "note": "fmt RED (rustfmt drift); clippy+test green. Panel captured.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 1,
+      "operator": "cleanup/gate-fix",
+      "target_metric": "cargo fmt --check clean (fmt_ok false->true)",
+      "change": "cargo fmt reformatted 2 multi-line forms in src/browser/mod.rs #[cfg(test)] module (2 ins / 8 del, test-module whitespace only)",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "fmt RED->GREEN; tests unaffected.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 4,
+      "operator": "fix-with-test (SG3a correctness P0s)",
+      "target": "src/agent/mod.rs, src/session/mod.rs",
+      "target_metric": "model sees POST-navigation URL next iteration (was fed stale pre-exec snapshot URL); spawn_worker rejects an unknown pinned_page_id (was silently binding to a non-existent page)",
+      "change": "agent/mod.rs: re-snapshot AFTER tool execution (outside the state lock) to update state.current_url/page_title, so a navigating tool updates what the model sees next iteration. session/mod.rs: spawn_worker validates pinned_page_id against session.pages (Err if absent), resolves None->active_page, and builds the agent before taking the sessions lock (folds in a P1 lock-scope fix); removed now-stale #[allow(dead_code)] on active_page. +2 regression tests.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Clean gate green: fmt, clippy -D warnings, 60 tests pass (58+2), tauri check. NOTE: an earlier gate falsely reported the stale-URL test failing due to a corrupted incremental build after concurrent cargo processes were killed; fix confirmed correct via instrumentation + clean rebuild.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 3,
+      "operator": "fix-with-test batch (SG2 security P0s)",
+      "target": "src/agent/policy.rs, src/browser/mod.rs, src-tauri/src/main.rs, src-tauri/src/bin/headless.rs",
+      "target_metric": "6 security P0s closed: injection scans text+html; javascript:/data:/file: navigation blocked; SSRF guard rejects loopback/private/link-local; navigate command enforces validate_url; ask command routes through execute_with_policy; control socket chmod 0600",
+      "change": "policy.rs: snapshot_contains_prompt_injection scans text+html; added unsafe_navigation_scheme guard in evaluate. browser/mod.rs: ssrf_blocked_reason + is_blocked_ip guard in navigate. main.rs: navigate enforces validate_url; ask uses execute_with_policy + registers pending approvals. headless.rs: chmod 0600 on the control socket (#[cfg(unix)]). +3 regression tests (2 policy, 1 SSRF). Full peer-cred authz spun off as a follow-up task.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "Full gate green: fmt clean, clippy --all-targets -D warnings clean, 58 tests pass (55+3), tauri check clean.",
+      "timestamp": "2026-07-20"
+    },
+    {
+      "run": 2,
+      "operator": "fix-with-test (SG1)",
+      "target": "src/providers/anthropic.rs",
+      "target_metric": "Anthropic request valid vs live Messages API (system top-level, not in-array role); stop_reason 'end_turn' normalizes to 'stop'; multi-block responses concatenated",
+      "change": "Refactored for testability (build_request_body/build_user_content/normalize_finish_reason/extract_text). Moved system_prompt to top-level 'system' key; messages now user-only; normalized stop_reason (end_turn/stop_sequence->stop, max_tokens->length); extract_text concatenates all text blocks. Added 3 regression tests.",
+      "result": "KEEP",
+      "gate_pass": true,
+      "note": "First attempt fmt RED (hand-formatting), cargo fmt canonicalized -> GREEN. clippy --lib -D warnings clean; 3 new tests + all lib unit tests pass. Verified lib-scoped; full verify.sh deferred to phase end.",
+      "timestamp": "2026-07-20"
+    }
+  ],
+  "validation_set": [
+    "tests/action_policy.rs", "tests/agent_memory_metrics.rs", "tests/autonomous_agent.rs",
+    "tests/error_types.rs", "tests/headless_daemon.rs", "tests/streaming.rs",
+    "tests/streaming_agent.rs", "tests/workers.rs"
+  ]
+}

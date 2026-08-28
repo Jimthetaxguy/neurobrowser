@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use neurobrowser::providers::ProviderResult;
 use neurobrowser::{
     ActionPolicy, AgentConfig, AgentRunEvent, AgentRunStatus, AiContext, AiProvider, AiResponse,
-    BrowserInterface, ElementInfo, PageSnapshot, ToolCall,
+    AutonomyLevel, BrowserInterface, ElementInfo, PageSnapshot, ToolCall,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -127,6 +127,136 @@ fn call(name: &str, args: &[(&str, &str)]) -> ToolCall {
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect::<HashMap<_, _>>(),
     }
+}
+
+/// A browser whose current URL changes when `navigate` is called, so we can
+/// verify the agent surfaces the POST-navigation URL to the model.
+struct MutBrowser {
+    snapshot: Mutex<PageSnapshot>,
+}
+
+impl MutBrowser {
+    fn new(url: &str) -> Self {
+        Self {
+            snapshot: Mutex::new(PageSnapshot {
+                url: url.to_string(),
+                title: "Test Page".to_string(),
+                text: Some("ready".to_string()),
+                html: Some("<html><body>ready</body></html>".to_string()),
+                viewport_width: 1280,
+                viewport_height: 720,
+                interactive_ready: true,
+                ..PageSnapshot::default()
+            }),
+        }
+    }
+}
+
+#[async_trait]
+impl BrowserInterface for MutBrowser {
+    async fn navigate(&self, url: &str) -> Result<(), String> {
+        self.snapshot.lock().unwrap().url = url.to_string();
+        Ok(())
+    }
+    async fn query_selector(&self, _selector: &str) -> Result<Vec<ElementInfo>, String> {
+        Ok(Vec::new())
+    }
+    async fn get_text(&self, _selector: &str) -> Result<String, String> {
+        Ok("ready".to_string())
+    }
+    async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
+        Ok(HashMap::new())
+    }
+    async fn click(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn type_text(&self, _selector: &str, _text: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn submit_form(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn scroll_to(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn scroll_by(&self, _x: f32, _y: f32) -> Result<(), String> {
+        Ok(())
+    }
+    async fn snapshot(&self) -> Result<PageSnapshot, String> {
+        Ok(self.snapshot.lock().unwrap().clone())
+    }
+}
+
+/// A provider that records the `current_url` it is handed on each model call.
+struct RecordingProvider {
+    responses: Mutex<VecDeque<AiResponse>>,
+    seen_urls: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingProvider {
+    fn new(responses: Vec<AiResponse>, seen_urls: Arc<Mutex<Vec<String>>>) -> Self {
+        Self {
+            responses: Mutex::new(responses.into()),
+            seen_urls,
+        }
+    }
+}
+
+#[async_trait]
+impl AiProvider for RecordingProvider {
+    async fn complete(&self, _prompt: &str, context: &AiContext) -> ProviderResult<AiResponse> {
+        self.seen_urls
+            .lock()
+            .unwrap()
+            .push(context.current_url.clone());
+        Ok(self
+            .responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("recording provider response"))
+    }
+    fn provider_name(&self) -> &str {
+        "recording"
+    }
+    fn is_configured(&self) -> bool {
+        true
+    }
+}
+
+#[tokio::test]
+async fn post_navigation_url_reaches_model_next_iteration() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let browser = MutBrowser::new("https://before.example");
+    let provider = Arc::new(RecordingProvider::new(
+        vec![
+            response(
+                "go",
+                vec![call("navigate", &[("url", "https://after.example")])],
+                "tool_calls",
+            ),
+            response("Final Answer: done", vec![], "stop"),
+        ],
+        seen.clone(),
+    ));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+    // HighAutonomy so the cross-domain navigate runs without an approval gate.
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        ..ActionPolicy::default()
+    };
+
+    let run = agent
+        .execute_with_policy("navigate then finish", &browser, &policy)
+        .await
+        .unwrap();
+
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2, "expected two model calls");
+    // The second iteration's context must carry the POST-navigation URL; before
+    // the fix it carried the stale pre-navigation URL.
+    assert_eq!(seen[1], "https://after.example");
 }
 
 #[tokio::test]

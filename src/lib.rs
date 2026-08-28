@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod browser;
+pub mod netguard;
 pub mod providers;
 pub mod session;
 pub mod tools;

@@ -316,6 +316,26 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt
 }
 
+/// Resolve a provider request URL, honoring an optional `base_url` override.
+///
+/// `base_url` (fed from `CUSTOM_PROVIDER_BASE_URL`) is treated as the API
+/// **origin** — `scheme://host[:port]` — and the provider's fixed `path` is
+/// appended, so callers can point OpenAI/Anthropic at Azure, a corporate
+/// gateway, or a local proxy. An empty/whitespace override falls back to
+/// `default_origin`, and a trailing slash on the override is trimmed to avoid a
+/// doubled `//`. Previously `ProviderConfig.base_url` was read into config but
+/// never used (the request URL was hardcoded), so an override silently did
+/// nothing — the same "reports success but no-ops" defect the interactive tools
+/// had, one layer down.
+pub(crate) fn resolve_endpoint(base_url: Option<&str>, default_origin: &str, path: &str) -> String {
+    let origin = base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_end_matches('/'))
+        .unwrap_or(default_origin);
+    format!("{origin}{path}")
+}
+
 pub mod anthropic;
 pub mod ollama;
 pub mod openai;
@@ -332,5 +352,47 @@ pub fn create_provider(config: &ProviderConfig) -> Arc<dyn AiProvider> {
         ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.clone())),
         ProviderType::Ollama => Arc::new(OllamaProvider::new(config.clone())),
         ProviderType::Custom => Arc::new(OpenAiProvider::new(config.clone())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_endpoint;
+
+    #[test]
+    fn resolve_endpoint_uses_default_origin_when_unset() {
+        assert_eq!(
+            resolve_endpoint(None, "https://api.openai.com", "/v1/chat/completions"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn resolve_endpoint_overrides_origin() {
+        assert_eq!(
+            resolve_endpoint(
+                Some("https://gateway.example.com"),
+                "https://api.openai.com",
+                "/v1/chat/completions"
+            ),
+            "https://gateway.example.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn resolve_endpoint_trims_trailing_slash_and_ignores_blank() {
+        assert_eq!(
+            resolve_endpoint(
+                Some("https://proxy.local/"),
+                "https://api.anthropic.com",
+                "/v1/messages"
+            ),
+            "https://proxy.local/v1/messages"
+        );
+        // Empty / whitespace-only override falls back to the default origin.
+        assert_eq!(
+            resolve_endpoint(Some("   "), "https://api.anthropic.com", "/v1/messages"),
+            "https://api.anthropic.com/v1/messages"
+        );
     }
 }

@@ -173,8 +173,14 @@ impl SessionState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Honor RUST_LOG when set (e.g. `RUST_LOG=debug`), falling back to the
+    // default filter. Previously the filter was a hardcoded string literal, so
+    // RUST_LOG had no effect (FA-8 operability).
     tracing_subscriber::fmt()
-        .with_env_filter("neurobrowser=info,headless=info")
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("neurobrowser=info,headless=info")),
+        )
         .init();
 
     let socket_path = std::env::var("NEUROBROWSER_SOCKET")
@@ -206,6 +212,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     println!("NEUROBROWSER_LISTENING=unix://{}", socket_path.display());
+
+    // Restrict the control socket to the owning user. This is defense-in-depth;
+    // full per-connection peer-credential authz (SO_PEERCRED same-uid + per-client
+    // session state) is tracked as a follow-up.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(error) =
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+        {
+            tracing::warn!(?error, "failed to restrict control-socket permissions");
+        }
+    }
 
     let session_state = SessionState::new();
     loop {
