@@ -188,21 +188,21 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
-        if let Some(tool) = self.tools.get(name) {
-            return Some(tool.clone());
-        }
-        let canonical = match name {
-            "type_text" => "type",
-            "query_selector" => "query_dom",
-            "wait_for" => "wait",
-            _ => return None,
-        };
-        self.tools.get(canonical).cloned()
+        self.tools.get(canonical_tool_name(name)).cloned()
     }
 }
 
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// SKILL-facing names for the two tools that were renamed, not reimplemented.
+pub(crate) fn canonical_tool_name(name: &str) -> &str {
+    match name {
+        "type_text" => "type",
+        "query_selector" => "query_dom",
+        _ => name,
     }
 }

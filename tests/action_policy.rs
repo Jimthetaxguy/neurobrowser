@@ -149,3 +149,22 @@ fn navigation_to_javascript_scheme_is_blocked() {
     assert_eq!(decision.outcome, PolicyOutcome::Block);
     assert!(decision.risk_flags.contains(&RiskFlag::DomainDenied));
 }
+
+#[test]
+fn alias_is_subject_to_canonical_deny_list() {
+    let snapshot = snapshot("https://current.example", "Ready");
+    let policy = ActionPolicy {
+        denied_tools: vec!["query_dom".to_string()],
+        ..ActionPolicy::default()
+    };
+
+    let decision = policy.evaluate(
+        "query_selector",
+        &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        &HashMap::new(),
+        &snapshot,
+    );
+
+    assert_eq!(decision.outcome, PolicyOutcome::Block);
+    assert!(decision.risk_flags.contains(&RiskFlag::ActionDenied));
+}
