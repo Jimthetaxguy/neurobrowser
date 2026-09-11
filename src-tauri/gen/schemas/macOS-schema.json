@@ -447,34 +447,10 @@
           "markdownDescription": "Enables the get_action_policy command without any pre-configured scope."
         },
         {
-          "description": "Enables the get_page_info command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-page-info",
-          "markdownDescription": "Enables the get_page_info command without any pre-configured scope."
-        },
-        {
           "description": "Enables the get_page_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-page-snapshot",
           "markdownDescription": "Enables the get_page_snapshot command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the get_worker command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-worker",
-          "markdownDescription": "Enables the get_worker command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the list_sessions command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-list-sessions",
-          "markdownDescription": "Enables the list_sessions command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the list_workers command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-list-workers",
-          "markdownDescription": "Enables the list_workers command without any pre-configured scope."
         },
         {
           "description": "Enables the navigate command without any pre-configured scope.",
@@ -591,34 +567,10 @@
           "markdownDescription": "Denies the get_action_policy command without any pre-configured scope."
         },
         {
-          "description": "Denies the get_page_info command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-page-info",
-          "markdownDescription": "Denies the get_page_info command without any pre-configured scope."
-        },
-        {
           "description": "Denies the get_page_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-page-snapshot",
           "markdownDescription": "Denies the get_page_snapshot command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the get_worker command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-worker",
-          "markdownDescription": "Denies the get_worker command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the list_sessions command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-list-sessions",
-          "markdownDescription": "Denies the list_sessions command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the list_workers command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-list-workers",
-          "markdownDescription": "Denies the list_workers command without any pre-configured scope."
         },
         {
           "description": "Denies the navigate command without any pre-configured scope.",
