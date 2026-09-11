@@ -30,13 +30,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use neurobrowser::agent::policy::{ActionPolicy, AutonomyLevel, RiskFlag};
+use neurobrowser::agent::policy::ActionPolicy;
 use neurobrowser::browser::default_tool_registry;
-use neurobrowser::providers::{
-    create_provider, AiContext, AiProvider, ProviderConfig, ProviderType,
-};
 use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, ToolRisk};
-use neurobrowser::{AgentConfig, PageConfig, ReActAgent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -92,14 +88,8 @@ impl Response {
 struct SessionState {
     /// Per-session policy. Defaults to `Assisted` + no allow/deny lists.
     policy: Arc<Mutex<ActionPolicy>>,
-    /// Optional provider for the `ask` method. Not used in v0.1 of the
-    /// daemon beyond echo-style validation.
-    agent: Arc<Mutex<Option<Arc<ReActAgent>>>>,
-    /// The real browser tool registry (navigate/click/type/submit_form/...),
-    /// used to resolve each tool's actual `ToolRisk` before handing it to
-    /// `policy.evaluate`. Built once per session rather than per request.
-    /// Not `#[derive(Default)]`-able: `ToolRegistry::default()` is an empty
-    /// registry, which would silently defeat this lookup for every tool.
+    /// Browser tool registry used to resolve each tool's real `ToolRisk`.
+    /// `ToolRegistry::default()` is empty and would silently defeat that lookup.
     tool_registry: Arc<ToolRegistry>,
 }
 
@@ -107,7 +97,6 @@ impl SessionState {
     fn new() -> Self {
         Self {
             policy: Arc::new(Mutex::new(ActionPolicy::default())),
-            agent: Arc::new(Mutex::new(None)),
             tool_registry: Arc::new(default_tool_registry()),
         }
     }
@@ -173,9 +162,6 @@ impl SessionState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Honor RUST_LOG when set (e.g. `RUST_LOG=debug`), falling back to the
-    // default filter. Previously the filter was a hardcoded string literal, so
-    // RUST_LOG had no effect (FA-8 operability).
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -340,25 +326,13 @@ async fn dispatch(request: &Request, _state: &SessionState) -> Response {
                 .await
         }
         "snapshot" => {
-            // v0.1: returns the live `lastRefMap` placeholder for the
-            // accepting socket connection; v0.1.1 wires this through
-            // a real BrowserEngine.
             let result = serde_json::json!({
                 "url": "about:blank",
                 "title": "",
                 "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 },
-                "ref_map": {},
                 "tree": ""
             });
             Response::ok(request.id.clone(), result)
-        }
-        "policy.snapshot" => {
-            // For Phase F's audit log: capture the current policy + the
-            // last 5 policy decisions into a structured payload.
-            let policy = _state.policy.lock().await;
-            serde_json::to_value(&*policy)
-                .map(|v| Response::ok(request.id.clone(), v))
-                .unwrap_or_else(|e| Response::err(request.id.clone(), "INTERNAL", e.to_string()))
         }
         other => Response::err(
             request.id.clone(),
@@ -366,35 +340,6 @@ async fn dispatch(request: &Request, _state: &SessionState) -> Response {
             format!("unknown method: {other}"),
         ),
     }
-}
-
-#[allow(dead_code)]
-fn _touch_types_to_keep_them_in_scope() {
-    // Reference some types so the headless crate compiles even if the
-    // dispatch table doesn't yet exercise them.
-    let _provider: ProviderConfig = ProviderConfig {
-        provider_type: ProviderType::Custom,
-        api_key: None,
-        base_url: None,
-        model: "stub".to_string(),
-        max_tokens: Some(64),
-        temperature: Some(0.0),
-    };
-    let _: ActionPolicy = ActionPolicy::default();
-    let _risk = RiskFlag::ActionDenied;
-    let _: AutonomyLevel = AutonomyLevel::Assisted;
-    let _: PageConfig = PageConfig::default();
-    let _: AgentConfig = AgentConfig::default();
-    let _ctx: AiContext = AiContext {
-        current_url: String::new(),
-        page_title: String::new(),
-        dom_snapshot: String::new(),
-        accessibility_tree: None,
-        scroll_position: neurobrowser::providers::ScrollPosition { x: 0.0, y: 0.0 },
-        tool_results: Vec::new(),
-        conversation_history: Vec::new(),
-    };
-    let _provider_fn: fn(&ProviderConfig) -> std::sync::Arc<dyn AiProvider> = create_provider;
 }
 
 #[cfg(test)]

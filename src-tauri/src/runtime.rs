@@ -48,45 +48,6 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     xpath: elementToXPath(element)
   });
 
-  // Build a stable CSS selector for an element. Order of preference:
-  // 1. #id (if unique); 2. tag.class[0][.class[1]…]
-  // 3. :nth-of-type fallback when nothing else disambiguates.
-  // We deliberately do NOT try to be clever with attribute selectors —
-  // those break in production whenever attribute names change.
-  const buildSelector = (element) => {
-    if (!element || element.nodeType !== 1) {
-      return 'body';
-    }
-    const tag = element.tagName ? element.tagName.toLowerCase() : '';
-    const id = element.id ? '#' + element.id : '';
-    if (id && document.querySelectorAll(id).length === 1) {
-      return tag + id;
-    }
-    const classes = Array.from(element.classList || []).filter((c) => /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(c));
-    const classSel = classes.length > 0 ? '.' + classes.slice(0, 3).join('.') : '';
-    let candidate = tag + id + classSel;
-    if (document.querySelectorAll(candidate).length === 1) {
-      return candidate;
-    }
-    // Disambiguate via :nth-of-type among siblings.
-    const parent = element.parentElement;
-    if (parent) {
-      let i = 1;
-      let sibling = element.previousElementSibling;
-      while (sibling) {
-        if (sibling.tagName === element.tagName) {
-          i += 1;
-        }
-        sibling = sibling.previousElementSibling;
-      }
-      candidate = `${tag}:nth-of-type(${i})${id}${classSel}`;
-      if (document.querySelectorAll(candidate).length === 1) {
-        return candidate;
-      }
-    }
-    return candidate;
-  };
-
   const elementToXPath = (element) => {
     if (!element || element.nodeType !== 1) {
       return '';
@@ -196,11 +157,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         })),
         forms: collectForms(),
         prices: [],
-        tables: collectTables(),
-        // Ref map for the agent-facing tool surface (Phase D2). Covers all
-        // interactive elements visible on the page. Stable for the
-        // lifetime of this snapshot; agents must re-snapshot after navigation.
-        ref_map: collectRefMap()
+        tables: collectTables()
       };
     },
 
@@ -221,52 +178,6 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         throw new Error(`No element matched selector: ${selector}`);
       }
       return attrsToObject(element);
-    },
-
-    // Ref-based agent-facing surface (Phase D2). Each method looks up the
-    // ref in the most recent snapshot's ref_map and falls back to a fresh
-    // selector build via buildSelector.
-    clickRef(ref) {
-      const element = refToElement(ref);
-      if (!element) {
-        throw new Error(`No element matched ref: ${ref}`);
-      }
-      element.click();
-      return { ok: true, ref };
-    },
-
-    typeTextRef(ref, text) {
-      const element = refToElement(ref);
-      if (!element) {
-        throw new Error(`No element matched ref: ${ref}`);
-      }
-      if (!('value' in element)) {
-        throw new Error(`Element does not support value assignment: ${ref}`);
-      }
-      element.focus();
-      element.value = text;
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true, ref };
-    },
-
-    submitFormRef(ref) {
-      const element = refToElement(ref);
-      if (!element) {
-        throw new Error(`No element matched ref: ${ref}`);
-      }
-      const form = element.tagName && element.tagName.toLowerCase() === 'form'
-        ? element
-        : element.closest('form');
-      if (!form) {
-        throw new Error(`No form found for ref: ${ref}`);
-      }
-      if (typeof form.requestSubmit === 'function') {
-        form.requestSubmit();
-      } else {
-        form.submit();
-      }
-      return { ok: true, ref };
     },
 
     click(selector) {
@@ -335,78 +246,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       target.dispatchEvent(new KeyboardEvent('keydown', init));
       target.dispatchEvent(new KeyboardEvent('keyup', init));
       return { ok: true };
-    },
-
-    evaluate(script) {
-      // Sandbox: webview's JS context only. Cross-origin frame access
-      // will throw on the page side; that's the intended boundary.
-      const result = (0, eval)(script);
-      if (result === undefined || result === null) {
-        return '';
-      }
-      return typeof result === 'string' ? result : JSON.stringify(result);
     }
-  };
-
-  // ---- Ref registry ----
-
-  // Most-recent ref_map; rebuilt on every collectRefMap() call.
-  let lastRefMap = {};
-
-  const collectRefMap = () => {
-    const map = {};
-    let counter = 1;
-    const seen = new WeakSet();
-    const interactiveSelector =
-      'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [tabindex]';
-    const interactive = Array.from(document.querySelectorAll(interactiveSelector)).slice(0, 1000);
-    for (const el of interactive) {
-      if (seen.has(el)) {
-        continue;
-      }
-      seen.add(el);
-      const ref = '@e' + counter++;
-      map[ref] = {
-        tag: el.tagName ? el.tagName.toLowerCase() : '',
-        id: el.id || null,
-        classes: Array.from(el.classList || []),
-        text: limitText(el.innerText || el.textContent || '', 220),
-        selector: buildSelector(el),
-        xpath: elementToXPath(el)
-      };
-      if (counter > 9999) {
-        break; // safety cap
-      }
-    }
-    lastRefMap = map;
-    return map;
-  };
-
-  const refToElement = (ref) => {
-    if (!ref || typeof ref !== 'string') {
-      return null;
-    }
-    const entry = lastRefMap[ref];
-    if (entry && entry.selector) {
-      const element = document.querySelector(entry.selector);
-      if (element) {
-        return element;
-      }
-    }
-    // Ref not in the last map (e.g. page changed): build a fresh selector
-    // by parsing @eN and matching the n-th interactive element.
-    const match = /@e(\d+)/.exec(ref);
-    if (!match) {
-      return null;
-    }
-    const idx = parseInt(match[1], 10);
-    const interactiveSelector =
-      'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [tabindex]';
-    const interactive = Array.from(document.querySelectorAll(interactiveSelector));
-    if (idx >= 1 && idx <= interactive.length) {
-      return interactive[idx - 1];
-    }
-    return null;
   };
 
   window.__NEUROBROWSER_RUNTIME__ = runtime;
@@ -425,8 +265,6 @@ struct RuntimePage {
     runtime_id: String,
     viewport: BrowserViewport,
     loading: bool,
-    visible: bool,
-    last_snapshot: Option<PageSnapshot>,
 }
 
 #[derive(Default)]
@@ -444,8 +282,6 @@ impl BrowserRuntimeRegistry {
                 runtime_id,
                 viewport: BrowserViewport::default(),
                 loading: false,
-                visible: false,
-                last_snapshot: None,
             },
         );
     }
@@ -530,12 +366,6 @@ impl BrowserRuntimeRegistry {
             .ok_or_else(|| "Runtime page not found".to_string())
     }
 
-    pub fn set_visible(&self, page_id: usize, visible: bool) {
-        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.visible = visible;
-        }
-    }
-
     pub fn set_active_page(&self, page_id: Option<usize>) {
         *self.active_page.lock().unwrap() = page_id;
     }
@@ -553,19 +383,6 @@ impl BrowserRuntimeRegistry {
             .collect()
     }
 
-    pub fn update_snapshot(&self, page_id: usize, snapshot: &PageSnapshot) {
-        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.last_snapshot = Some(snapshot.clone());
-        }
-    }
-
-    pub fn snapshot(&self, page_id: usize) -> Option<PageSnapshot> {
-        self.pages
-            .lock()
-            .unwrap()
-            .get(&page_id)
-            .and_then(|page| page.last_snapshot.clone())
-    }
 }
 
 #[derive(Deserialize)]
@@ -666,11 +483,6 @@ const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
 #[async_trait]
 impl BrowserInterface for TauriBrowserRuntime {
     async fn navigate(&self, url: &str) -> Result<(), String> {
-        // The SAME shared boundary the static engine uses. This path was previously
-        // unguarded: the SSRF check lived privately inside `BrowserEngine`, so the
-        // interactive runtime — the one that actually drives a browser, and the one an
-        // agent steered by page content reaches — handed URLs straight to the webview.
-        // A guard only one implementation calls is not a boundary.
         if let Some(reason) = neurobrowser::netguard::blocked_reason(url) {
             tracing::warn!("Blocked navigation to {}: {}", url, reason);
             return Err(reason.to_string());
@@ -680,11 +492,6 @@ impl BrowserInterface for TauriBrowserRuntime {
         self.webview()?
             .navigate(parsed)
             .map_err(|e| e.to_string())?;
-        // Await the load before returning. Previously this returned as soon as the
-        // webview was TOLD to navigate, so a caller's next `snapshot()` raced the page
-        // transition: it could capture the old URL, or fail outright while the old
-        // document unloaded. Navigation is not complete until the page is ready, and
-        // the trait's contract is "navigate", not "start navigating".
         self.wait_for_navigation().await
     }
 
@@ -776,17 +583,10 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
         let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()").await?;
         enrich_snapshot(&mut snapshot);
-        self.registry.update_snapshot(self.page_id, &snapshot);
         Ok(snapshot)
     }
 
     async fn wait_for_navigation(&self) -> Result<(), String> {
-        // Honest failure. This previously swallowed the timeout with
-        // `.or_else(|_| Ok(()))`, so a page that never finished loading reported
-        // success and every caller proceeded on a false premise — the same
-        // silent-success family as the static engine's click/type/submit no-ops that
-        // this branch fixes elsewhere. A slow page is a real condition the caller is
-        // entitled to know about and can retry.
         self.wait_for_ready(NAVIGATION_READY_TIMEOUT_MS).await
     }
 }
@@ -802,16 +602,10 @@ pub fn create_runtime_page(
         .map_err(|e| e.to_string())?;
     let registry_for_nav = registry.clone();
     let registry_for_load = registry.clone();
-    let registry_for_title = registry.clone();
 
     let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
         .initialization_script(RUNTIME_INIT_SCRIPT)
-        // EVERY hop, not just the one `navigate()` was asked for. The webview follows
-        // 302s, JS redirects, and clicked links on its own; checking only the entry
-        // point meant an attacker-controlled public origin could redirect the live
-        // webview to http://169.254.169.254/ or file:// and `snapshot()` would return
-        // the contents to the model. Returning false here cancels the load, so this is
-        // the hop-level equivalent of the static engine's redirect policy.
+        // Cancel hops the shared netguard rejects (redirects, JS, clicked links).
         .on_navigation(move |url| {
             if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
                 tracing::warn!("Blocked webview navigation to {}: {}", url, reason);
@@ -824,11 +618,6 @@ pub fn create_runtime_page(
         .on_page_load(move |_webview, payload| match payload.event() {
             PageLoadEvent::Started => registry_for_load.set_loading(page_id, true),
             PageLoadEvent::Finished => registry_for_load.set_loading(page_id, false),
-        })
-        .on_document_title_changed(move |_webview, _title| {
-            if let Some(snapshot) = registry_for_title.snapshot(page_id) {
-                registry_for_title.update_snapshot(page_id, &snapshot);
-            }
         });
 
     let webview = window
@@ -880,10 +669,8 @@ pub fn set_active_runtime_page(
                 ))
                 .map_err(|e| e.to_string())?;
             webview.show().map_err(|e| e.to_string())?;
-            registry.set_visible(known_page_id, true);
         } else {
             webview.hide().map_err(|e| e.to_string())?;
-            registry.set_visible(known_page_id, false);
         }
     }
     Ok(())

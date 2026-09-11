@@ -9,7 +9,6 @@ class ContentViewController: NSViewController {
     var backButton: NSButton!
     var forwardButton: NSButton!
     var reloadButton: NSButton!
-    var tabView: NSTabView!
     var webViews: [WKWebView] = []
     var tabBar: NSSegmentedControl!
     var pageUpdateHandler: (([String: Any]) -> Void)?
