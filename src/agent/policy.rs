@@ -391,11 +391,10 @@ fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
 /// never be navigated to programmatically. These execute script or read local
 /// resources and carry no host, so the domain allow/deny list cannot govern them.
 fn unsafe_navigation_scheme(url: &str) -> Option<String> {
-    let lowered = url.trim().to_ascii_lowercase();
-    ["javascript", "data", "vbscript", "file", "blob"]
-        .into_iter()
-        .find(|scheme| lowered.starts_with(&format!("{scheme}:")))
-        .map(str::to_string)
+    match crate::netguard::blocked_reason(url) {
+        Some(crate::netguard::BlockReason::DisallowedScheme(scheme)) => Some(scheme),
+        _ => None,
+    }
 }
 
 fn target_domain(
