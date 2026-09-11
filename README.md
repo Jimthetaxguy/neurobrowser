@@ -1,50 +1,56 @@
 # neurobrowser
 
-AI-native browser with a custom Rust rendering engine and Tauri desktop runtime.
+**v0.1.1** — AI-native desktop browser: Rust library + Tauri/React shell.
+Agents drive a real OS webview (or the scraper-backed headless daemon)
+through a 12-tool surface gated by `ActionPolicy`. There is no custom
+rendering engine; FastRender was never integrated.
+
+See [SKILL.md](SKILL.md) and [docs/AGENT-SURFACE.md](docs/AGENT-SURFACE.md)
+for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
 
 ## Tech Stack
 
-- **Rust** (single crate + Tauri v2 wrapper)
-- **Tokio** full async runtime
-- **thiserror v2** for error handling (AgentError + ProviderError)
-- **reqwest** for HTTP, **scraper** for HTML parsing, **serde** for serialization
-- **async-trait** for async trait methods
+- **Two crates, no workspace:** `neurobrowser` (`src/`) and `neurobrowser-tauri` (`src-tauri/`)
+- **Desktop (macOS only):** React + Vite shell, Tauri v2 commands, OS child webview per page
+- **Library + headless:** Tokio, reqwest, `scraper` HTML parsing, serde, thiserror v2
+- **Agent IPC:** `SKILL.md` / `docs/AGENT-SURFACE.md`; `neurobrowser-headless` JSON-RPC over UDS or TCP
 
 ## Quick Start
 
 ```bash
-cargo build                # Dev build
+cargo build                # Library crate (neurobrowser)
 cargo test                 # Unit + integration tests
 cargo clippy --all-targets # Lint
-cargo check --manifest-path src-tauri/Cargo.toml # Tauri wrapper check
-cargo build --release      # Release (LTO + strip + abort)
+cargo check --manifest-path src-tauri/Cargo.toml # Desktop crate type-check
+cargo build --release      # Library release (LTO + strip + abort)
 ./verify.sh                # Full verification chain
 ```
 
+Desktop (`npx tauri dev` in `src-tauri/`) is macOS. Headless daemon commands
+live in [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
+
 ## Architecture
 
-This repository keeps the architecture in the Rust modules and project docs, including:
-- Error architecture (ToolError struct with builder pattern, AgentError enum)
-- Async streaming via mpsc channels + StreamEvent tagged JSON
-- Tauri IPC bridge between the desktop shell and Rust backend
-
-See [docs/frontend-architecture-spike.md](docs/frontend-architecture-spike.md)
-for the React + Tauri and React + AppKit frontend lane comparison.
-See [docs/adr/ADR-001-react-tauri-primary.md](docs/adr/ADR-001-react-tauri-primary.md)
-for the accepted frontend path.
-
-## Autonomous Agent Core
-
-The primary agent path is provider-agnostic and run-oriented:
+Shipped run/policy surface:
 
 - `start_agent_run` evaluates model tool calls against `ActionPolicy`
+  (`ReadOnly` / `Assisted` / `HighAutonomy`)
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
-- every proposed, blocked, approved, rejected, and executed action is returned as a structured run event
-- default autonomy is assisted: reads, snapshots, scrolling, and same-domain navigation can run; typing, form submission, high-impact actions, denylisted domains, and suspicious page content stop for approval or blocking
+- every proposed, blocked, approved, rejected, and executed action is returned
+  as a structured run event
+- default autonomy is Assisted: reads, snapshots, scrolling, and same-domain
+  navigation can run; typing, form submission, high-impact actions, denylisted
+  domains, and suspicious page content stop for approval or blocking
+- headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /
+  `policy.snapshot`, `snapshot`
 
-See [docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md](docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md)
-and [docs/stories/STORY-001-autonomous-browser-agent-core.md](docs/stories/STORY-001-autonomous-browser-agent-core.md)
-for the committed spec and acceptance trail.
+React + Tauri is the primary frontend path
+([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).
+Lane comparison: [docs/frontend-architecture-spike.md](docs/frontend-architecture-spike.md).
+
+Spec and acceptance trail:
+[SPEC-AUTONOMOUS-BROWSER-AGENT](docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md),
+[STORY-001](docs/stories/STORY-001-autonomous-browser-agent-core.md).
 
 ## Documentation Workflow
 
