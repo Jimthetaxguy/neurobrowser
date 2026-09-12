@@ -5,11 +5,9 @@
 //! Claude Code, custom workers) connect, send JSON-RPC-shaped requests, and
 //! receive the tool results.
 //!
-//! For v0.1 the daemon uses the in-process `BrowserEngine` over reqwest +
-//! scraper rather than a Tauri child webview. That keeps the daemon
-//! platform-portable and dependency-light at the cost of full JS execution.
-//! v0.1.1 will add a `--tauri` flag that boots a real Tauri child webview
-//! and routes through the IPC bridge.
+//! The daemon uses the in-process `BrowserEngine` over reqwest + scraper
+//! rather than a child webview. That keeps it platform-portable and
+//! dependency-light at the cost of full JS execution.
 //!
 //! Wire format (newline-delimited JSON over the socket):
 //!

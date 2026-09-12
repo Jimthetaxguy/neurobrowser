@@ -27,8 +27,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-[target.'cfg(unix)'.dependencies]
-tokio = { version = "1", features = ["net"] }
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

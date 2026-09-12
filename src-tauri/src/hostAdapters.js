@@ -131,14 +131,27 @@ export function createAppKitHostAdapter() {
     async syncBrowserViewport() {},
     async validateUrl(url) {
       const trimmed = url.trim();
-      if (!trimmed) return { valid: false, normalized_url: "", error: "URL is empty" };
-      if (trimmed.includes("javascript:") || trimmed.includes("data:")) {
-        return { valid: false, normalized_url: trimmed, error: "Dangerous URL scheme blocked" };
+      let normalized;
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        normalized = trimmed;
+      } else if (trimmed.includes(".") && !trimmed.includes(" ")) {
+        normalized = `https://${trimmed}`;
+      } else {
+        return { valid: false, normalized_url: "", error: "Invalid URL format" };
       }
-      const normalized =
-        trimmed.startsWith("http://") || trimmed.startsWith("https://")
-          ? trimmed
-          : `https://${trimmed}`;
+      let parsed;
+      try {
+        parsed = new URL(normalized);
+      } catch {
+        return { valid: false, normalized_url: normalized, error: "Invalid URL format" };
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return {
+          valid: false,
+          normalized_url: normalized,
+          error: `Refusing to navigate to disallowed scheme '${parsed.protocol}'`,
+        };
+      }
       return { valid: true, normalized_url: normalized, error: null };
     },
     async navigate(activeSessionId, pageId, url) {
@@ -149,16 +162,7 @@ export function createAppKitHostAdapter() {
       await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
       return latestSnapshot;
     },
-    async ask(activeSessionId, pageId, prompt) {
-      await send("ask", { sessionId: activeSessionId, pageId, prompt });
-      return {
-        response: "Native AppKit lane received the request. Rust agent execution is the remaining bridge work.",
-        tools_used: ["appkit_host_bridge"],
-        iterations: 1,
-      };
-    },
-    async startAgentRun(activeSessionId, pageId, prompt) {
-      await send("start_agent_run", { sessionId: activeSessionId, pageId, prompt });
+    async startAgentRun() {
       return {
         run_id: `appkit-run-${Date.now()}`,
         status: "completed",
@@ -169,8 +173,7 @@ export function createAppKitHostAdapter() {
         approval_id: null,
       };
     },
-    async submitApproval(runId, approved, message = null) {
-      await send("submit_approval", { runId, approved, message });
+    async submitApproval(runId, approved) {
       return {
         run_id: runId,
         status: approved ? "completed" : "cancelled",
@@ -182,7 +185,6 @@ export function createAppKitHostAdapter() {
       };
     },
     async cancelAgentRun(runId) {
-      await send("cancel_agent_run", { runId });
       return {
         run_id: runId,
         status: "cancelled",
@@ -204,7 +206,6 @@ export function createAppKitHostAdapter() {
       };
     },
     async setActionPolicy(policy) {
-      await send("set_action_policy", { policy });
       return policy;
     },
     async browserAction(command, activeSessionId, pageId) {

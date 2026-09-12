@@ -6,7 +6,6 @@ class MainWindowController: NSWindowController {
     var browserViewController: BrowserViewController!
     
     convenience init() {
-        // Create the main window
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -23,7 +22,6 @@ class MainWindowController: NSWindowController {
         
         self.init(window: window)
         
-        // Setup the browser view controller
         browserViewController = BrowserViewController()
         window.contentViewController = browserViewController
     }
