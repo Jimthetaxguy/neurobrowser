@@ -274,7 +274,7 @@ impl ActionPolicy {
 
         match self.autonomy_level {
             AutonomyLevel::ReadOnly => match tool_risk.action {
-                ToolAction::Read | ToolAction::Wait | ToolAction::Scroll | ToolAction::Navigate => {
+                ToolAction::Read | ToolAction::Wait | ToolAction::Scroll => {
                     PolicyDecision::allow(redacted_arguments)
                 }
                 _ => {
@@ -359,10 +359,8 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
-    // Scan BOTH the rendered text AND the raw HTML. Injection payloads are often
-    // hidden in attributes/comments that never become DOM text nodes; the previous
-    // `text.or(html)` left the HTML branch dead (text is virtually always present),
-    // so attribute/comment-hidden payloads were invisible to the detector.
+    // Scan both the rendered text and the raw HTML. Injection payloads are often
+    // hidden in attributes/comments that never become DOM text nodes.
     let mut haystack = String::new();
     if let Some(text) = snapshot.text.as_deref() {
         haystack.push_str(text);
