@@ -20,11 +20,11 @@ updated: "2026-07-08"
 - **Tauri desktop shell:** React frontend with tab strip, URL bar,
   chat panel, command palette, settings drawer — runs against a Rust
   backend that owns a Tauri child webview per page (`src-tauri/src/runtime.rs`).
-- **Agent surface:** 12 structured tools (`snapshot`, `click`, `type_text`,
-  `submit_form`, `query_selector`, `evaluate`, `navigate`, `get_text`,
-  `get_attribute`, `wait_for`, `extract_text`, `screenshot`) plus
-  ref-based interaction (`@eN` references resolved through a `ref_map`).
-  See `docs/AGENT-SURFACE.md`.
+- **Agent surface:** 17 CSS-selector tools from `ToolRegistry`
+  (`navigate`, `wait`, `query_dom`, `get_text`, `get_links`, `get_prices`,
+  `get_tables`, `click`, `type`, `scroll_to`, `scroll_by`, `submit_form`,
+  `keypress`, `screenshot`, `back`, `forward`, `reload`). Selector-based;
+  `PageSnapshot` has no `ref_map`. See `docs/AGENT-SURFACE.md`.
 - **Action policy:** `ReadOnly` / `Assisted` / `HighAutonomy` modes with
   per-domain allow/deny lists, sensitive-arg redaction, prompt-injection
   detection, and three outcomes (`Allow`, `RequireApproval`, `Deny`).

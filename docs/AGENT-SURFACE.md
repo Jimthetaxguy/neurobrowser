@@ -1,262 +1,173 @@
 # NeuroBrowser — Agent Surface (spec-of-record)
 
-This document is the canonical spec for the **agent-facing tool surface** that
-any external agent (ROSA, Claude Code, a custom worker) uses to drive
-NeuroBrowser. It is the source-of-truth for:
+Canonical agent-facing surface for the **shipped crate**. Update `SKILL.md`
+with this file.
 
-- The 12 tools (`snapshot`, `click`, `type_text`, `submit_form`,
-  `query_selector`, `evaluate`, `navigate`, `get_text`, `get_attribute`,
-  `wait_for`, `extract_text`, `screenshot`).
-- The JSON schemas for each tool's arguments and return values.
-- The three autonomy levels (`ReadOnly`, `Assisted`, `HighAutonomy`) and the
-  policy gates that bind them.
+- **17 tools** from `default_tool_registry()` in `src/browser/mod.rs`.
+- CSS selectors (or pixels / a key). There is no `ref_map`
+  (`PageSnapshot` has no such field).
+- Autonomy: `ReadOnly` / `Assisted` / `HighAutonomy` via `ActionPolicy`.
+- Headless JSON-RPC is `ping` / `policy.*` / `snapshot` (scraper/stub), not
+  a live WKWebView session.
 
-`SKILL.md` mirrors this document as the agent-loadable invocation spec. Update
-both together.
+Desktop is macOS WKWebView. Headless / `BrowserEngine` is reqwest+scraper.
 
-## Concept: ref-based interaction
+Not shipped as named tools: `evaluate`, `get_attribute`, `wait_for`,
+`extract_text`.
 
-External agents pass `[@e1, @e2, ...]` **element refs** rather than CSS
-selectors or XPaths. Every `snapshot()` returns a ref-map alongside the
-accessibility tree:
+## PageSnapshot
 
-```json
-{
-  "url": "https://example.com/login",
-  "title": "Sign in - Example",
-  "viewport": { "width": 1280, "height": 720, "scroll_x": 0, "scroll_y": 0 },
-  "ref_map": {
-    "@e1": { "tag": "input", "id": "email",    "classes": ["field"],     "xpath": "//input[@id='email']" },
-    "@e2": { "tag": "input", "id": "password", "classes": ["field"],     "xpath": "//input[@id='password']" },
-    "@e3": { "tag": "button","id": "submit",  "classes": ["primary"],   "xpath": "//button[@id='submit']" }
-  },
-  "tree": "<accessibility tree as flattened ARIA>"
-}
+`BrowserInterface::snapshot()` (library method, **not** a registry tool)
+returns:
+
+```text
+url, title, html, text,
+viewport_width, viewport_height, scroll_x, scroll_y,
+interactive_ready, links, images, forms, prices, tables
 ```
 
-Refs are stable for the lifetime of the current snapshot. After navigation,
-re-snapshot and re-resolve refs. This avoids the brittle-text-selector problem
-of CSS selectors (which break when a class name changes) and the
-implementation-coupled problem of XPaths (which break when developers refactor
-DOM).
+No element-ref map. No ARIA tree field.
 
-## Tools (12)
+## Tools (17)
 
-### 1. `snapshot(url_or_ref)`
+Arguments are `HashMap<String, String>`. Results are `ToolResult`
+(`tool_name`, `arguments`, `result`, `success`).
 
-Take a snapshot of a page. If `url_or_ref` is a URL, navigate first then
-snapshot. If it's a ref (e.g. `@e3`), snapshot without navigation.
+On `BrowserEngine`, click / type / submit / scroll / keypress fail with an
+honest static-engine error (no live DOM). `back` / `forward` / `reload` /
+`screenshot` use the `BrowserInterface` defaults (error) unless a runtime
+overrides them. The Tauri runtime does not override `screenshot`.
 
-```json
-// arguments
-{ "url_or_ref": "https://example.com/login" }
+### 1. `navigate` — `url`
 
-// return — matches the example above
-{ "url", "title", "viewport", "ref_map", "tree" }
-```
+Navigate / fetch. Risk: `Navigate`, medium.
 
-### 2. `click(ref)`
+### 2. `wait`
 
-Click an element by ref. Returns before/after URL (useful for confirming
-navigation).
+Wait for navigation to settle. No args. Risk: `Wait`, low.
 
-```json
-// arguments
-{ "ref": "@e3" }
+### 3. `query_dom` — `selector`
 
-// return
-{ "ok": true, "before_url": "https://example.com/login", "after_url": "https://example.com/dashboard" }
-```
+Query by CSS selector. Returns a text dump of matches, or
+`No elements found`. Risk: `Read`, low.
 
-If `click` requires approval under the active policy, the return is:
+### 4. `get_text` — `selector`
 
-```json
-{ "ok": false, "pending_approval_id": "uuid", "reasons": ["Assisted mode requires confirmation for clicks"] }
-```
+Concatenated text of matches. Risk: `Read`, low.
 
-### 3. `type_text(ref, text)`
+### 5. `get_links`
 
-Type text into an input by ref. Fires `InputEvent`s to the element.
+All links (`text - href`). Risk: `Read`, low.
 
-```json
-{ "ref": "@e2", "text": "correct horse battery staple" }
-→ { "ok": true }
-```
+### 6. `get_prices`
 
-### 4. `submit_form(ref)`
+Price-like strings from the snapshot. Risk: `Read`, low.
 
-Submit a form (or invoke a button) by ref. Waits for the resulting
-navigation.
+### 7. `get_tables`
 
-```json
-{ "ref": "@e3" }
-→ { "ok": true, "response_url": "https://example.com/dashboard" }
-```
+`Table N: H headers, R rows` per table. Risk: `Read`, low.
 
-### 5. `query_selector(selector)`
+### 8. `click` — `selector`
 
-Resolve a CSS selector to a list of refs. Useful when an agent knows the
-selectors but hasn't snapshotted.
+Click. Risk: `Click`, medium.
 
-```json
-{ "selector": "nav a" }
-→ { "elements": ["@e11", "@e12", "@e13"] }
-```
+### 9. `type` — `selector`, `text`
 
-### 6. `evaluate(script)`
+Type into an input. `text` is sensitive (not echoed in the result).
+Risk: `Type`, high.
 
-Run a JavaScript expression inside the webview's sandbox. Returns the value
-as a string. Sandboxed to the page's origin; cross-origin reads blocked.
+### 10. `scroll_to` — `selector`
 
-```json
-{ "script": "document.cookie" }
-→ { "value": "session=abc123" }
-```
+Scroll an element into view. Risk: `Scroll`, low.
 
-### 7. `navigate(url)`
+### 11. `scroll_by` — `x`, `y`
 
-Navigate the active page to a URL. Normalized (adds `https://` if missing).
+Pixel deltas. Risk: `Scroll`, low.
 
-```json
-{ "url": "example.com/about" }
-→ { "ok": true, "page_handle": "0" }
-```
+### 12. `submit_form` — `selector`
 
-### 8. `get_text(ref)`
+Submit a form (or an element inside one). Risk: `Submit`, high,
+externally visible.
 
-Read the visible text of an element.
+### 13. `keypress` — `key`
 
-```json
-{ "ref": "@e1" }
-→ { "text": "Email address" }
-```
+Send a key (`Enter`, `Escape`, …). Risk: `Keypress`, medium.
 
-### 9. `get_attribute(ref, name)`
+### 14. `screenshot`
 
-Read a single attribute of an element. Returns `null` if absent.
+Registered. `BrowserInterface::screenshot` defaults to
+`Err("screenshot is not supported by this browser")`. No PNG path is
+wired. Risk: `Screenshot`, low.
 
-```json
-{ "ref": "@e3", "name": "data-test-id" }
-→ { "value": "submit-btn" }
+### 15. `back`
 
-// or for a missing attr
-→ { "value": null }
-```
+History back. Default: not supported. Risk: `Back`, low.
 
-### 10. `wait_for(selector, timeout_ms)`
+### 16. `forward`
 
-Block until the selector matches at least one element, or timeout.
+History forward. Default: not supported. Risk: `Forward`, low.
 
-```json
-{ "selector": ".dashboard", "timeout_ms": 8000 }
-→ { "ok": true, "elapsed_ms": 1240 }
-```
+### 17. `reload`
 
-### 11. `extract_text(ref, structured?)`
+Reload. Default: not supported. Risk: `Reload`, low.
 
-Read the inner text and (optionally) parse it into a structured form.
+## Headless JSON-RPC
 
-```json
-{ "ref": "@e20", "structured": true }
-→ {
-    "text": "Total: $42.50\nDate: 2026-07-08",
-    "structured": { "total": "42.50", "currency": "USD", "date": "2026-07-08" }
-  }
-```
+`src-tauri/src/bin/headless.rs` (`--features headless`). Newline-delimited
+`{id, method, params}` → `{id, ok, result|error}`.
 
-`structured=true` returns a best-effort parse based on common patterns
-(amounts, dates, prices). For tables / lists / repeating structures, prefer
-`snapshot` + the `tree` field.
+| Method | What it does |
+|---|---|
+| `ping` | `{ "pong": true }` |
+| `policy.get` | Current `ActionPolicy` |
+| `policy.set` | Replace `ActionPolicy` |
+| `policy.evaluate` | Gate a tool name + args (no execution) |
+| `policy.snapshot` | Current policy JSON |
+| `snapshot` | Hardcoded `about:blank` stub — not a crate `PageSnapshot` |
 
-### 12. `screenshot(viewport?)`
+Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 
-Take a PNG screenshot of the current page. Returns base64-encoded bytes.
+## Autonomy
 
-```json
-{ "viewport": { "width": 1280, "height": 720 } }
-→ { "base64_png": "iVBORw0KGgo...", "viewport": { "width": 1280, "height": 720 }, "size_bytes": 42183 }
-```
+`ActionPolicy::evaluate` gates by `ToolRisk.action` and domain lists.
 
-If `viewport` is omitted, uses the page's current viewport. Screenshots
-are full-page by default; pass `viewport.fullPage = false` for viewport-only.
-
-## Autonomy levels
-
-Three levels bind to the `ActionPolicy`'s `AutonomyLevel`:
-
-| Level | Allowed actions | Blocked actions |
+| Level | Auto-allow | Otherwise |
 |---|---|---|
-| `ReadOnly` | `snapshot`, `query_selector`, `get_text`, `get_attribute`, `extract_text`, `screenshot`, `evaluate` (read-only scripts only) | `click`, `type_text`, `submit_form`, `navigate`, `evaluate` (anything that mutates) |
-| `Assisted` | everything in `ReadOnly` + `click`, `type_text`, `submit_form`, `navigate` | actions that touch `denied_domains` or trigger `RiskFlag::Sensitive` require explicit approval (returned as `pending_approval_id`) |
-| `HighAutonomy` | everything | actions touching `denied_domains` still block; sensitive-args (passwords, tokens) auto-redact but the call runs |
+| `ReadOnly` | `Read`, `Wait`, `Scroll`, `Navigate` | `Block` |
+| `Assisted` | `Read`, `Wait`, `Scroll`, same-domain `Navigate` | `RequireApproval` |
+| `HighAutonomy` | allowed tools run | denied domains still `Block` |
+
+Sensitive args (`type`, or keys matching
+`password|token|secret|api_key|apikey|ssn|social|credit|card|cvv|otp|auth`)
+→ `RequireApproval` and `[REDACTED]` in the audit trail.
 
 ## Policy gates
 
-Every tool call goes through `ActionPolicy::evaluate` before execution. The
-policy inspects:
+1. `denied_tools` / `denied_domains` → `Block`.
+2. Non-empty `allowed_domains` → off-list `Block`.
+3. `javascript:` / `data:` / `file:` / … navigate → `Block`.
+4. Prompt-injection on the page → `Block`.
+5. `approval_required_tools` → `RequireApproval`.
 
-1. **Domain membership** — if the current page URL is in
-   `ActionPolicy.denied_domains`, the call returns `Block` with
-   `RiskFlag::DomainDenied`.
-2. **Autonomy level** — if the tool is not allowed at the current level,
-   the call returns `RequireApproval` (Assisted) or `Block` (ReadOnly).
-3. **Sensitive-arg redaction** — argument values whose keys match
-   `(password|token|secret|api_key|apikey|ssn|social|credit|card|cvv|otp|auth)`
-   are replaced with `[REDACTED]` in the audit trail and events. The actual
-   call still runs (with the real value) unless the policy is in a stricter
-   mode (Phase E will add a per-worker redact-only mode).
-4. **Prompt-injection detection** — substring detection on tool arguments;
-   if the argument value contains `ignore previous instructions` or
-   `reveal your instructions`, the call is `Block`-ed.
-
-The current `ActionPolicy` is exposed via `set_action_policy` /
-`get_action_policy` Tauri commands (and, in the headless daemon, via the
-`policy.get` / `policy.set` IPC). Agents can read it and reason about it.
+Tauri: `get_action_policy` / `set_action_policy`. Daemon: `policy.get` /
+`policy.set`.
 
 ## Error shape
 
-Tool calls that fail return:
+Crate tools return `ToolResult { success: false, result: "<message>" }`.
+Daemon errors:
 
 ```json
-{ "ok": false, "error": { "code": "TIMEOUT", "message": "..." } }
+{ "ok": false, "error": { "code": "INTERNAL", "message": "..." } }
 ```
 
-Codes:
-
-- `TIMEOUT` — exceeded `timeout_ms` (default 8s, 3s for follow-on actions).
-- `BLOCKED` — call denied by policy.
-- `NOT_FOUND` — ref or selector didn't resolve.
-- `EVAL_ERROR` — `evaluate` script threw.
-- `NAVIGATION_FAILED` — navigate didn't reach a loaded state in time.
-- `INTERNAL` — something on our side broke.
-
-## Worked example: log in to a site
-
-```javascript
-// pseudocode for an external agent
-const snap = await tools.snapshot({ url_or_ref: "https://example.com/login" });
-const email_ref = findRefByAriaLabel(snap, "Email");
-const password_ref = findRefByAriaLabel(snap, "Password");
-const submit_ref = findRefByAriaLabel(snap, "Submit");
-
-await tools.type_text({ ref: email_ref, text: "[email protected]" });
-await tools.type_text({ ref: password_ref, text: process.env.PASSWORD });
-
-// Sensitive-arg redaction will replace "password" with [REDACTED] in audit
-// trails, but the actual call goes through (policy risk mode = HighAutonomy).
-
-const sub = await tools.submit_form({ ref: submit_ref });
-if (!sub.ok) throw new Error(`Login failed: ${sub.error?.message}`);
-
-await tools.wait_for({ selector: ".dashboard", timeout_ms: 5000 });
-const after = await tools.snapshot({ url_or_ref: "@self" });
-```
+Codes the daemon actually emits include `INTERNAL`, `VALIDATION`,
+`UNKNOWN_METHOD`, plus policy outcomes from `policy.evaluate`.
 
 ## See also
 
-- `SKILL.md` — agent-loadable version of this spec.
-- `docs/RUNBOOK-DEV.md` — how to run NeuroBrowser locally.
-- `docs/TESTING-NOTES.md` — which parts are automated vs manual.
-- `src-tauri/src/runtime.rs` — implementation of the JS-RPC bridge that
-  exposes these tools.
-- `src/agent/policy.rs` — implementation of the policy gates.
+- `SKILL.md` — agent-loadable version.
+- `docs/RUNBOOK-DEV.md` — build + run.
+- `src/browser/mod.rs` — registry + `BrowserEngine`.
+- `src/tools/mod.rs` — `BrowserInterface` / `PageSnapshot`.
+- `src/agent/policy.rs` — policy gates.

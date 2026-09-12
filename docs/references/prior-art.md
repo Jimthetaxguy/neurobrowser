@@ -33,21 +33,15 @@ SKILL.md that any AI agent can load to drive the browser.
 
 **Repo:** `https://github.com/vercel-labs/agent-browser`
 
-> **TODO:** PROJECT.md still cites `https://github.com/AIAnytime/agent-browser`
-> at line 447. The user's local Desktop analysis observed `vercel-labs/agent-browser`
-> as the actual reference. Need to verify which repo is the real inspiration
-> (or whether both exist) and update PROJECT.md accordingly.
-
 ## agent-browser (AIAnytime/agent-browser)
 
-**Role observed:** PROJECT.md:447 cites this URL as a source for "AI agent
-patterns, ReAct implementation."
+**Role observed:** earlier ReAct-pattern citation retained in `PROJECT.md`
+for provenance. Unrelated to vercel-labs/agent-browser (name collision).
 
-**Status:** needs verification — see TODO above. Likely either an older name
-for the same project, a fork, or a separate project that informed an earlier
-incarnation of NeuroBrowser's design.
+**Status:** not an architectural ancestor. vercel-labs/agent-browser is the
+current agent-CLI reference.
 
-**Repo:** `https://github.com/AIAnytime/agent-browser` (per PROJECT.md:447)
+**Repo:** `https://github.com/AIAnytime/agent-browser`
 
 ## hyperbrowser-app-examples
 
@@ -97,15 +91,3 @@ Chromium/WebView. Cited in PROJECT.md's `competitive_analysis`.
 **Repos / sites:**
 - `https://arc.net`
 - `https://www.opera.com/features/opera-aria`
-
-## Code-quality reference: real-systems-only
-
-Per `~/.ai-memory/core/agent-rules/rules.md` (`real-systems-only` rule),
-NeuroBrowser's integrations must use real backing systems:
-- **OpenAI** (real API, key via env / Infisical)
-- **Anthropic** (real API, key via env / Infisical)
-- **Ollama** (real local daemon, no mock fallback in production code)
-- **Tauri child webview** (real WKWebView/WebView2/WebKitGTK, no iframe stub)
-
-Every PR landing in NeuroBrowser must keep this invariant. See `PROJECT.md` §
-"Real systems" (added in Phase F1).

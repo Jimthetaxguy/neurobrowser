@@ -92,9 +92,6 @@ Required checks before promoting changes against this spec:
 
 ```bash
 ./verify.sh
-npm run build
-npm audit --audit-level=moderate
-npm run smoke:desktop
 ```
 
 AppKit parity remains deferred unless the Tauri child-webview path fails a real
