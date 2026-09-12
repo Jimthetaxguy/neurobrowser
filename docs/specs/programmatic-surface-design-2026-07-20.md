@@ -78,7 +78,7 @@ Promote src-tauri/src/runtime.rs into a [lib] target so a future --tauri headles
 - Daemon single-shared-state audit gap: every connection sharing one global ActionPolicy/agent slot (headless.rs:106-113,223) → per-session isolation via SessionManager. This is also the prerequisite that makes the socket-authz work meaningful.
 - Socket peer-cred authz task: reduced to a single narrow integration point (tag connection, check owns(session_id) once before dispatch) because every method now takes explicit session_id.
 - NB-12 tool-profile scoping: absorbed via per-session ActionPolicy + list_tools/tools.list surfacing per-tool ToolRisk + effective_under_engine hint, so callers scope the tool surface per session instead of a process-global.
-- CLI v0.2 / v0.1.1 stub: the SKILL.md neurobrowser-cli ask/click/snapshot --session auto stub and the feature-backlog 'neurobrowser skills get <topic>' item are both fulfilled by the cli/ crate + skills.get RPC.
+- CLI v0.2: there is no `neurobrowser-cli` today. This design's `cli/` crate + `skills.get` RPC is the proposed wrapper, not a shipped binary.
 - Credential-vault NB-3 direction: the CLI/daemon standardize on the existing provider env-var conventions (ANTHROPIC_API_KEY/OPENAI_API_KEY/etc. from provider_config_for) and the never-key-on-argv rule, giving NB-3 a single choke point.
 - NB-18 EngineAdapter: the NeuroBrowser facade is deliberately generic over BrowserInterface, staying compatible with a future headless-webview backend rather than duplicating it.
 - ref_map silently dropped by serde (JS builds it, PageSnapshot had no field) — a real latent bug in the Tauri path too, not just headless.
