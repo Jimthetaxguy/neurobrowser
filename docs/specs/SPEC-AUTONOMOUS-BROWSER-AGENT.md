@@ -40,8 +40,8 @@ Browser tools must expose:
 - a deterministic argument parser,
 - a structured result or structured rejection.
 
-The shared tool inventory covers navigation, snapshot, query, click, type,
-keypress, scroll, submit, screenshot, back, forward, reload, and close-tab actions.
+The shared tool inventory covers navigation, query, click, type,
+keypress, scroll, submit, screenshot, back, forward, and reload actions.
 
 ## Policy Requirements
 

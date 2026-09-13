@@ -24,8 +24,7 @@ control autonomous web workflows.
 - The React shell shows policy mode, pending approvals, run status, and action
   history.
 - Compatibility `ask` behavior remains available.
-- Verification passes through the root Rust checks, frontend build, desktop smoke,
-  and audit gate.
+- Verification passes through `./verify.sh`.
 
 ## Implementation Links
 

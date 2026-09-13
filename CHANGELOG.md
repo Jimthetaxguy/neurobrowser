@@ -12,6 +12,9 @@ merged into `main`. Captures Phases A–F of the v0.1 roadmap. The pre-merge
 history lives on `codex-live-tauri-browser-runtime` and the prior `main`
 contained only the v0.1.0 foundation snapshot.
 
+0.1.1 is the docs/release label. The library and Tauri crates remain
+`0.1.0` in `Cargo.toml` / `src-tauri/Cargo.toml` until a real tag.
+
 ### Added
 - **Tauri desktop shell** (`src-tauri/`) with React frontend: tab strip,
   URL bar, chat panel, command palette, settings drawer, streaming agent
@@ -23,11 +26,11 @@ contained only the v0.1.0 foundation snapshot.
   `list_workers`, `navigate`, `set_active_page`, `set_action_policy`,
   `set_provider`, `start_agent_run`, `submit_approval`,
   `sync_browser_viewport`, `validate_url`, `wait_for_page_ready`.
-- **Agent-facing tool surface** (`docs/AGENT-SURFACE.md`): 12 tools
-  (`snapshot`, `click`, `type_text`, `submit_form`, `query_selector`,
-  `evaluate`, `navigate`, `get_text`, `get_attribute`, `wait_for`,
-  `extract_text`, `screenshot`) with ref-based interaction (`@eN`
-  references resolved through `ref_map`).
+- **Agent-facing tool surface** (`docs/AGENT-SURFACE.md`): 17 CSS-selector
+  tools in `default_tool_registry()` (`navigate`, `wait`, `query_dom`,
+  `get_text`, `get_links`, `get_prices`, `get_tables`, `click`, `type`,
+  `scroll_to`, `scroll_by`, `submit_form`, `keypress`, `screenshot`,
+  `back`, `forward`, `reload`).
 - **`SKILL.md`** at repo root — agent-loadable invocation spec.
 - **ActionPolicy** (`src/agent/policy.rs`): three autonomy levels
   (`ReadOnly` / `Assisted` / `HighAutonomy`), per-domain allow/deny lists,
@@ -51,15 +54,19 @@ contained only the v0.1.0 foundation snapshot.
 - **Headless daemon** (`src-tauri/src/bin/headless.rs`): UDS/TCP service
   dispatching `ping`, `policy.get`, `policy.set`, `policy.evaluate`,
   `snapshot`, `policy.snapshot`. Gated by the `headless` feature flag.
-- **Reference docs** (`docs/`): `RUNBOOK-DEV.md` (build/dev), `TESTING-NOTES.md`
-  (automated + manual verification), `AGENT-SURFACE.md` (tool spec),
+- **Reference docs** (`docs/`): `RUNBOOK-DEV.md` (build/dev),
+  `AGENT-SURFACE.md` (tool spec),
   `references/prior-art.md` (vercel-labs/agent-browser, AIAnytime/agent-browser,
   hyperbrowser-app-examples, fastrender).
-- **verify.sh**: one-shot green build covering fmt + clippy `-D warnings` +
-  lib + integration + Tauri frontend + headless release build.
-- **Test coverage**: 50 tests across 8 files (`action_policy`,
-  `agent_memory_metrics`, `browser_engine`, `concurrency`, `session`,
-  `streaming_agent`, `tools`, `workers`).
+- **verify.sh**: library `cargo fmt -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`,
+  and `cargo build --release`, plus Tauri `npm ci && npm run build` and
+  `cargo check --manifest-path src-tauri/Cargo.toml`. Not a headless
+  release build.
+- **Test coverage**: integration tests in `tests/action_policy.rs`,
+  `tests/agent_memory_metrics.rs`, `tests/autonomous_agent.rs`,
+  `tests/error_types.rs`, `tests/headless_daemon.rs`, `tests/streaming.rs`,
+  `tests/streaming_agent.rs`, `tests/workers.rs`.
 
 ### Changed
 - `ReActAgent::execute_with_policy` now seeds the conversation with the
@@ -67,8 +74,7 @@ contained only the v0.1.0 foundation snapshot.
   derives `current_prompt` from `build_context` instead of overwriting it
   after every tool call.
 - `SessionManager::create_page` reorders mutex acquisition
-  (`page_counter` before `sessions`) to break a deadlock observed in
-  `tests/concurrency.rs`.
+  (`page_counter` before `sessions`) to break a deadlock.
 - `src-tauri/src/runtime.rs` gained `buildSelector`, `elementToXPath`,
   `serializeElement` (now returns `xpath`), `collectRefMap` (assigns
   `@eN` refs to interactive elements), and `clickRef` / `typeTextRef` /
