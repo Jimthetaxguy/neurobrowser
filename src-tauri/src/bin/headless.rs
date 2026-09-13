@@ -180,6 +180,7 @@ impl SessionState {
     }
 }
 
+#[derive(Debug)]
 struct Cli {
     socket: Option<PathBuf>,
 }
