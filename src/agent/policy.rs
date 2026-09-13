@@ -349,13 +349,32 @@ fn contains_sensitive_argument(arguments: &HashMap<String, String>) -> bool {
 }
 
 fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_lowercase();
+    let key = key.to_ascii_lowercase();
     [
         "password", "passcode", "token", "secret", "api_key", "apikey", "ssn", "social", "credit",
         "card", "cvv", "otp", "auth",
     ]
     .iter()
-    .any(|needle| key.contains(needle))
+    .any(|needle| contains_token(&key, needle))
+}
+
+/// True when `needle` equals `key` or appears as a whole token.
+/// Tokens are bounded by the start/end of the key or a non-alphanumeric
+/// separator, so `"auth"` does not match `"author"` / `"authorization"`
+/// and `"card"` does not match `"discard"`.
+fn contains_token(key: &str, needle: &str) -> bool {
+    let mut start = 0;
+    while let Some(offset) = key[start..].find(needle) {
+        let idx = start + offset;
+        let before_ok = idx == 0 || !key.as_bytes()[idx - 1].is_ascii_alphanumeric();
+        let after = idx + needle.len();
+        let after_ok = after == key.len() || !key.as_bytes()[after].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        start = idx + 1;
+    }
+    false
 }
 
 fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
@@ -403,7 +422,7 @@ fn target_domain(
     arguments: &HashMap<String, String>,
     snapshot: &PageSnapshot,
 ) -> Option<String> {
-    let url = if tool_name == "navigate" {
+    let url = if tool_name.eq_ignore_ascii_case("navigate") {
         arguments.get("url").map(String::as_str)
     } else {
         Some(snapshot.url.as_str())

@@ -86,6 +86,59 @@ fn sensitive_arguments_are_redacted_and_require_approval() {
 }
 
 #[test]
+fn sensitive_key_match_is_token_bounded() {
+    // Substring needles are false positives: "auth" ⊂ "author"/"authorization",
+    // "card" ⊂ "discard". Token-boundary still flags credit_card.
+    let snapshot = snapshot("https://docs.example", "Ready");
+    let mut args = HashMap::new();
+    args.insert("author".to_string(), "jane".to_string());
+    args.insert("authorization".to_string(), "bearer".to_string());
+    args.insert("discard".to_string(), "true".to_string());
+    args.insert("credit_card".to_string(), "4111".to_string());
+
+    let decision = ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        ..ActionPolicy::default()
+    }
+    .evaluate(
+        "type",
+        &ToolRisk::new(ToolAction::Type, RiskLevel::High),
+        &args,
+        &snapshot,
+    );
+
+    assert_eq!(decision.outcome, PolicyOutcome::RequireApproval);
+    assert_eq!(
+        decision
+            .redacted_arguments
+            .get("author")
+            .map(String::as_str),
+        Some("jane")
+    );
+    assert_eq!(
+        decision
+            .redacted_arguments
+            .get("authorization")
+            .map(String::as_str),
+        Some("bearer")
+    );
+    assert_eq!(
+        decision
+            .redacted_arguments
+            .get("discard")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        decision
+            .redacted_arguments
+            .get("credit_card")
+            .map(String::as_str),
+        Some("[REDACTED]")
+    );
+}
+
+#[test]
 fn prompt_injection_content_blocks_tool_calls() {
     let snapshot = snapshot(
         "https://hostile.example",
@@ -148,4 +201,29 @@ fn navigation_to_javascript_scheme_is_blocked() {
 
     assert_eq!(decision.outcome, PolicyOutcome::Block);
     assert!(decision.risk_flags.contains(&RiskFlag::DomainDenied));
+}
+
+#[test]
+fn navigate_domain_check_is_case_insensitive() {
+    // Scheme-block already uses eq_ignore_ascii_case("navigate"). target_domain
+    // must do the same, or NAVIGATE/Navigate applies allow/deny to the current
+    // page instead of arguments["url"].
+    let snapshot = snapshot("https://allowed.example", "Ready");
+    let mut args = HashMap::new();
+    args.insert("url".to_string(), "https://other.example/path".to_string());
+
+    let policy = ActionPolicy {
+        allowed_domains: vec!["allowed.example".to_string()],
+        ..ActionPolicy::default()
+    };
+
+    let decision = policy.evaluate(
+        "NAVIGATE",
+        &ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        &args,
+        &snapshot,
+    );
+
+    assert_eq!(decision.outcome, PolicyOutcome::Block);
+    assert!(decision.risk_flags.contains(&RiskFlag::DomainNotAllowed));
 }
