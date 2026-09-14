@@ -16,10 +16,7 @@ export default defineConfig({
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
     rollupOptions: {
-      input: {
-        index: "index.html",
-        appkit: "appkit.html",
-      },
+      input: process.env.BUILD_APPKIT ? "appkit.html" : "index.html",
     },
   },
 });

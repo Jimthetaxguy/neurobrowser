@@ -25,8 +25,9 @@ This is the verification chain in `verify.sh`:
 2. `cargo clippy --all-targets -- -D warnings`
 3. `cargo test --all-targets`
 4. `cd src-tauri && npm ci && npm run build`
-5. `cargo check --manifest-path src-tauri/Cargo.toml`
-6. `cargo build --release` (library crate)
+5. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
+6. Locked headless check and binary tests with `--features headless`
+7. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
@@ -49,7 +50,7 @@ NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
 
 Prints `NEUROBROWSER_LISTENING=unix://…` or falls back to
 `NEUROBROWSER_LISTENING=tcp://127.0.0.1:…`. Methods: `ping`,
-`policy.get` / `policy.set` / `policy.evaluate` / `policy.snapshot`,
+`policy.get` / `policy.set` / `policy.evaluate`,
 `snapshot`. Speak newline-delimited JSON-RPC on the socket. There is no
 CLI wrapper. `snapshot` is a hardcoded `about:blank` payload. The daemon
 does not construct `BrowserEngine`, navigate, or execute registry tools.
@@ -65,15 +66,14 @@ Integration tests live in `tests/`:
 - `action_policy.rs` — deny-wins-over-allow, assisted-mode click approval,
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
-- `error_types.rs` — error conversion paths.
-- `streaming.rs` / `streaming_agent.rs` — `StreamingAgent` / `StreamEvent`.
+- `streaming.rs` — `StreamEvent` serialization.
 - `agent_memory_metrics.rs` — memory + metrics.
-- `workers.rs` — worker registry.
-- `headless_daemon.rs` — daemon protocol.
+- Headless argument and policy tests live in `src-tauri/src/bin/headless.rs`
+  and run explicitly with the `headless` feature.
 
 ## Tauri IPC
 
-The desktop app exposes 24 commands (see `src-tauri/src/main.rs`). From
+The desktop app exposes 20 commands (see `src-tauri/src/main.rs`). From
 the React frontend:
 
 ```javascript
@@ -92,8 +92,9 @@ Adding a command:
 
 1. Define it in `src-tauri/src/main.rs`.
 2. Add it to `tauri::generate_handler!`.
-3. Add `allow-<command-name>` to `src-tauri/capabilities/main.json`.
-4. Add a wrapper in `src-tauri/src/hostAdapters.js`.
+3. Add the command name to the app manifest in `src-tauri/build.rs`.
+4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json`.
+5. Add a wrapper in `src-tauri/src/hostAdapters.js`.
 
 Do not add a wildcard capability permission.
 
@@ -106,7 +107,7 @@ Do not add a wildcard capability permission.
 | `cargo test` | failed assertions | fix the test or the code |
 | `npm ci && npm run build` | Vite error | check `src-tauri/src/*.{jsx,js}` |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | Tauri compile error | missing icon or capability |
-| `cargo build --release` | linker / symbol error | clear `target/`; check `rustc --version` |
+| `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
 
 ## Environment variables
 
@@ -148,3 +149,19 @@ Local keys go in a gitignored `.env`.
 - `docs/specs/` — product specs.
 - `docs/stories/` — user stories.
 - `docs/adr/` — architecture decision records.
+
+## Native AppKit shell
+
+The optional AppKit shell bundles its generated React control surface as an
+Xcode folder resource. Build that resource before building the native app:
+
+```bash
+(cd src-tauri && npm ci && npm run build:appkit)
+xcodebuild -project NeuroBrowser.xcodeproj -scheme NeuroBrowser -configuration Debug CODE_SIGNING_ALLOWED=NO build
+```
+
+`NeuroBrowser/ControlSurface` is generated and remains gitignored. Its
+`appkit.html` and relative assets must appear in the built app's
+`Contents/Resources/ControlSurface`. The XcodeGen source of truth is
+`project.yml`; after editing that file, regenerate the checked-in project
+with `xcodegen generate --spec project.yml`.
