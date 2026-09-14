@@ -23,10 +23,8 @@ class BrowserViewController: NSViewController {
     // MARK: - Setup
     
     private func setupSplitView() {
-        // Create split view controller
         splitView = NSSplitViewController()
         
-        // Sidebar (chat)
         sidebarViewController = SidebarViewController()
         sidebarViewController.controlSurfaceViewController.delegate = self
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
@@ -35,7 +33,6 @@ class BrowserViewController: NSViewController {
         sidebarItem.maximumThickness = 440
         splitView.addSplitViewItem(sidebarItem)
         
-        // Content (browser)
         contentViewController = ContentViewController()
         contentViewController.pageUpdateHandler = { [weak self] event in
             self?.sidebarViewController.dispatchToReact(event)
@@ -44,7 +41,6 @@ class BrowserViewController: NSViewController {
         contentItem.minimumThickness = 400
         splitView.addSplitViewItem(contentItem)
         
-        // Add split view as child
         addChild(splitView)
         splitView.view.frame = view.bounds
         splitView.view.autoresizingMask = [.width, .height]
@@ -110,11 +106,6 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
             sidebarViewController.dispatchToReact([
                 "type": "status",
                 "message": "Provider selected in AppKit host: \(provider)"
-            ])
-        case "ask":
-            sidebarViewController.dispatchToReact([
-                "type": "status",
-                "message": "AppKit command received; Rust agent bridge is pending"
             ])
         default:
             sidebarViewController.dispatchToReact([
