@@ -18,10 +18,6 @@ SKILL.md that any AI agent can load to drive the browser.
   equivalent for the Tauri child-webview surface.
 - The **ref-based interaction model** — agents pass `[@e1, @e2, ...]` refs
   instead of CSS selectors. Each ref maps to a stable element identity.
-- The **snapshot / visual diff** ergonomics — `neurobrowser diff snapshot_a
-  snapshot_b` and `neurobrowser diff --pixel a.png b.png`.
-- The **encrypted profile / state persistence** story — persist
-  `SessionManager` state across invocations behind a keychain-derived key.
 
 **What NeuroBrowser does NOT take:**
 - agent-browser's separate-daemon architecture. NeuroBrowser is in-process with
@@ -57,9 +53,6 @@ delegate "intelligence" to Hyperbrowser's server-side `hyperAgent`; the
 apps themselves are UX shells with hard-coded prompts and cheerio extraction.
 
 **What NeuroBrowser takes:**
-- The **decompose → fan-out → synthesize** LLM pipeline shape (hyperswarm).
-- The **parallel aspect extraction** pattern with `Promise.allSettled`
-  (yc-research-bot).
 - The **benchmark harness over an agent** framing (agent-web-index) — relevant
   for NeuroBrowser's testing strategy in `tests/autonomous_agent.rs`.
 
@@ -76,8 +69,7 @@ apps themselves are UX shells with hard-coded prompts and cheerio extraction.
 considered as a rendering engine. PROJECT.md:470 says "Using scraper crate
 instead of FastRender due to dependency conflicts."
 
-**Status:** deferred — see `docs/SPIKES.md` (created in Phase F) for the
-re-evaluation. The merged tree's actual approach is "Tauri child webview with
+**Status:** deferred. The merged tree's actual approach is "Tauri child webview with
 JS RPC," which obsoletes the FastRender spike.
 
 **Repo:** `https://github.com/wilsonzlin/fastrender`
@@ -88,8 +80,6 @@ JS RPC," which obsoletes the FastRender spike.
 Chromium/WebView. Cited in PROJECT.md's `competitive_analysis`.
 
 **What NeuroBrowser differentiates on:**
-- Full DOM control (vs. AI layered on top of a normal browser).
-- Lightweight (~50MB vs. 200MB+).
 - Local-first privacy (no external browser telemetry).
 - Policy-gated autonomy (ReadOnly / Assisted / HighAutonomy) — Arc / Opera
   Aria do not offer this.
@@ -105,7 +95,7 @@ NeuroBrowser's integrations must use real backing systems:
 - **OpenAI** (real API, key via env / Infisical)
 - **Anthropic** (real API, key via env / Infisical)
 - **Ollama** (real local daemon, no mock fallback in production code)
-- **Tauri child webview** (real WKWebView/WebView2/WebKitGTK, no iframe stub)
+- **Tauri child webview** (macOS WKWebView, no iframe stub)
 
 Every PR landing in NeuroBrowser must keep this invariant. See `PROJECT.md` §
 "Real systems" (added in Phase F1).
