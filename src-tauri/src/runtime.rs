@@ -12,6 +12,10 @@ use tokio::time::sleep;
 
 const ABOUT_BLANK_URL: &str = "about:blank";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+// Page webviews load arbitrary sites. This script must stay so host-driven
+// eval can post snapshot/action results through `browser_runtime_report`.
+// ACL is report-only on `page-runtime-*` (see capabilities/page-runtime.json);
+// page JS must not inherit the control-surface host command set.
 const RUNTIME_INIT_SCRIPT: &str = r#"
 (() => {
   if (window.__NEUROBROWSER_RUNTIME__) {

@@ -93,7 +93,7 @@ Adding a command:
 1. Define it in `src-tauri/src/main.rs`.
 2. Add it to `tauri::generate_handler!`.
 3. Add the command name to the app manifest in `src-tauri/build.rs`.
-4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json`.
+4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json` (control webview only). Do not grant host commands to `page-runtime.json`.
 5. Add a wrapper in `src-tauri/src/hostAdapters.js`.
 
 Do not add a wildcard capability permission.
