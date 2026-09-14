@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -234,28 +234,32 @@ function Header({
         <span className="brand-dot" />
         <span>NeuroBrowser</span>
       </div>
-      <select
-        className="provider-select"
-        onChange={(event) => setProvider(event.target.value)}
-        value={provider}
-      >
-        {PROVIDERS.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-      <select
-        className="provider-select"
-        onChange={(event) => setPolicyMode(event.target.value)}
-        value={policyMode}
-      >
-        {POLICY_MODES.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
+      {!compact && (
+        <>
+          <select
+            className="provider-select"
+            onChange={(event) => setProvider(event.target.value)}
+            value={provider}
+          >
+            {PROVIDERS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="provider-select"
+            onChange={(event) => setPolicyMode(event.target.value)}
+            value={policyMode}
+          >
+            {POLICY_MODES.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       <form
         className="url-bar"
         onSubmit={(event) => {
@@ -302,10 +306,7 @@ export default function App({ adapter, lane }) {
     {
       id: -1,
       role: "assistant",
-      text:
-        lane === "appkit"
-          ? "Native AppKit lane ready. Page rendering stays in WKWebView while this React surface sends browser commands."
-          : "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
+      text: "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
       tools: [],
     },
   ]);
@@ -563,14 +564,16 @@ export default function App({ adapter, lane }) {
         setTabs([{ id: pageId, title: "Tab 1" }]);
         setCurrentPageId(pageId);
         await adapter.setActivePage(nextSessionId, pageId);
-        try {
-          const policy = await adapter.getActionPolicy();
-          if (!disposed && policy) {
-            setActionPolicy(policy);
-            setPolicyModeValue(policy.autonomy_level || "assisted");
+        if (!compact) {
+          try {
+            const policy = await adapter.getActionPolicy();
+            if (!disposed && policy) {
+              setActionPolicy(policy);
+              setPolicyModeValue(policy.autonomy_level || "assisted");
+            }
+          } catch (error) {
+            console.warn("policy load failed", messageText(error));
           }
-        } catch (error) {
-          console.warn("policy load failed", messageText(error));
         }
         setStatus("Session ready");
       } catch (error) {
@@ -581,7 +584,7 @@ export default function App({ adapter, lane }) {
     return () => {
       disposed = true;
     };
-  }, [adapter]);
+  }, [adapter, compact]);
 
   useEffect(() => {
     const unsubscribe = adapter.onHostEvent((event) => {
@@ -642,10 +645,8 @@ export default function App({ adapter, lane }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [closeTab, createNewTab, currentPageId]);
 
-  const stageText = useMemo(() => {
-    if (lane === "appkit") return "Real pages render in the AppKit WKWebView content pane.";
-    return "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
-  }, [lane]);
+  const stageText =
+    "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
 
   if (compact) {
     return (
@@ -654,27 +655,12 @@ export default function App({ adapter, lane }) {
           compact
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
-          policyMode={policyMode}
-          provider={provider}
-          setPolicyMode={selectPolicyMode}
-          setProvider={selectProvider}
           setUrl={setUrl}
           url={url}
         />
         <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} tabs={tabs} />
         <BrowserToolbar onAction={runBrowserAction} />
         <StatsRow snapshot={snapshot} />
-        <ChatPanel
-          actionEvents={actionEvents}
-          messages={messages}
-          onCancelApproval={cancelApproval}
-          onAsk={askAssistant}
-          onResolveApproval={resolveApproval}
-          pendingApproval={pendingApproval}
-          prompt={prompt}
-          setPrompt={setPrompt}
-          thinking={thinking}
-        />
         <div className="status-bar">
           <span>{status}</span>
           <span>Tabs: {tabs.length}</span>
