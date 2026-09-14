@@ -138,7 +138,6 @@ impl AiProvider for AnthropicProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
             finish_reason,
         })

@@ -12,15 +12,13 @@ pub use agent::{
         ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, AutonomyLevel, PolicyDecision,
         PolicyOutcome, RiskFlag,
     },
-    streaming::{AgentStatus, StreamEvent},
-    worker::{WorkerSnapshot, WorkerStatus, WorkerSummary},
     AgentConfig, AgentMessage, AgentSnapshot, AgentState, ReActAgent,
 };
 pub use browser::{BrowserEngine, PageConfig, PageState};
 pub use providers::{
     AiContext, AiProvider, AiResponse, Message, ProviderConfig, ProviderType, ToolCall,
 };
-pub use session::{PageHandle, SessionInfo, SessionManager};
+pub use session::{PageHandle, SessionManager};
 pub use tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
     PageSnapshot, PriceInfo, RiskLevel, TableInfo, ToolAction, ToolArgumentDefinition,

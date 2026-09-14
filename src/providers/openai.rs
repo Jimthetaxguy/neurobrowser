@@ -107,7 +107,6 @@ impl AiProvider for OpenAiProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
             finish_reason,
         })

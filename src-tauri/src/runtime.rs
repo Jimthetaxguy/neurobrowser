@@ -506,12 +506,6 @@ impl BrowserInterface for TauriBrowserRuntime {
             .await
     }
 
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.request_json(&format!("runtime.getAttributes({selector_json})"))
-            .await
-    }
-
     async fn click(&self, selector: &str) -> Result<(), String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.click({selector_json})"))
