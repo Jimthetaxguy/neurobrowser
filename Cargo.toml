@@ -2,7 +2,7 @@
 name = "neurobrowser"
 version = "0.1.0"
 edition = "2021"
-description = "AI-native browser with custom rendering engine"
+description = "HTTP scraper and policy-gated browser agent library"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

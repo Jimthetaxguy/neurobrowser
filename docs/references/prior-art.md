@@ -15,13 +15,11 @@ AI agent can load to drive the browser.
   that any agent loads to invoke the browser.
 - The **ref-based interaction model** — agents pass `[@e1, @e2, ...]` refs
   instead of CSS selectors.
-- The **snapshot / visual diff** ergonomics.
-- The **encrypted profile / state persistence** story.
 
 **What NeuroBrowser does NOT take:**
 - A separate Playwright daemon as the runtime. NeuroBrowser is in-process
-  with Tauri; the shipped headless daemon is a thin JSON-RPC shim over the
-  same library.
+  with Tauri; the headless daemon only evaluates policy and returns a
+  hardcoded snapshot. It does not execute browser tools.
 - iOS Simulator support.
 - `npm install -g` packaging. NeuroBrowser ships via Tauri bundling.
 
@@ -47,8 +45,6 @@ ancestor.
 `@hyperbrowser/sdk` cloud-browser API.
 
 **What NeuroBrowser takes:**
-- The **decompose → fan-out → synthesize** pipeline shape.
-- The **parallel aspect extraction** pattern.
 - The **benchmark harness over an agent** framing
   (`tests/autonomous_agent.rs`).
 
@@ -62,8 +58,8 @@ ancestor.
 ## fastrender (wilsonzlin/fastrender)
 
 **Role observed:** a Rust HTML/CSS renderer once considered as the
-rendering engine. The tree uses the `scraper` crate for the library /
-headless path and a Tauri child webview for desktop.
+rendering engine. The library uses `scraper`; the desktop uses a Tauri child webview.
+The headless policy protocol does not construct either browser runtime.
 
 **Status:** not integrated (dependency conflicts; desktop JS execution
 comes from the OS webview).
@@ -76,8 +72,6 @@ comes from the OS webview).
 Chromium/WebView.
 
 **What NeuroBrowser differentiates on:**
-- Full DOM control (vs. AI layered on a normal browser).
-- Lightweight (~50MB vs. 200MB+).
 - Local-first privacy (no external browser telemetry).
 - Policy-gated autonomy (`ReadOnly` / `Assisted` / `HighAutonomy`).
 
@@ -89,6 +83,6 @@ Integrations use real backing systems:
 - **OpenAI** (API key via env)
 - **Anthropic** (API key via env)
 - **Ollama** (local daemon)
-- **Tauri child webview** (real WKWebView / WebView2 / WebKitGTK)
+- **Tauri child webview** (macOS WKWebView)
 
 No mock browser page on product paths.
