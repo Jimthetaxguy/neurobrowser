@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,10 +119,4 @@ impl ToolDefinition {
         self.arguments = arguments;
         self
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StructuredToolCall {
-    pub name: String,
-    pub arguments: HashMap<String, String>,
 }

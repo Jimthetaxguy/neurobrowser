@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+pub use crate::tools::ToolResult;
+
 #[derive(Debug, Error)]
 pub enum ProviderError {
     #[error("API request failed: {0}")]
@@ -51,14 +53,6 @@ pub struct ScrollPosition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResult {
-    pub tool_name: String,
-    pub arguments: HashMap<String, String>,
-    pub result: String,
-    pub success: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
     pub content: String,
@@ -68,7 +62,6 @@ pub struct Message {
 pub trait AiProvider: Send + Sync {
     async fn complete(&self, prompt: &str, context: &AiContext) -> ProviderResult<AiResponse>;
     fn provider_name(&self) -> &str;
-    fn is_configured(&self) -> bool;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,10 +316,7 @@ pub fn build_system_prompt(context: &AiContext) -> String {
 /// appended, so callers can point OpenAI/Anthropic at Azure, a corporate
 /// gateway, or a local proxy. An empty/whitespace override falls back to
 /// `default_origin`, and a trailing slash on the override is trimmed to avoid a
-/// doubled `//`. Previously `ProviderConfig.base_url` was read into config but
-/// never used (the request URL was hardcoded), so an override silently did
-/// nothing — the same "reports success but no-ops" defect the interactive tools
-/// had, one layer down.
+/// doubled `//`.
 pub(crate) fn resolve_endpoint(base_url: Option<&str>, default_origin: &str, path: &str) -> String {
     let origin = base_url
         .map(str::trim)
