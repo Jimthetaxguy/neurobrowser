@@ -23,7 +23,6 @@ control autonomous web workflows.
 - Prompt-injection patterns in page text stop execution.
 - The React shell shows policy mode, pending approvals, run status, and action
   history.
-- Compatibility `ask` behavior remains available.
 - Verification passes through `./verify.sh` and the moderate-severity dependency
   audit documented below.
 

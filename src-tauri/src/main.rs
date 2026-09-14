@@ -32,13 +32,6 @@ struct PendingApproval {
 }
 
 #[derive(Serialize)]
-struct AskResult {
-    response: String,
-    tools_used: Vec<String>,
-    iterations: usize,
-}
-
-#[derive(Serialize)]
 struct SnapshotResponse {
     url: String,
     title: String,
@@ -328,38 +321,6 @@ async fn execute_agent_run(
 }
 
 #[tauri::command]
-async fn ask(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    prompt: String,
-) -> Result<AskResult, String> {
-    let result = execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await?;
-    let tools_used = result
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            AgentRunEvent::ToolCallResult { tool, .. } => Some(tool.clone()),
-            _ => None,
-        })
-        .collect();
-    let response = result.final_response.clone().unwrap_or_else(|| match result.status {
-        AgentRunStatus::AwaitingApproval => {
-            "This action needs your approval before it can run.".to_string()
-        }
-        AgentRunStatus::Blocked => "This action was blocked by the active policy.".to_string(),
-        _ => String::new(),
-    });
-
-    Ok(AskResult {
-        response,
-        tools_used,
-        iterations: result.iterations,
-    })
-}
-
-#[tauri::command]
 fn get_action_policy(state: State<'_, AppState>) -> Result<ActionPolicy, String> {
     state
         .action_policy
@@ -571,7 +532,6 @@ fn main() {
             pending_approvals: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
-            ask,
             browser_back,
             browser_forward,
             browser_reload,

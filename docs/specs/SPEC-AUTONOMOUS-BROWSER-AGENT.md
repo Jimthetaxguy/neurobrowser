@@ -26,10 +26,6 @@ The run-oriented API is the stable control surface:
 | `get_action_policy()` | Reads the active autonomy and risk policy. |
 | `set_action_policy(policy)` | Updates the active autonomy and risk policy. |
 
-`ask(sessionId, pageId, prompt)` remains a compatibility command. New autonomous
-work should use the run-oriented API so approvals, blocks, and results are visible
-as structured events.
-
 ## Tool Contract
 
 Browser tools must expose:

@@ -467,7 +467,7 @@ export default function App({ adapter, lane }) {
         appendMessage("assistant", result.final_response || "Run cancelled.");
         setStatus("Run cancelled");
       } else {
-        appendMessage("assistant", result.final_response ?? result.response ?? "", result.tools_used || []);
+        appendMessage("assistant", result.final_response ?? "");
         setStatus("Ready");
       }
       await refreshSnapshot({ waitForReady: false });
