@@ -4,7 +4,7 @@
   "local": false,
   "webviews": ["page-runtime-*"],
   "remote": {
-    "urls": ["about:blank", "http://*", "https://*"]
+    "urls": ["http://*", "https://*"]
   },
   "permissions": [
     "allow-browser-runtime-report"
