@@ -66,7 +66,10 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
       - name: cargo check tauri (headless)
-        run: cargo check --manifest-path src-tauri/Cargo.toml --features headless
+        run: cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
+
+      - name: cargo test headless
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
 
   guards:
     name: "Guards: no-mock + merge conflicts + iCloud"
