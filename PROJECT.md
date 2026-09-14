@@ -29,11 +29,10 @@ Shipped on `main`. `./verify.sh` is the green-build chain.
 
 ## v0.2
 
-- Native function calling in `ReActAgent` (`ToolCall::parse_native` exists;
-  the loop still consumes text-only tool invocations).
+- Native function calling is not in the loop.
 - React Workers sidebar.
 - Headless `worker.spawn` / `worker.list`.
-- CLI wrapper over the daemon (no `neurobrowser-cli` today).
+- CLI wrapper over the daemon (no `neurobrowser-cli` today; a future CLI maps
+  1:1 to the registry).
 - Visual regression tests; budget-capped real-LLM integration tests.
-- Wire the daemon to the same session/page/ask/tool surface as desktop
-  (`docs/specs/programmatic-surface-design-2026-07-20.md`).
+- Wire the daemon to the same session/page/ask/tool surface as desktop.

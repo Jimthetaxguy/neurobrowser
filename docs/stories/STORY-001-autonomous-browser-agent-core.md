@@ -24,13 +24,13 @@ control autonomous web workflows.
 - The React shell shows policy mode, pending approvals, run status, and action
   history.
 - Compatibility `ask` behavior remains available.
-- Verification passes through `./verify.sh` and the moderate-severity dependency
-  audit documented below.
+- Verification passes through `./verify.sh` and the separate moderate-severity
+  dependency audit documented below.
 
 ## Implementation Links
 
 - Spec: `docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md`
-- Frontend architecture: `docs/frontend-architecture-spike.md`
+- Frontend architecture: `docs/adr/ADR-001-react-tauri-primary.md`
 - Policy layer: `src/agent/policy.rs`
 - Run API: `src/agent/mod.rs`
 - Tool metadata: `src/tools/contracts.rs`
