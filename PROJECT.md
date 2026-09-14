@@ -1,8 +1,10 @@
 # NeuroBrowser
 
 AI-native desktop browser: Rust library + Tauri/React shell. Agents drive a
-real OS webview (or the scraper-backed headless daemon) through a 12-tool
-surface gated by `ActionPolicy`.
+real OS webview through the desktop bridge. The Rust library provides a
+CSS-selector tool registry gated by `ActionPolicy`. The headless daemon is
+a policy JSON-RPC protocol stub: its snapshot is hardcoded `about:blank`,
+and it cannot navigate or execute browser tools.
 
 See `docs/AGENT-SURFACE.md` and `SKILL.md` for the agent surface.
 See `docs/RUNBOOK-DEV.md` to build and run. Changelog: `CHANGELOG.md`.
@@ -16,7 +18,9 @@ Shipped on `main`. `./verify.sh` is the green-build chain.
   worker registry, streaming + metrics (`src/`).
 - **Policy:** `ReadOnly` / `Assisted` / `HighAutonomy` with domain allow/deny,
   sensitive-arg redaction, and prompt-injection detection.
-- **Headless daemon:** `neurobrowser-headless` over UDS or TCP. Methods:
+- **Headless protocol stub:** `neurobrowser-headless` over a Unix socket
+  with loopback TCP fallback after a failed Unix bind. Policy evaluation
+  does not execute a tool; `snapshot` returns hardcoded data. Methods:
   `ping`, `policy.get` / `policy.set` / `policy.evaluate` / `policy.snapshot`,
   `snapshot`.
 - **Workers:** types + `SessionManager` registry + Tauri `list_workers` /

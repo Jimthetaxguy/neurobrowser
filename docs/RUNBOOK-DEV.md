@@ -40,7 +40,7 @@ npx tauri dev --no-watch
 Runs the Vite dev server, compiles the Tauri binary, and launches the
 window. Drop `--no-watch` to rebuild on save.
 
-## Headless daemon (shipped in v0.1.1)
+## Headless policy protocol stub (shipped in v0.1.1)
 
 ```bash
 NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
@@ -51,7 +51,8 @@ Prints `NEUROBROWSER_LISTENING=unix://…` or falls back to
 `NEUROBROWSER_LISTENING=tcp://127.0.0.1:…`. Methods: `ping`,
 `policy.get` / `policy.set` / `policy.evaluate` / `policy.snapshot`,
 `snapshot`. Speak newline-delimited JSON-RPC on the socket. There is no
-CLI wrapper.
+CLI wrapper. `snapshot` is a hardcoded `about:blank` payload. The daemon
+does not construct `BrowserEngine`, navigate, or execute registry tools.
 
 ## Tests
 

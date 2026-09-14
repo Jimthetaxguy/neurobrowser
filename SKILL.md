@@ -60,24 +60,25 @@ Unix bind fails). There is no CLI wrapper; speak JSON-RPC on that socket.
 ### In-process (Rust agent)
 
 ```rust
+use std::sync::Arc;
 use neurobrowser::{
-    ActionPolicy, AgentConfig, AutonomyLevel, PageConfig, ReActAgent, SessionManager,
+    ActionPolicy, AgentConfig, AgentRunResult, AiProvider, AutonomyLevel,
+    BrowserInterface, ReActAgent,
 };
 
-let policy = ActionPolicy {
-    autonomy_level: AutonomyLevel::ReadOnly,
-    allowed_domains: vec!["example.com".into()],
-    ..ActionPolicy::default()
-};
-
-let sessions = SessionManager::new(PageConfig::default(), AgentConfig::default());
-let session_id = sessions.create_session();
-let _page = sessions.create_page(&session_id)?;
-
-let agent = ReActAgent::new(AgentConfig::default(), provider);
-let response = agent
-    .execute_with_policy("Summarize the page", &browser, &policy)
-    .await?;
+// The caller supplies a configured real provider and a browser with a loaded page.
+async fn summarize_page(
+    browser: &dyn BrowserInterface,
+    provider: Arc<dyn AiProvider + Send + Sync>,
+) -> Result<AgentRunResult, String> {
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::ReadOnly,
+        allowed_domains: vec!["example.com".into()],
+        ..ActionPolicy::default()
+    };
+    let agent = ReActAgent::new(AgentConfig::default(), provider);
+    agent.execute_with_policy("Summarize the page", browser, &policy).await
+}
 ```
 
 `ActionPolicy` is a public struct (`autonomy_level`, `allowed_domains`,
