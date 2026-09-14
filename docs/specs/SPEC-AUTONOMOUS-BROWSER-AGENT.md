@@ -92,6 +92,7 @@ Required checks before promoting changes against this spec:
 
 ```bash
 ./verify.sh
+(cd src-tauri && npm audit --audit-level=moderate)
 ```
 
 AppKit parity remains deferred unless the Tauri child-webview path fails a real

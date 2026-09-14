@@ -7,10 +7,11 @@ with this file.
 - CSS selectors (or pixels / a key). There is no `ref_map`
   (`PageSnapshot` has no such field).
 - Autonomy: `ReadOnly` / `Assisted` / `HighAutonomy` via `ActionPolicy`.
-- Headless JSON-RPC is `ping` / `policy.*` / `snapshot` (scraper/stub), not
+- Headless JSON-RPC is `ping` / `policy.*` / `snapshot` (hardcoded stub), not
   a live WKWebView session.
 
-Desktop is macOS WKWebView. Headless / `BrowserEngine` is reqwest+scraper.
+Desktop is macOS WKWebView. The separate library `BrowserEngine` uses
+reqwest+scraper. The headless daemon does not construct either browser.
 
 Not shipped as named tools: `evaluate`, `get_attribute`, `wait_for`,
 `extract_text`.
@@ -73,8 +74,9 @@ Click. Risk: `Click`, medium.
 
 ### 9. `type` — `selector`, `text`
 
-Type into an input. `text` is sensitive (not echoed in the result).
-Risk: `Type`, high.
+Type into an input. Tool metadata is sensitive, so policy requires approval.
+Risk: `Type`, high. Redaction is based on argument keys; do not assume the
+plain `text` key is redacted from every tool or event payload.
 
 ### 10. `scroll_to` — `selector`
 
@@ -122,7 +124,6 @@ Reload. Default: not supported. Risk: `Reload`, low.
 | `policy.get` | Current `ActionPolicy` |
 | `policy.set` | Replace `ActionPolicy` |
 | `policy.evaluate` | Gate a tool name + args (no execution) |
-| `policy.snapshot` | Current policy JSON |
 | `snapshot` | Hardcoded `about:blank` stub — not a crate `PageSnapshot` |
 
 Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
@@ -133,13 +134,20 @@ Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 
 | Level | Auto-allow | Otherwise |
 |---|---|---|
-| `ReadOnly` | `Read`, `Wait`, `Scroll`, `Navigate` | `Block` |
+| `ReadOnly` | `Read`, `Wait`, `Scroll` | `Block`, including `Navigate` |
 | `Assisted` | `Read`, `Wait`, `Scroll`, same-domain `Navigate` | `RequireApproval` |
-| `HighAutonomy` | allowed tools run | denied domains still `Block` |
+| `HighAutonomy` | remaining non-high-impact actions | submit / purchase / auth / upload / message / destructive require approval |
 
-Sensitive args (`type`, or keys matching
-`password|token|secret|api_key|apikey|ssn|social|credit|card|cvv|otp|auth`)
-→ `RequireApproval` and `[REDACTED]` in the audit trail.
+This table applies only after the common gates. Denied tools/domains, off-list
+domains, unsafe navigation schemes, and detected prompt injection block first.
+Sensitive argument keys, sensitive tool metadata (including `type`), and explicit
+approval-list matches return `RequireApproval` before mode evaluation, even in
+`HighAutonomy` or `ReadOnly`.
+
+Credential keys are normalized across case, camelCase, and separators; matching
+credential tokens (including `authorization`, `authentication`, `apiKey`,
+`accessToken`, and `cardNumber`) are redacted to `[REDACTED]` in the decision.
+Sensitive tool metadata does not redact unrelated keys such as plain `text`.
 
 ## Policy gates
 
@@ -161,8 +169,18 @@ Daemon errors:
 { "ok": false, "error": { "code": "INTERNAL", "message": "..." } }
 ```
 
-Codes the daemon actually emits include `INTERNAL`, `VALIDATION`,
-`UNKNOWN_METHOD`, plus policy outcomes from `policy.evaluate`.
+Codes the daemon emits include `INTERNAL`, `VALIDATION`, and `UNKNOWN_METHOD`.
+A successful `policy.evaluate` request returns `ok: true` with its policy decision
+in `result`; approval and blocking are decision outcomes, not transport errors:
+
+```json
+{"id":"2","ok":true,"result":{"outcome":"RequireApproval","reasons":["Tool call contains sensitive input"],"risk_flags":["SensitiveArgument"],"redacted_arguments":{"apiKey":"[REDACTED]"}}}
+```
+
+The daemon outcomes are `Allow`, `RequireApproval`, and `Block` (the Rust
+serde representation uses snake_case, but this dispatcher formats enum names).
+This method
+only evaluates a proposed call; it does not execute it.
 
 ## See also
 

@@ -1,93 +1,88 @@
 # Prior Art — NeuroBrowser
 
 Repos and projects that informed NeuroBrowser's architecture. Each entry lists
-the role the prior art played, the version observed, and where NeuroBrowser
-follows vs. diverges.
+the role the prior art played and where NeuroBrowser follows vs. diverges.
 
 ## agent-browser (vercel-labs/agent-browser)
 
-**Role observed:** agent-facing CLI that wraps Playwright. An external LLM agent
-invokes the CLI; the CLI runs Playwright in a Node daemon and returns structured
-page snapshots / diffs / screenshots. Distributed via npm, Homebrew, and from
-source. Ships an iOS Simulator mode, encrypted profile persistence, and a
-SKILL.md that any AI agent can load to drive the browser.
+**Role observed:** agent-facing CLI that wraps Playwright. An external LLM
+agent invokes the CLI; the CLI runs Playwright in a Node daemon and returns
+structured page snapshots / diffs / screenshots. Ships a SKILL.md that any
+AI agent can load to drive the browser.
 
 **What NeuroBrowser takes:**
-- The **SKILL.md / agent-facing interface** model — a single canonical doc that
-  any agent loads to invoke the browser. NeuroBrowser's `SKILL.md` is the
-  equivalent for the Tauri child-webview surface.
+- The **SKILL.md / agent-facing interface** model — a single canonical doc
+  that any agent loads to invoke the browser.
 - The **ref-based interaction model** — agents pass `[@e1, @e2, ...]` refs
-  instead of CSS selectors. Each ref maps to a stable element identity.
-- The **snapshot / visual diff** ergonomics — `neurobrowser diff snapshot_a
-  snapshot_b` and `neurobrowser diff --pixel a.png b.png`.
-- The **encrypted profile / state persistence** story — persist
-  `SessionManager` state across invocations behind a keychain-derived key.
+  instead of CSS selectors.
 
 **What NeuroBrowser does NOT take:**
-- agent-browser's separate-daemon architecture. NeuroBrowser is in-process with
-  Tauri; the headless daemon (Phase D4) is a thin cross-process shim, not a
-  full separate runtime.
-- agent-browser's iOS Simulator support. Out of scope for v0.1.
-- agent-browser's `npm install -g` packaging. NeuroBrowser is a desktop app and
-  ships via Tauri bundling.
+- A separate Playwright daemon as the runtime. NeuroBrowser is in-process
+  with Tauri; the headless daemon only evaluates policy and returns a
+  hardcoded snapshot. It does not execute browser tools.
+- iOS Simulator support.
+- `npm install -g` packaging. NeuroBrowser ships via Tauri bundling.
 
-**Repo:** `https://github.com/vercel-labs/agent-browser`
+**Repo:** https://github.com/vercel-labs/agent-browser
+
+This is the current agent-CLI reference. It is unrelated to
+`AIAnytime/agent-browser` (name collision only).
 
 ## agent-browser (AIAnytime/agent-browser)
 
-**Role observed:** earlier ReAct-pattern citation retained in `PROJECT.md`
-for provenance. Unrelated to vercel-labs/agent-browser (name collision).
+**Role observed:** earlier ReAct-pattern teaching demo (Tauri + React +
+placeholder tools). No wired DOM/WebView automation, no policy layer, no
+shared history with vercel-labs/agent-browser.
 
-**Status:** not an architectural ancestor. vercel-labs/agent-browser is the
-current agent-CLI reference.
+**Status:** retained as a provenance citation only. Not an architectural
+ancestor.
 
-**Repo:** `https://github.com/AIAnytime/agent-browser`
+**Repo:** https://github.com/AIAnytime/agent-browser
 
 ## hyperbrowser-app-examples
 
-**Role observed:** showcase of 45 thin Next.js apps that all funnel into a
-single hosted product — the `@hyperbrowser/sdk` cloud-browser API. Most apps
-delegate "intelligence" to Hyperbrowser's server-side `hyperAgent`; the
-apps themselves are UX shells with hard-coded prompts and cheerio extraction.
+**Role observed:** showcase of thin Next.js apps that funnel into a hosted
+`@hyperbrowser/sdk` cloud-browser API.
 
 **What NeuroBrowser takes:**
-- The **decompose → fan-out → synthesize** LLM pipeline shape (hyperswarm).
-- The **parallel aspect extraction** pattern with `Promise.allSettled`
-  (yc-research-bot).
-- The **benchmark harness over an agent** framing (agent-web-index) — relevant
-  for NeuroBrowser's testing strategy in `tests/autonomous_agent.rs`.
+- The **benchmark harness over an agent** framing
+  (`tests/autonomous_agent.rs`).
 
 **What NeuroBrowser does NOT take:**
-- The hosted-only model. NeuroBrowser is a local desktop app with optional
-  headless-daemon mode for cross-process driving.
-- The Next.js app-of-apps showcase. NeuroBrowser has one desktop app.
+- The hosted-only model. NeuroBrowser is a local desktop app with an
+  optional headless daemon.
+- The Next.js app-of-apps showcase.
 
-**Repo:** `https://github.com/hyperbrowserai/hyperbrowser-app-examples`
+**Repo:** https://github.com/hyperbrowserai/hyperbrowser-app-examples
 
 ## fastrender (wilsonzlin/fastrender)
 
-**Role observed:** a Rust HTML/CSS renderer that NeuroBrowser's PROJECT.md
-considered as a rendering engine. PROJECT.md:470 says "Using scraper crate
-instead of FastRender due to dependency conflicts."
+**Role observed:** a Rust HTML/CSS renderer once considered as the
+rendering engine. The library uses `scraper`; the desktop uses a Tauri child webview.
+The headless policy protocol does not construct either browser runtime.
 
-**Status:** deferred — see `docs/SPIKES.md` (created in Phase F) for the
-re-evaluation. The merged tree's actual approach is "Tauri child webview with
-JS RPC," which obsoletes the FastRender spike.
+**Status:** not integrated (dependency conflicts; desktop JS execution
+comes from the OS webview).
 
-**Repo:** `https://github.com/wilsonzlin/fastrender`
+**Repo:** https://github.com/wilsonzlin/fastrender
 
 ## Arc, Opera Aria
 
-**Role observed:** commercial "AI browser" products that layer AI on top of
-Chromium/WebView. Cited in PROJECT.md's `competitive_analysis`.
+**Role observed:** commercial "AI browser" products that layer AI on
+Chromium/WebView.
 
 **What NeuroBrowser differentiates on:**
-- Full DOM control (vs. AI layered on top of a normal browser).
-- Lightweight (~50MB vs. 200MB+).
 - Local-first privacy (no external browser telemetry).
-- Policy-gated autonomy (ReadOnly / Assisted / HighAutonomy) — Arc / Opera
-  Aria do not offer this.
+- Policy-gated autonomy (`ReadOnly` / `Assisted` / `HighAutonomy`).
 
-**Repos / sites:**
-- `https://arc.net`
-- `https://www.opera.com/features/opera-aria`
+**Sites:** https://arc.net · https://www.opera.com/features/opera-aria
+
+## Real systems
+
+Integrations use real backing systems:
+- **OpenAI** (API key via env)
+- **Anthropic** (API key via env)
+- **Ollama** (local daemon)
+- **Tauri child webview** (macOS WKWebView)
+
+No mock browser page on product paths.

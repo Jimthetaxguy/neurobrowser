@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 17 CSS-selector tools, or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; headless is reqwest+scraper.
+description: Drive NeuroBrowser from a Rust agent via the crate's 17 CSS-selector tools, or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -12,8 +12,8 @@ drive it in two ways:
    `src/browser/mod.rs`).
 2. **Headless daemon** — newline-delimited JSON-RPC over a Unix socket (TCP
    fallback). Methods are `ping`, `policy.get`, `policy.set`,
-   `policy.evaluate`, `policy.snapshot`, and `snapshot`. `snapshot` is a
-   scraper/stub (`about:blank`), not a live WKWebView session.
+   `policy.evaluate`, and `snapshot`. `snapshot` is a hardcoded
+   `about:blank` stub. The daemon does not execute browser tools.
 
 The shipped agent surface is **17 CSS-selector tools**. There is no `ref_map`
 (`PageSnapshot` has no such field). Not shipped as named tools: `evaluate`,
@@ -54,20 +54,25 @@ There is no `neurobrowser-cli`. Speak JSON-RPC on the socket.
 ### In-process (Rust)
 
 ```rust
+use std::sync::Arc;
 use neurobrowser::{
-    ActionPolicy, AgentConfig, AutonomyLevel, BrowserEngine, PageConfig, ReActAgent,
+    ActionPolicy, AgentConfig, AgentRunResult, AiProvider, AutonomyLevel,
+    BrowserInterface, ReActAgent,
 };
 
-let browser = BrowserEngine::new(PageConfig::default());
-let policy = ActionPolicy {
-    autonomy_level: AutonomyLevel::ReadOnly,
-    allowed_domains: vec!["example.com".into()],
-    ..ActionPolicy::default()
-};
-let agent = ReActAgent::new(AgentConfig::default(), provider);
-let response = agent
-    .execute_with_policy("Summarize the page", &browser, &policy)
-    .await?;
+// The caller supplies a configured real provider and a browser with a loaded page.
+async fn summarize_page(
+    browser: &dyn BrowserInterface,
+    provider: Arc<dyn AiProvider + Send + Sync>,
+) -> Result<AgentRunResult, String> {
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::ReadOnly,
+        allowed_domains: vec!["example.com".into()],
+        ..ActionPolicy::default()
+    };
+    let agent = ReActAgent::new(AgentConfig::default(), provider);
+    agent.execute_with_policy("Summarize the page", browser, &policy).await
+}
 ```
 
 `ActionPolicy` is a public struct. There are no builder helpers.
@@ -115,16 +120,23 @@ the Tauri runtime overrides it.
 
 | Level | Auto-allow | Gate |
 |---|---|---|
-| `ReadOnly` | Read, wait, scroll, navigate | Other actions `Block` |
+| `ReadOnly` | Read, wait, scroll | Other actions, including navigate, `Block` |
 | `Assisted` (default) | Read, wait, scroll, same-domain navigate | Click / type / submit / cross-domain → `RequireApproval` |
-| `HighAutonomy` | Allowed tools run | Denied domains still `Block`; sensitive args redact |
+| `HighAutonomy` | Remaining non-high-impact actions | Submit / purchase / auth / upload / message / destructive → `RequireApproval` |
+
+The mode table applies after the common gates below. Sensitive inputs and
+explicit approval-list matches return `RequireApproval` before mode evaluation,
+including in `ReadOnly` and `HighAutonomy`. Tool/domain denials and injection
+checks run first and return `Block`.
 
 ## Policy gates
 
 1. `denied_domains` — `Block`.
 2. `allowed_domains` — if non-empty, URLs not on the list are `Block`.
-3. Sensitive keys (`password|token|secret|api_key|…`) become `[REDACTED]` in
-   the audit trail; `type` is marked sensitive.
+3. Sensitive keys (`password`, `token`, `secret`, `api_key`, `authorization`,
+   and related credential tokens) become `[REDACTED]` in the decision payload.
+   Sensitive keys or sensitive tool metadata require approval. `type` is marked
+   sensitive; metadata alone does not redact every argument value.
 4. Prompt-injection substrings (`ignore previous instructions`,
    `reveal your instructions`) → `Block`.
 

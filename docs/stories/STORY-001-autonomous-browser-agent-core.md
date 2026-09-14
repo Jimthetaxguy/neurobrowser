@@ -44,4 +44,5 @@ The implemented slice is expected to pass:
 
 ```bash
 ./verify.sh
+(cd src-tauri && npm audit --audit-level=moderate)
 ```
