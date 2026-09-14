@@ -35,22 +35,19 @@ class ContentViewController: NSViewController {
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         
-        // Toolbar container
         let toolbarContainer = NSView()
         toolbarContainer.translatesAutoresizingMaskIntoConstraints = false
         toolbarContainer.wantsLayer = true
         toolbarContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         view.addSubview(toolbarContainer)
         
-        // Navigation buttons
         backButton = createNavButton(title: "◀", action: #selector(goBack))
         forwardButton = createNavButton(title: "▶", action: #selector(goForward))
         reloadButton = createNavButton(title: "↻", action: #selector(reloadCurrentPage))
         
-        // URL bar
         urlBar = NSTextField()
         urlBar.translatesAutoresizingMaskIntoConstraints = false
-        urlBar.placeholderString = "Enter URL or search..."
+        urlBar.placeholderString = "Enter a URL or domain..."
         urlBar.font = NSFont.systemFont(ofSize: 13)
         urlBar.bezelStyle = .roundedBezel
         urlBar.target = self
@@ -60,7 +57,6 @@ class ContentViewController: NSViewController {
         toolbarContainer.addSubview(reloadButton)
         toolbarContainer.addSubview(urlBar)
         
-        // Tab bar
         tabBar = NSSegmentedControl()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.segmentCount = 1
@@ -72,12 +68,10 @@ class ContentViewController: NSViewController {
         tabBar.segmentStyle = .rounded
         view.addSubview(tabBar)
         
-        // WebView container
         webViewContainer = NSView()
         webViewContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webViewContainer)
         
-        // Constraints
         NSLayoutConstraint.activate([
             toolbarContainer.topAnchor.constraint(equalTo: view.topAnchor),
             toolbarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -111,7 +105,6 @@ class ContentViewController: NSViewController {
             webViewContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         
-        // Create initial tab with webview
         addNewTab()
     }
     
@@ -130,29 +123,23 @@ class ContentViewController: NSViewController {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         
-        // Store webview
         webViews.append(webView)
         
-        // Update tab bar
         let newIndex = webViews.count - 1
         tabBar.segmentCount = webViews.count + 1
         tabBar.setLabel("Tab \(newIndex + 1)", forSegment: newIndex)
         tabBar.setWidth(80, forSegment: newIndex)
         
-        // Add "+" button for new tab
         tabBar.setLabel("+", forSegment: webViews.count)
         
-        // Select new tab
         tabBar.selectedSegment = newIndex
         currentTabIndex = newIndex
         
-        // Add webview to view hierarchy
         webView.frame = webViewContainer.bounds
         webView.autoresizingMask = [.width, .height]
         webViewContainer.addSubview(webView)
         showCurrentTab()
         
-        // Load default page
         if let url = URL(string: "https://www.example.com") {
             webView.load(URLRequest(url: url))
         }
@@ -167,7 +154,6 @@ class ContentViewController: NSViewController {
         webView.removeFromSuperview()
         webViews.remove(at: currentTabIndex)
         
-        // Update tab bar
         tabBar.segmentCount = webViews.count + 1
         tabBar.selectedSegment = min(currentTabIndex, webViews.count - 1)
         currentTabIndex = tabBar.selectedSegment
@@ -186,7 +172,6 @@ class ContentViewController: NSViewController {
     @objc private func tabBarChanged() {
         let selected = tabBar.selectedSegment
         
-        // Check if "+" button clicked
         if selected == webViews.count {
             addNewTab()
             return
@@ -197,17 +182,14 @@ class ContentViewController: NSViewController {
     }
     
     private func showCurrentTab() {
-        // Hide all webviews
         for webView in webViews {
             webView.isHidden = true
         }
         
-        // Show current
         if currentTabIndex < webViews.count {
             let webView = webViews[currentTabIndex]
             webView.isHidden = false
             
-            // Update URL bar
             if let url = webView.url {
                 urlBar.stringValue = url.absoluteString
             }
@@ -240,26 +222,27 @@ class ContentViewController: NSViewController {
 
     func navigateCurrentTab(to input: String) {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty else { return }
-        
-        var urlToLoad: URL?
-        
-        // Check if it looks like a URL
-        if input.contains(".") && !input.contains(" ") {
-            var urlString = input
-            if !urlString.hasPrefix("http://") && !urlString.hasPrefix("https://") {
-                urlString = "https://" + urlString
-            }
-            urlToLoad = URL(string: urlString)
-        } else {
-            // Search
-            let encoded = input.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? input
-            urlToLoad = URL(string: "https://www.google.com/search?q=\(encoded)")
-        }
-        
-        guard let url = urlToLoad, currentTabIndex < webViews.count else { return }
+        guard !input.isEmpty, currentTabIndex < webViews.count else { return }
+        guard let url = Self.validatedNavigationURL(from: input) else { return }
         urlBar.stringValue = url.absoluteString
         webViews[currentTabIndex].load(URLRequest(url: url))
+    }
+
+    private static func validatedNavigationURL(from input: String) -> URL? {
+        let normalized: String
+        if input.hasPrefix("http://") || input.hasPrefix("https://") {
+            normalized = input
+        } else if input.contains(".") && !input.contains(" ") {
+            normalized = "https://" + input
+        } else {
+            return nil
+        }
+        guard let url = URL(string: normalized),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url
     }
 
     func snapshotCurrentPage(completion: @escaping ([String: Any]) -> Void) {
@@ -337,12 +320,10 @@ class ContentViewController: NSViewController {
 extension ContentViewController: WKNavigationDelegate {
     
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        // Show loading
         reloadButton.title = "◌"
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Update URL bar
         if let url = webView.url {
             urlBar.stringValue = url.absoluteString
         }

@@ -157,16 +157,7 @@ export function createAppKitHostAdapter() {
       await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
       return latestSnapshot;
     },
-    async ask(activeSessionId, pageId, prompt) {
-      await send("ask", { sessionId: activeSessionId, pageId, prompt });
-      return {
-        response: "Native AppKit lane received the request. Rust agent execution is the remaining bridge work.",
-        tools_used: ["appkit_host_bridge"],
-        iterations: 1,
-      };
-    },
-    async startAgentRun(activeSessionId, pageId, prompt) {
-      await send("start_agent_run", { sessionId: activeSessionId, pageId, prompt });
+    async startAgentRun() {
       return {
         run_id: `appkit-run-${Date.now()}`,
         status: "completed",
@@ -177,8 +168,7 @@ export function createAppKitHostAdapter() {
         approval_id: null,
       };
     },
-    async submitApproval(runId, approved, message = null) {
-      await send("submit_approval", { runId, approved, message });
+    async submitApproval(runId, approved) {
       return {
         run_id: runId,
         status: approved ? "completed" : "cancelled",
@@ -190,7 +180,6 @@ export function createAppKitHostAdapter() {
       };
     },
     async cancelAgentRun(runId) {
-      await send("cancel_agent_run", { runId });
       return {
         run_id: runId,
         status: "cancelled",
@@ -212,7 +201,6 @@ export function createAppKitHostAdapter() {
       };
     },
     async setActionPolicy(policy) {
-      await send("set_action_policy", { policy });
       return policy;
     },
     async browserAction(command, activeSessionId, pageId) {
