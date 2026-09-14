@@ -116,8 +116,4 @@ impl AiProvider for OpenAiProvider {
     fn provider_name(&self) -> &str {
         "openai"
     }
-
-    fn is_configured(&self) -> bool {
-        self.config.api_key.is_some()
-    }
 }

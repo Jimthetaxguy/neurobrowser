@@ -66,6 +66,15 @@ impl std::fmt::Display for BlockReason {
 /// `JavaScript:` casing.
 const DISALLOWED_SCHEMES: [&str; 5] = ["javascript", "data", "vbscript", "file", "blob"];
 
+/// Scheme-only check. Does not resolve or contact the host.
+pub fn disallowed_scheme(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let scheme = parsed.scheme().to_ascii_lowercase();
+    DISALLOWED_SCHEMES
+        .contains(&scheme.as_str())
+        .then_some(scheme)
+}
+
 /// True when this address is internal and must never be reached from a page-influenced
 /// navigation.
 ///
@@ -315,6 +324,15 @@ mod tests {
                 "{u} must be blocked"
             );
         }
+    }
+
+    #[test]
+    fn disallowed_scheme_does_not_resolve_hosts() {
+        assert_eq!(
+            disallowed_scheme("javascript:alert(1)").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(disallowed_scheme("https://nonexistent.invalid/"), None);
     }
 
     #[test]
