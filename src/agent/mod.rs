@@ -1,27 +1,14 @@
-pub mod memory;
-pub mod observability;
 pub mod policy;
 
-use crate::agent::memory::{AgentEvent, AgentMemory};
-use crate::agent::observability::AgentMetrics;
 use crate::agent::policy::{
     ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, PolicyOutcome,
 };
 use crate::providers::{
-    create_provider, AiContext, AiProvider, ProviderConfig, ScrollPosition, ToolCall, ToolResult,
+    create_provider, AiContext, AiProvider, ProviderConfig, ToolCall, ToolResult,
 };
 use crate::tools::{BrowserInterface, BrowserTool, ToolRegistry};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, OnceLock};
-
-const CONVERSATION_WINDOW: usize = 20;
-
-static GLOBAL_METRICS: OnceLock<AgentMetrics> = OnceLock::new();
-
-pub fn metrics() -> &'static AgentMetrics {
-    GLOBAL_METRICS.get_or_init(AgentMetrics::default)
-}
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -43,14 +30,7 @@ pub struct AgentState {
     pub current_url: String,
     pub page_title: String,
     pub tool_results: Vec<ToolResult>,
-    pub conversation: VecDeque<AgentMessage>,
     pub iterations: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentMessage {
-    pub role: String,
-    pub content: String,
 }
 
 pub struct ReActAgent {
@@ -58,7 +38,6 @@ pub struct ReActAgent {
     provider: Mutex<Arc<dyn AiProvider + Send + Sync>>,
     tool_registry: ToolRegistry,
     state: Mutex<AgentState>,
-    memory: Mutex<AgentMemory>,
 }
 
 impl ReActAgent {
@@ -71,17 +50,9 @@ impl ReActAgent {
                 current_url: String::new(),
                 page_title: String::new(),
                 tool_results: Vec::new(),
-                conversation: VecDeque::with_capacity(CONVERSATION_WINDOW),
                 iterations: 0,
             }),
-            memory: Mutex::new(AgentMemory::default()),
         }
-    }
-
-    pub fn snapshot_state(&self) -> Result<AgentSnapshot, String> {
-        let state = self.state.lock().map_err(|e| e.to_string())?.clone();
-        let memory = self.memory.lock().map_err(|e| e.to_string())?.clone();
-        Ok(AgentSnapshot { state, memory })
     }
 
     pub fn set_provider_config(&self, provider_config: ProviderConfig) -> Result<(), String> {
@@ -110,13 +81,7 @@ impl ReActAgent {
             state.page_title = page_info.title.clone();
             state.iterations = 0;
             state.tool_results.clear();
-            state.conversation.clear();
         }
-
-        self.push_conversation_bounded(AgentMessage {
-            role: "user".to_string(),
-            content: user_prompt.to_string(),
-        })?;
 
         let max_iterations = self
             .config
@@ -124,7 +89,6 @@ impl ReActAgent {
             .map_err(|e| e.to_string())?
             .max_iterations;
         let mut events = Vec::new();
-        metrics().record_request();
 
         for iteration in 0..max_iterations {
             let context = self.build_context()?;
@@ -133,22 +97,7 @@ impl ReActAgent {
             let response = provider
                 .complete(user_prompt, &context)
                 .await
-                .map_err(|e| {
-                    self.record_error_metric();
-                    e.to_string()
-                })?;
-
-            self.push_conversation_bounded(AgentMessage {
-                role: "assistant".to_string(),
-                content: response.content.clone(),
-            })?;
-            self.push_episodic(AgentEvent::LlmCall {
-                run_id: run_id.clone(),
-                model: provider.provider_name().to_string(),
-                iteration,
-                content_preview: response.content.chars().take(200).collect(),
-                timestamp: AgentEvent::now("LlmCall"),
-            })?;
+                .map_err(|e| e.to_string())?;
 
             if response.tool_calls.is_empty() {
                 let answer = self.extract_final_answer(&response.content);
@@ -184,7 +133,6 @@ impl ReActAgent {
                         tool: tool_call.name.clone(),
                         decision,
                     });
-                    self.record_error_metric();
                     return Ok(AgentRunResult {
                         run_id,
                         status: AgentRunStatus::Blocked,
@@ -210,7 +158,6 @@ impl ReActAgent {
                             tool: tool_call.name.clone(),
                             decision,
                         });
-                        self.record_error_metric();
                         return Ok(AgentRunResult {
                             run_id,
                             status: AgentRunStatus::Blocked,
@@ -264,15 +211,6 @@ impl ReActAgent {
                     result: result.clone(),
                     success,
                 });
-                self.record_tool_call_metrics(&tool_call.name);
-                self.push_episodic(AgentEvent::ToolCall {
-                    run_id: run_id.clone(),
-                    tool: tool_call.name.clone(),
-                    arguments: tool_call.arguments.clone(),
-                    success,
-                    result_preview: result.chars().take(200).collect(),
-                    timestamp: AgentEvent::now("ToolCall"),
-                })?;
 
                 let tool_result = ToolResult {
                     tool_name: tool_call.name.clone(),
@@ -325,7 +263,6 @@ impl ReActAgent {
             }
         }
 
-        self.record_error_metric();
         Ok(AgentRunResult {
             run_id,
             status: AgentRunStatus::Failed,
@@ -439,23 +376,11 @@ impl ReActAgent {
     }
 
     fn build_context(&self) -> Result<AiContext, String> {
-        let (current_url, page_title, tool_results) = {
-            let state = self.state.lock().map_err(|e| e.to_string())?;
-            (
-                state.current_url.clone(),
-                state.page_title.clone(),
-                state.tool_results.clone(),
-            )
-        };
-
+        let state = self.state.lock().map_err(|e| e.to_string())?;
         Ok(AiContext {
-            current_url,
-            page_title,
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
-            tool_results,
-            conversation_history: Vec::new(),
+            current_url: state.current_url.clone(),
+            page_title: state.page_title.clone(),
+            tool_results: state.tool_results.clone(),
         })
     }
 
@@ -490,33 +415,4 @@ impl ReActAgent {
         }
         content.to_string()
     }
-
-    fn push_conversation_bounded(&self, message: AgentMessage) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        if state.conversation.len() >= CONVERSATION_WINDOW {
-            state.conversation.pop_front();
-        }
-        state.conversation.push_back(message);
-        Ok(())
-    }
-
-    fn record_tool_call_metrics(&self, tool_name: &str) {
-        metrics().record_tool_call_named(tool_name);
-    }
-
-    fn record_error_metric(&self) {
-        metrics().record_error();
-    }
-
-    fn push_episodic(&self, event: AgentEvent) -> Result<(), String> {
-        let mut memory = self.memory.lock().map_err(|e| e.to_string())?;
-        memory.episodic.push(event);
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentSnapshot {
-    pub state: AgentState,
-    pub memory: AgentMemory,
 }

@@ -133,17 +133,12 @@ impl AiProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::ScrollPosition;
 
     fn ctx() -> AiContext {
         AiContext {
             current_url: String::new(),
             page_title: String::new(),
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results: Vec::new(),
-            conversation_history: Vec::new(),
         }
     }
 

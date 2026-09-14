@@ -2,7 +2,7 @@ mod runtime;
 
 use neurobrowser::{
     ActionPolicy, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus, BrowserInterface,
-    PageConfig, PageSnapshot, ProviderConfig, ProviderType, SessionManager, ToolCall,
+    PageSnapshot, ProviderConfig, ProviderType, SessionManager, ToolCall,
 };
 use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
@@ -527,13 +527,12 @@ fn main() {
         )
         .init();
 
-    let browser_config = PageConfig::default();
     let agent_config = AgentConfig {
         max_iterations: 5,
         provider_config: provider_config_for(ProviderType::Openai),
     };
 
-    let session_manager = SessionManager::new(browser_config, agent_config);
+    let session_manager = SessionManager::new(agent_config);
     let runtimes = Arc::new(BrowserRuntimeRegistry::default());
 
     tauri::Builder::default()
