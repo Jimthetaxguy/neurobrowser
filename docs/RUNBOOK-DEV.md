@@ -106,7 +106,8 @@ Do not add a wildcard capability permission.
 | `cargo clippy` | warnings-as-errors | fix the warning, re-run |
 | `cargo test` | failed assertions | fix the test or the code |
 | `npm ci && npm run build` | Vite error | check `src-tauri/src/*.{jsx,js}` |
-| `cargo check --manifest-path src-tauri/Cargo.toml` | Tauri compile error | missing icon or capability |
+| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Tauri compile error | missing icon or capability |
+| locked headless `cargo check` / `cargo test --bin neurobrowser-headless` | headless compile or binary test failure | fix the headless feature path |
 | `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
 
 ## Environment variables

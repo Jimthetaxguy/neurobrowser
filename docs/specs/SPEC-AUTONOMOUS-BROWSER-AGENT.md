@@ -62,17 +62,12 @@ Policy behavior:
 
 ## Audit Trail
 
-Each proposed, blocked, approval-requested, approved, rejected, executed, cancelled,
-and completed action must record:
-
-- run id,
-- page id,
-- tool name,
-- redacted arguments,
-- policy decision,
-- risk flags,
-- timestamp,
-- structured result or rejection.
+Events are the `AgentRunEvent` enum: `ToolCallStarted` (`run_id`, `tool`,
+`arguments`), `ToolCallResult` (`run_id`, `tool`, `result`, `success`),
+`ToolCallBlocked` (`run_id`, `tool`, `decision`), `ApprovalRequested`
+(`run_id`, `approval_id`, `tool`, `decision`), `ApprovalResolved`
+(`run_id`, `approval_id`, `approved`, `message`), `RunCancelled`
+(`run_id`, `reason`), and `RunDone` (`run_id`, `final_response`, `iterations`).
 
 ## Frontend Requirements
 
@@ -88,12 +83,7 @@ Approval-required actions must not execute silently.
 
 ## Verification
 
-Required checks before promoting changes against this spec:
-
-```bash
-./verify.sh
-(cd src-tauri && npm audit --audit-level=moderate)
-```
+Promote check is `./verify.sh` (same chain CI runs).
 
 AppKit parity remains deferred unless the Tauri child-webview path fails a real
 browser smoke test.

@@ -31,7 +31,3 @@ shell, and a separate AppKit shell. This glossary records shared vocabulary;
 | Native AppKit | NeuroBrowser/ and NeuroBrowser.xcodeproj/ |
 | Agent contract and skill | docs/AGENT-SURFACE.md and SKILL.md |
 | Build commands | docs/RUNBOOK-DEV.md and verify.sh |
-
-Keep generated schemas aligned with intentional Tauri capability changes.
-Keep local credentials, build products, and working notes out of commits.
-The headless protocol stub is a known real-systems gap, not browser execution.
