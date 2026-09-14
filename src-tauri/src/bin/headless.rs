@@ -221,8 +221,10 @@ where
             let path = iter
                 .next()
                 .ok_or_else(|| CliError::Message("--socket requires a path".into()))?;
-            if path.is_empty() {
-                return Err(CliError::Message("--socket requires a path".into()));
+            if path.is_empty() || path.starts_with('-') {
+                return Err(CliError::Message(
+                    "--socket requires a path; use --socket=PATH for a dash-prefixed path".into(),
+                ));
             }
             socket = Some(PathBuf::from(path));
             continue;
@@ -554,6 +556,33 @@ mod tests {
             }
             other => panic!("expected missing-path error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_args_rejects_options_in_place_of_socket_path() {
+        for option in [
+            "--help",
+            "-h",
+            "--tauri",
+            "--socket",
+            "--socket=/tmp/other.sock",
+        ] {
+            match parse_args(args(&["--socket", option])) {
+                Err(CliError::Message(message)) => {
+                    assert!(
+                        message.contains("--socket requires a path"),
+                        "{option}: {message}"
+                    );
+                }
+                other => panic!("expected missing-path error for {option}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_args_accepts_explicit_dash_prefixed_socket_path() {
+        let cli = parse_args(args(&["--socket=--help"])).unwrap();
+        assert_eq!(cli.socket.as_deref(), Some(std::path::Path::new("--help")));
     }
 
     #[test]
