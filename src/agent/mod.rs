@@ -1,8 +1,6 @@
 pub mod memory;
 pub mod observability;
 pub mod policy;
-pub mod streaming;
-pub mod worker;
 
 use crate::agent::memory::{AgentEvent, AgentMemory};
 use crate::agent::observability::AgentMetrics;
@@ -95,27 +93,6 @@ impl ReActAgent {
 
         tracing::info!("Provider changed to: {:?}", provider_config.provider_type);
         Ok(())
-    }
-
-    pub async fn execute(
-        &self,
-        user_prompt: &str,
-        browser: &dyn BrowserInterface,
-    ) -> Result<String, String> {
-        let run = self
-            .execute_with_policy(user_prompt, browser, &ActionPolicy::default())
-            .await?;
-        match run.status {
-            AgentRunStatus::Completed => Ok(run.final_response.unwrap_or_default()),
-            AgentRunStatus::AwaitingApproval => {
-                Ok("Action requires approval before continuing".to_string())
-            }
-            AgentRunStatus::Blocked => Ok("Action blocked by policy".to_string()),
-            AgentRunStatus::Cancelled => Ok("Run cancelled".to_string()),
-            AgentRunStatus::Failed => Err(run
-                .final_response
-                .unwrap_or_else(|| "Agent run failed".to_string())),
-        }
     }
 
     pub async fn execute_with_policy(
