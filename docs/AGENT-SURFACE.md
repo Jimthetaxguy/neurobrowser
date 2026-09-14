@@ -256,7 +256,6 @@ const after = await tools.snapshot({ url_or_ref: "@self" });
 
 - `SKILL.md` — agent-loadable version of this spec.
 - `docs/RUNBOOK-DEV.md` — how to run NeuroBrowser locally.
-- `docs/TESTING-NOTES.md` — which parts are automated vs manual.
 - `src-tauri/src/runtime.rs` — implementation of the JS-RPC bridge that
   exposes these tools.
 - `src/agent/policy.rs` — implementation of the policy gates.

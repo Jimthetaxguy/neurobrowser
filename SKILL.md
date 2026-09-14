@@ -10,19 +10,19 @@ drive it in two ways:
 
 1. **In-process** — call the `neurobrowser::*` Rust crate directly (best
    when the agent is also a Rust binary).
-2. **Headless daemon** (Phase D4) — connect over Unix domain socket.
+2. **Headless daemon** — connect over a Unix domain socket (TCP fallback).
+   Ships in v0.1.1 as `neurobrowser-headless`.
 
-This skill documents the **agent-facing tool surface**: 12 tools (`snapshot`,
-`click`, `type_text`, `submit_form`, `query_selector`, `evaluate`,
-`navigate`, `get_text`, `get_attribute`, `wait_for`, `extract_text`,
-`screenshot`), the autonomy levels (`ReadOnly` / `Assisted` /
-`HighAutonomy`), and the policy gates that bind them.
+The agent-facing surface is 12 tools (`snapshot`, `click`, `type_text`,
+`submit_form`, `query_selector`, `evaluate`, `navigate`, `get_text`,
+`get_attribute`, `wait_for`, `extract_text`, `screenshot`), three autonomy
+levels (`ReadOnly` / `Assisted` / `HighAutonomy`), and `ActionPolicy` gates.
 
 Full spec: `docs/AGENT-SURFACE.md`.
 
 ## When to use
 
-- An external agent needs a real browser session (real WKWebView / WebView2 /
+- An external agent needs a real browser session (WKWebView / WebView2 /
   WebKitGTK, not a scraper) with policy-gated autonomy.
 - The agent needs **both** programmatic and **visual** access to web pages.
 - The agent must work with pages that use CORS, web sockets, or rich
@@ -45,49 +45,59 @@ chmod +x verify.sh
 ./verify.sh
 ```
 
-This builds the desktop app. To run as a headless daemon (cross-process IPC):
+Headless daemon (cross-process IPC):
 
 ```bash
-cargo build --release --manifest-path src-tauri/Cargo.toml --features headless
-./target/release/neurobrowser-headless --socket ~/.neurobrowser/daemon.sock
+NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
+  cargo run --bin neurobrowser-headless --manifest-path src-tauri/Cargo.toml --features headless
 ```
 
-(Headless daemon ships in v0.1.1 — see `docs/ROADMAP-v0.2.md`.)
+The process prints `NEUROBROWSER_LISTENING=unix://…` (or `tcp://…` if the
+Unix bind fails). There is no CLI wrapper; speak JSON-RPC on that socket.
 
 ## Invocation
 
 ### In-process (Rust agent)
 
 ```rust
-use neurobrowser::{ReActAgent, SessionManager, PageConfig, ActionPolicy, AutonomyLevel};
-use neurobrowser::agent::policy::{AutonomyLevel as AV, PolicyDomain};
+use std::sync::Arc;
+use neurobrowser::{
+    ActionPolicy, AgentConfig, AgentRunResult, AiProvider, AutonomyLevel,
+    BrowserInterface, ReActAgent,
+};
 
-let browser_config = PageConfig::default();
-let agent_config = AgentConfig::default();
-let session_manager = SessionManager::new(browser_config, agent_config);
-let session_id = session_manager.create_session();
-let page = session_manager.create_page(&session_id)?;
-
-let browser = /* concrete BrowserInterface implementation */;
-let policy = ActionPolicy::read_only()
-    .with_allowed_domains(vec!["example.com".parse()?]);
-let agent = ReActAgent::new(/* ... */);
-
-// One-shot blocking ask
-let response = agent.execute("Summarize the page", &browser).await?;
+// The caller supplies a configured real provider and a browser with a loaded page.
+async fn summarize_page(
+    browser: &dyn BrowserInterface,
+    provider: Arc<dyn AiProvider + Send + Sync>,
+) -> Result<AgentRunResult, String> {
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::ReadOnly,
+        allowed_domains: vec!["example.com".into()],
+        ..ActionPolicy::default()
+    };
+    let agent = ReActAgent::new(AgentConfig::default(), provider);
+    agent.execute_with_policy("Summarize the page", browser, &policy).await
+}
 ```
 
-### Cross-process (any agent via headless daemon — v0.1.1)
+`ActionPolicy` is a public struct (`autonomy_level`, `allowed_domains`,
+`denied_domains`, `denied_tools`, `approval_required_tools`,
+`block_prompt_injection`) with `Default` and `evaluate(...)`. There are no
+builder helpers.
 
-```bash
-# Assume the daemon is running and socket is at $NB_SOCKET.
-neurobrowser-cli ask --session auto --prompt "Summarize the page"
-neurobrowser-cli click --session auto --ref @e3
-neurobrowser-cli snapshot --session auto
+### Cross-process (headless daemon)
+
+Newline-delimited JSON on the socket:
+
+```json
+{"id":"1","method":"ping","params":{}}
+{"id":"2","method":"policy.get","params":{}}
+{"id":"3","method":"snapshot","params":{}}
 ```
 
-(`neurobrowser-cli` ships in v0.1.1 as a thin Rust binary that talks to the
-daemon.)
+Shipped methods: `ping`, `policy.get`, `policy.set`, `policy.evaluate`,
+`snapshot`, `policy.snapshot`.
 
 ## Tools
 
@@ -111,19 +121,21 @@ See `docs/AGENT-SURFACE.md` for the full JSON schemas. Quick reference:
 ## Autonomy
 
 ```rust
-use neurobrowser::ActionPolicy;
-use neurobrowser::agent::policy::AutonomyLevel;
+use neurobrowser::{ActionPolicy, AutonomyLevel};
 
-let policy = ActionPolicy::default().with_autonomy(AutonomyLevel::Assisted);
-let policy = policy.with_allowed_domains(vec!["example.com".parse()?]);
-let policy = policy.with_denied_domains(vec!["blocked.example".parse()?]);
+let policy = ActionPolicy {
+    autonomy_level: AutonomyLevel::Assisted,
+    allowed_domains: vec!["example.com".into()],
+    denied_domains: vec!["blocked.example".into()],
+    ..ActionPolicy::default()
+};
 ```
 
-| Level | Read | Click / Type / Submit | Navigate | Approve-or-block?
+| Level | Read | Click / Type / Submit | Navigate | Approve-or-block? |
 |---|---|---|---|---|
-| `ReadOnly` | ✓ | ✗ (RequireApproval) | ✗ (Block) | Never
-| `Assisted` | ✓ | ✓ (RequireApproval → UI) | ✓ | Per-call UI dialog
-| `HighAutonomy` | ✓ | ✓ | ✓ | Sensitive-arg auto-redact; UI optional
+| `ReadOnly` | ✓ | ✗ (RequireApproval) | ✗ (Block) | Never |
+| `Assisted` | ✓ | ✓ (RequireApproval → UI) | ✓ | Per-call UI dialog |
+| `HighAutonomy` | ✓ | ✓ | ✓ | Sensitive-arg auto-redact; UI optional |
 
 ## Policy gates
 
@@ -140,7 +152,7 @@ let policy = policy.with_denied_domains(vec!["blocked.example".parse()?]);
 
 ```javascript
 // Pseudocode; real call shape depends on your integration (in-process Rust
-// or CLI / IPC).
+// or JSON-RPC over the daemon socket).
 await tools.navigate({ url: "https://example.com/login" });
 const snap = await tools.snapshot({ url_or_ref: "@self" });
 
@@ -149,14 +161,11 @@ const pw_ref = snap.ref_map["@e2"];
 const submit_ref = snap.ref_map["@e3"];
 
 await tools.type_text({ ref: email_ref.id, text: process.env.EMAIL });
-// NB: type_text() redacts "password" in the audit trail but uses the real
-// value at call time.
 await tools.type_text({ ref: pw_ref.id, text: process.env.PASSWORD });
 
 const r = await tools.submit_form({ ref: submit_ref.id });
 if (!r.ok) {
   if (r.error?.code === "BLOCKED") {
-    // The page is on the denied list. Abort.
     throw new Error("Login is on the denied-domains list.");
   }
 }
@@ -182,6 +191,5 @@ const total_text = await tools.extract_text({ ref: "@e20", structured: true });
 
 - `docs/AGENT-SURFACE.md` — the spec-of-record.
 - `docs/RUNBOOK-DEV.md` — how to build + run.
-- `docs/TESTING-NOTES.md` — what's tested.
 - `docs/references/prior-art.md` — what NeuroBrowser takes / leaves from
   agent-browser, hyperbrowser-app-examples, etc.

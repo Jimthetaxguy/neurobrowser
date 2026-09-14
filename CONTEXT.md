@@ -1,72 +1,37 @@
-# NeuroBrowser — project context glossary
+---
+created: 2026-07-10
+updated: 2026-09-14
+status: active
+type: project-glossary
+scope: NeuroBrowser library and desktop shells
+---
 
-**Role:** first-party-active AI-native browser (Rust lib + Tauri v2 desktop).  
-**Path:** `/Users/jamespustorino/code/neurobrowser`  
-**Remote:** `https://github.com/Jimthetaxguy/neurobrowser.git`  
-**Branch:** `main` (as of 2026-07-10)
+# NeuroBrowser context
 
-## Purpose
-
-Drive a **real browser session** (WKWebView / WebView2 / WebKitGTK via Tauri) with policy-gated agent autonomy — not a pure HTTP scraper. Agents get programmatic tools **and** visual page access.
-
-## Domain vocabulary
+NeuroBrowser combines a Rust browser-agent library, a Tauri/React desktop
+shell, and a separate AppKit shell. This glossary records shared vocabulary;
+[PROJECT.md](PROJECT.md) owns current scope and planned work.
 
 | Term | Meaning |
-|------|---------|
-| **Agent run** | `start_agent_run` → model proposes tools → `ActionPolicy` evaluates → events stream |
-| **ActionPolicy** | Gate for proposed browser actions (read/scroll/nav vs type/submit/high-impact) |
-| **Autonomy levels** | `ReadOnly` / `Assisted` (default) / `HighAutonomy` |
-| **Assisted default** | Reads, snapshots, scrolling, same-domain nav auto-run; typing, form submit, denylist, suspicious content require approval or block |
-| **Submit approval** | `submit_approval` / `cancel_agent_run` resolve gated actions |
-| **StreamEvent** | Tagged JSON events for proposed / blocked / approved / rejected / executed actions |
-| **Tabs-as-workers** | Phase E model: tabs as parallel work units for agent tasks |
-| **Headless daemon** | Phase D4: Unix domain socket control plane for external agents |
-| **Agent surface** | 12 tools: snapshot, click, type_text, submit_form, query_selector, evaluate, navigate, get_text, get_attribute, wait_for, extract_text, screenshot |
-| **Provider** | Pluggable LLM backends: OpenAI, Anthropic, Ollama (real keys via env) |
-| **ReAct loop** | Library agent path (`src/agent/`) with memory/observability structures |
+|---|---|
+| BrowserInterface | Rust interface implemented by the HTTP scraper and Tauri webview runtime. Unsupported capabilities return errors. |
+| BrowserEngine | reqwest + scraper implementation; it does not run JavaScript or provide a live interactive DOM. |
+| TauriBrowserRuntime | Desktop runtime that routes browser operations to real child webviews. |
+| ActionPolicy | Evaluates proposed tool calls and returns Allow, RequireApproval, or Block with redacted arguments. |
+| ReadOnly / Assisted / HighAutonomy | Policy modes; domain/tool denials, sensitive input, and high-impact actions retain explicit gates. |
+| Agent run | ReAct loop using a real configured provider and BrowserInterface; pending actions require a caller-managed approval. |
+| Tool registry | CSS-selector browser tools in default_tool_registry; see the canonical [agent surface](docs/AGENT-SURFACE.md). |
+| Headless daemon | Unix-socket policy protocol stub with loopback TCP fallback; snapshot is hardcoded about:blank and tools are not executed. |
+| AppKit shell | Separate native Swift window/browser implementation; agent execution is not connected to the Rust runtime. |
 
-## Module map
+| Boundary | Source |
+|---|---|
+| Library, policy, providers | src/ |
+| Tauri IPC, React, webview bridge, headless protocol | src-tauri/ |
+| Native AppKit | NeuroBrowser/ and NeuroBrowser.xcodeproj/ |
+| Agent contract and skill | docs/AGENT-SURFACE.md and SKILL.md |
+| Build commands | docs/RUNBOOK-DEV.md and verify.sh |
 
-| Path | Role |
-|------|------|
-| `src/` | Library crate: agent, browser tools, providers, session, tools |
-| `src-tauri/` | Tauri v2 desktop wrapper + IPC bridge |
-| `docs/specs/`, `docs/stories/`, `docs/adr/` | Shared GitSpec-style product docs |
-| `docs/notes/local/` | Local process notes (gitignored; promote per docs/notes/README) |
-| `SKILL.md` | Agent skill entry for driving NeuroBrowser |
-| `docs/AGENT-SURFACE.md` | Full agent tool/autonomy surface |
-| `CURRENT_STATE.md` | Point-in-time audit (may lag tip — re-verify with cargo) |
-| `verify.sh` | Full verification chain |
-
-## Real systems
-
-- LLM: `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / local Ollama (`OLLAMA_BASE_URL`)
-- Browser: real Tauri webview runtime (fail closed if IPC bridge unavailable)
-- **No mock browser page** for product paths
-
-## Verify
-
-```bash
-cargo check --lib
-cargo test
-cargo clippy --all-targets
-cargo check --manifest-path src-tauri/Cargo.toml
-./verify.sh   # full chain when shipping
-```
-
-## Non-goals / safety
-
-- Not ROSA product shell; do not import ROSA identity/voice KB wire mutations here
-- Do not push to vendor upstreams; this is first-party
-- Archive-don't-delete for large remove batches (`_archive-*/`)
-- Stage-by-name only; auto-generated `src-tauri/gen/schemas/*` often dirty after local Tauri runs — do not bulk-add without review
-
-## Cleanup note (2026-07-10)
-
-CONTEXT added for project-context-glossary compliance. Residual dirty: `Cargo.lock` + Tauri gen schemas (build noise); `.cursor/` and `_archive-*` should stay local.
-
-## Cargo.lock / Tauri gen schemas policy (2026-07-10)
-
-- **`Cargo.lock` is tracked** — commit intentional dependency resolution (e.g. `tempfile` for tests).
-- **`src-tauri/gen/schemas/*` is tracked** — regenerate via Tauri build when capabilities change; commit with the capability/IPC change that caused the regen (worker list permissions, etc.). Do not leave machine-local schema drift uncommitted if it reflects source-of-truth capability config.
-- **`_working-files/`** stays gitignored (session notes).
+Keep generated schemas aligned with intentional Tauri capability changes.
+Keep local credentials, build products, and working notes out of commits.
+The headless protocol stub is a known real-systems gap, not browser execution.
