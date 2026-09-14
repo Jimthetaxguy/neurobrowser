@@ -27,7 +27,8 @@ This is the verification chain in `verify.sh`:
 4. `cd src-tauri && npm ci && npm run build`
 5. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
 6. Locked headless check and binary tests with `--features headless`
-7. `cargo build --release` (library crate)
+7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
+8. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
@@ -97,6 +98,13 @@ Adding a command:
 5. Add a wrapper in `src-tauri/src/hostAdapters.js`.
 
 Do not add a wildcard capability permission.
+
+Page webviews receive only `browser_runtime_report`, including the initial
+`about:blank` document. URLPattern requires its colon to be escaped: the JSON
+entry is `"about\\:blank"`. The capability tests exercise Tauri's compiled ACL
+without launching the app: blank/HTTP/HTTPS reports succeed, other document
+schemes and webview labels are denied, and page webviews cannot invoke control
+commands (including provider changes and approval submission).
 
 ## verify.sh failures
 
