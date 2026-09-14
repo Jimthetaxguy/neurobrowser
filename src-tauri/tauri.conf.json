@@ -26,7 +26,7 @@
     }
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "NeuroBrowser",
