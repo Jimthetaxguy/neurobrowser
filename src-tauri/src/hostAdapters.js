@@ -124,58 +124,8 @@ export function createAppKitHostAdapter() {
       await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
       return latestSnapshot;
     },
-    async startAgentRun() {
-      return {
-        run_id: `appkit-run-${Date.now()}`,
-        status: "completed",
-        final_response: "Native AppKit lane received the run request. Rust approval-loop parity remains deferred.",
-        iterations: 1,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async submitApproval(runId, approved) {
-      return {
-        run_id: runId,
-        status: approved ? "completed" : "cancelled",
-        final_response: approved ? "Approved in native host lane." : "Approval denied.",
-        iterations: 0,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async cancelAgentRun(runId) {
-      return {
-        run_id: runId,
-        status: "cancelled",
-        final_response: "Run cancelled.",
-        iterations: 0,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async getActionPolicy() {
-      return {
-        autonomy_level: "assisted",
-        allowed_domains: [],
-        denied_domains: [],
-        denied_tools: [],
-        approval_required_tools: [],
-        block_prompt_injection: true,
-      };
-    },
-    async setActionPolicy(policy) {
-      return policy;
-    },
     async browserAction(command, activeSessionId, pageId) {
       await send(command, { sessionId: activeSessionId, pageId });
-    },
-    async setProvider(provider) {
-      await send("set_provider", { provider });
-      return { provider, model: "native-host", configured: true };
     },
     onHostEvent(callback) {
       const handler = (event) => {
