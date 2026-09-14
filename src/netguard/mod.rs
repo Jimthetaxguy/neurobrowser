@@ -451,36 +451,39 @@ mod resolver_tests {
         }
     }
 
-    fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
+    async fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
         let addrs: Vec<SocketAddr> = inner.iter().map(|s| s.parse().unwrap()).collect();
         let guarded = GuardedResolver::new(Arc::new(FixedResolver(addrs)));
         let name = Name::from_str("example.test").unwrap();
-        futures::executor::block_on(async {
-            match guarded.resolve(name).await {
-                Ok(it) => Ok(it.collect()),
-                Err(e) => Err(e.to_string()),
-            }
-        })
+        match guarded.resolve(name).await {
+            Ok(it) => Ok(it.collect()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
-    #[test]
-    fn resolver_strips_internal_addresses_returned_by_dns() {
+    #[tokio::test]
+    async fn resolver_strips_internal_addresses_returned_by_dns() {
         // The rebinding case: DNS answers with a public AND a loopback address.
-        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"]).expect("some kept");
+        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"])
+            .await
+            .expect("some kept");
         assert_eq!(kept.len(), 1, "internal address must be filtered out");
         assert_eq!(kept[0].ip().to_string(), "93.184.216.34");
     }
 
-    #[test]
-    fn resolver_refuses_when_every_address_is_internal() {
+    #[tokio::test]
+    async fn resolver_refuses_when_every_address_is_internal() {
         let err = resolve_all(vec!["169.254.169.254:80", "10.0.0.1:80"])
+            .await
             .expect_err("must refuse, not return an empty set");
         assert!(err.contains("internal/loopback"), "got: {err}");
     }
 
-    #[test]
-    fn resolver_passes_ordinary_public_addresses_through() {
-        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"]).expect("kept");
+    #[tokio::test]
+    async fn resolver_passes_ordinary_public_addresses_through() {
+        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"])
+            .await
+            .expect("kept");
         assert_eq!(kept.len(), 2);
     }
 }

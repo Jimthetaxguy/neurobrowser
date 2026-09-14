@@ -813,7 +813,6 @@ name = "neurobrowser"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "futures",
  "regex-lite",
  "reqwest",
  "scraper",
