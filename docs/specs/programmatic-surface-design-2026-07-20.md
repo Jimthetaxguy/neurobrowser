@@ -1,54 +1,58 @@
 # NeuroBrowser — Programmatic Surface
 
-One core, thin clients. Four layers, not four silos.
+## Current boundaries
 
-## Layers
+1. **Rust library** owns `SessionManager`, `ReActAgent`, `ActionPolicy`,
+   `BrowserInterface`, and the 17-tool default registry. `BrowserEngine` is an
+   HTTP scraper; `TauriBrowserRuntime` drives desktop webviews.
+2. **Headless daemon** is a policy protocol stub. Its newline-delimited JSON-RPC
+   methods are `ping`, `policy.get`, `policy.set`, `policy.evaluate`, and a
+   hardcoded `snapshot`. It does not navigate, execute tools, or run an agent.
+3. **Future CLI and MCP clients** require real daemon browser wiring first.
+   No CLI crate or CLI browser command is shipped.
+4. **Direct embedding** links the library and supplies a real provider and browser.
 
-1. **Library (`neurobrowser` crate)** — owns `SessionManager`, `ReActAgent`
-   (`execute` / `execute_with_policy` / `execute_approved_tool` /
-   `execute_stream`), `ActionPolicy`, `BrowserInterface` plus its two
-   impls (`BrowserEngine` scraper path, `TauriBrowserRuntime`), and the
-   12-tool `ToolRegistry`. Planned: a `NeuroBrowser<B: BrowserInterface>`
-   facade that owns one browser + agent + policy.
+## Proposed browser commands
 
-2. **Headless daemon** (`src-tauri/src/bin/headless.rs`) — the one running
-   process. Newline-delimited JSON-RPC over UDS (TCP fallback). Shipped
-   today: `ping`, `policy.get` / `set` / `evaluate` / `snapshot`,
-   `snapshot`. Planned: the same session/page/ask/tool/worker surface as
-   the desktop app, over the same `SessionManager` objects.
+A future CLI must map these 17 verbs to the current registry using CSS selectors.
+These are a proposed contract, not callable daemon methods today. The stub
+`snapshot` RPC and library `BrowserInterface::snapshot()` are outside the registry.
 
-3. **Thin clients** — future MCP server and CLI. Socket clients only;
-   they reuse core serde types and do not embed a second engine.
+| Proposed verb | Registry tool | Arguments |
+|---|---|---|
+| navigate | navigate | url |
+| wait | wait | none |
+| query-dom | query_dom | selector |
+| get-text | get_text | selector |
+| get-links | get_links | none |
+| get-prices | get_prices | none |
+| get-tables | get_tables | none |
+| click | click | selector |
+| type | type | selector, text |
+| scroll-to | scroll_to | selector |
+| scroll-by | scroll_by | x, y |
+| submit-form | submit_form | selector |
+| keypress | keypress | key |
+| screenshot | screenshot | none; runtime support required |
+| back | back | none |
+| forward | forward | none |
+| reload | reload | none |
 
-4. **Direct embed** — a Rust program links the crate (or the planned
-   facade) with no daemon. Method names stay in lockstep with the RPC
-   vocabulary (`ask` / `ask_with_policy` / `resume_approved`).
+There are no shipped named `evaluate`, `get_attribute`, `wait_for`, or
+`extract_text` tools. Screenshot is registered but neither current runtime
+implements it. Unsupported browser capabilities must return errors.
 
-## Contract
+## Shared contract and dependencies
 
-Every surface honors one contract:
+Core types include `PageSnapshot`, `ActionPolicy`, `PolicyDecision`,
+`AgentRunResult`, `AgentRunEvent`, `ToolDefinition`, and `ToolRisk`.
+The current wire shape is `{id, method, params}` →
+`{id, ok, result|error:{code,message}}`. Policy evaluation returns a successful
+response containing an `Allow`, `RequireApproval`, or `Block` decision.
+See [the agent surface](../AGENT-SURFACE.md) for fields and actual methods.
 
-1. **Types** — `PageSnapshot`, `ActionPolicy` / `AutonomyLevel` /
-   `PolicyDecision` / `PolicyOutcome`, `AgentRunResult` / `AgentRunEvent`,
-   `ToolDefinition` / `ToolRisk`, `ProviderConfig`, `WorkerSpec` /
-   `WorkerSummary`. Serde-derived in the core crate; no hand-rolled DTOs.
-2. **Wire** — `{id, method, params}` → `{id, ok, result|error:{code,message}}`,
-   optional `stream` for `run`. Methods take `session_id` / `page_id`.
-   Error codes and `@eN` refs: `docs/AGENT-SURFACE.md`.
-3. **Policy** — `ActionPolicy::evaluate` is the only gate. The two-call
-   approval flow (`ask` → `AwaitingApproval` → `approval.resolve`) is
-   identical on desktop, MCP, and CLI.
-
-## Phases
-
-0. **Core contract** — `ref_map` on `PageSnapshot`; per-session policy +
-   decision log; ref-based `BrowserInterface` methods; facade.
-1. **Daemon wiring** — real navigate/snapshot/tool/ask/run/approval/worker
-   methods over `SessionManager`.
-1b. **Socket authz** — `SO_PEERCRED` + session ownership check.
-2. **Thin clients** — CLI crate and sibling MCP server over the Phase 1
-   protocol.
-3. **Library polish** — examples, crate docs, pre-1.0 semver.
-4. **Real interactivity** — promote `src-tauri` runtime to a `[lib]` so
-   headless can use `TauriBrowserRuntime`; close tools that have no Rust
-   path yet.
+Real browser/session wiring and socket authorization must precede browser CLI
+or MCP commands. Any future execution and approval flow must use the same policy
+gates and browser capabilities as the desktop. Element-ref maps, a unified
+facade, cross-process workers, and streaming RPC remain separate future work;
+they are not prerequisites for documenting the current selector tools accurately.

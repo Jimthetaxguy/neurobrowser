@@ -44,7 +44,5 @@ The implemented slice is expected to pass:
 
 ```bash
 ./verify.sh
-npm run build
-npm audit --audit-level=moderate
-npm run smoke:desktop
+(cd src-tauri && npm audit --audit-level=moderate)
 ```

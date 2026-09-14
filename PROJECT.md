@@ -2,7 +2,7 @@
 
 AI-native desktop browser: Rust library + Tauri/React shell. Agents drive a
 real OS webview through the desktop bridge. The Rust library provides a
-CSS-selector tool registry gated by `ActionPolicy`. The headless daemon is
+17-tool CSS-selector registry gated by `ActionPolicy`. The headless daemon is
 a policy JSON-RPC protocol stub: its snapshot is hardcoded `about:blank`,
 and it cannot navigate or execute browser tools.
 
@@ -14,17 +14,18 @@ See `docs/RUNBOOK-DEV.md` to build and run. Changelog: `CHANGELOG.md`.
 Shipped on `main`. `./verify.sh` is the green-build chain.
 
 - **Desktop:** React + Tauri child webview per page (`src-tauri/`).
-- **Library:** ReAct agent, providers (OpenAI / Anthropic / Ollama), session +
-  worker registry, streaming + metrics (`src/`).
+- **Library:** ReAct agent, providers (OpenAI / Anthropic / Ollama), sessions,
+  episodic memory, and metrics (`src/`).
 - **Policy:** `ReadOnly` / `Assisted` / `HighAutonomy` with domain allow/deny,
   sensitive-arg redaction, and prompt-injection detection.
 - **Headless protocol stub:** `neurobrowser-headless` over a Unix socket
   with loopback TCP fallback after a failed Unix bind. Policy evaluation
   does not execute a tool; `snapshot` returns hardcoded data. Methods:
-  `ping`, `policy.get` / `policy.set` / `policy.evaluate` / `policy.snapshot`,
+  `ping`, `policy.get` / `policy.set` / `policy.evaluate`,
   `snapshot`.
-- **Workers:** types + `SessionManager` registry + Tauri `list_workers` /
-  `get_worker`. Sidebar (E5) and headless fan-out (E6) are not shipped.
+- **Workers:** summary types and empty compatibility readers remain in the
+  library. Worker execution, Tauri worker IPC, sidebar, and headless fan-out
+  are not shipped.
 
 ## v0.2
 
