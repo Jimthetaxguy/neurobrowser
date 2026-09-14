@@ -54,13 +54,6 @@ struct SnapshotResponse {
     interactive_ready: bool,
 }
 
-#[derive(Serialize)]
-struct SessionListItem {
-    id: String,
-    created_at: u64,
-    page_count: usize,
-}
-
 #[derive(Serialize, Deserialize)]
 struct ValidateUrlResult {
     valid: bool,
@@ -247,9 +240,7 @@ async fn navigate(
     page_id: usize,
     url: String,
 ) -> Result<(), String> {
-    // Enforce URL validation server-side (dangerous-scheme rejection + normalization)
-    // regardless of any frontend check, so the command can't be invoked directly to
-    // reach a javascript:/data: target.
+    // Server-side check so invoke cannot skip the frontend guard.
     let validation = validate_url(url.clone());
     if !validation.valid {
         return Err(validation
@@ -286,14 +277,54 @@ async fn get_page_snapshot(
     Ok(snapshot_response(snapshot))
 }
 
-#[tauri::command]
-async fn get_page_info(
-    app: AppHandle,
-    state: State<'_, AppState>,
+fn remember_pending_approval(
+    state: &AppState,
     session_id: String,
     page_id: usize,
-) -> Result<SnapshotResponse, String> {
-    get_page_snapshot(app, state, session_id, page_id).await
+    result: &AgentRunResult,
+) -> Result<(), String> {
+    if result.status != AgentRunStatus::AwaitingApproval {
+        return Ok(());
+    }
+    if let (Some(tool_call), Some(approval_id)) =
+        (result.pending_tool_call.clone(), result.approval_id.clone())
+    {
+        state
+            .pending_approvals
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(
+                result.run_id.clone(),
+                PendingApproval {
+                    session_id,
+                    page_id,
+                    tool_call,
+                    approval_id,
+                },
+            );
+    }
+    Ok(())
+}
+
+async fn execute_agent_run(
+    app: AppHandle,
+    state: &AppState,
+    session_id: String,
+    page_id: usize,
+    prompt: &str,
+) -> Result<AgentRunResult, String> {
+    let (page, browser) = browser_for_page(app, state, &session_id, page_id)?;
+    let policy = state
+        .action_policy
+        .lock()
+        .map(|policy| policy.clone())
+        .map_err(|e| e.to_string())?;
+    let result = page
+        .agent
+        .execute_with_policy(prompt, &browser, &policy)
+        .await?;
+    remember_pending_approval(state, session_id, page_id, &result)?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -304,39 +335,7 @@ async fn ask(
     page_id: usize,
     prompt: String,
 ) -> Result<AskResult, String> {
-    let (page, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    let policy = state
-        .action_policy
-        .lock()
-        .map(|policy| policy.clone())
-        .map_err(|e| e.to_string())?;
-    // Route through the policy-aware path (was calling the raw `execute`, which
-    // bypassed ActionPolicy entirely). Approval-gated tools are surfaced, not run.
-    let result = page
-        .agent
-        .execute_with_policy(&prompt, &browser, &policy)
-        .await?;
-
-    if result.status == AgentRunStatus::AwaitingApproval {
-        if let (Some(tool_call), Some(approval_id)) =
-            (result.pending_tool_call.clone(), result.approval_id.clone())
-        {
-            state
-                .pending_approvals
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(
-                    result.run_id.clone(),
-                    PendingApproval {
-                        session_id,
-                        page_id,
-                        tool_call,
-                        approval_id,
-                    },
-                );
-        }
-    }
-
+    let result = execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await?;
     let tools_used = result
         .events
         .iter()
@@ -387,39 +386,7 @@ async fn start_agent_run(
     page_id: usize,
     prompt: String,
 ) -> Result<AgentRunResult, String> {
-    let (page, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    let policy = state
-        .action_policy
-        .lock()
-        .map(|policy| policy.clone())
-        .map_err(|e| e.to_string())?;
-
-    let result = page
-        .agent
-        .execute_with_policy(&prompt, &browser, &policy)
-        .await?;
-
-    if result.status == AgentRunStatus::AwaitingApproval {
-        if let (Some(tool_call), Some(approval_id)) =
-            (result.pending_tool_call.clone(), result.approval_id.clone())
-        {
-            state
-                .pending_approvals
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(
-                    result.run_id.clone(),
-                    PendingApproval {
-                        session_id,
-                        page_id,
-                        tool_call,
-                        approval_id,
-                    },
-                );
-        }
-    }
-
-    Ok(result)
+    execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await
 }
 
 #[tauri::command]
@@ -475,29 +442,6 @@ fn cancel_agent_run(state: State<'_, AppState>, run_id: String) -> Result<AgentR
 }
 
 #[tauri::command]
-fn list_workers(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<Vec<neurobrowser::WorkerSummary>, String> {
-    state
-        .session_manager
-        .list_workers(&session_id)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_worker(
-    state: State<'_, AppState>,
-    session_id: String,
-    worker_id: String,
-) -> Result<neurobrowser::WorkerSnapshot, String> {
-    state
-        .session_manager
-        .get_worker(&session_id, &worker_id)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn close_page(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -509,62 +453,36 @@ fn close_page(
 }
 
 #[tauri::command]
-fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionListItem>, String> {
-    Ok(state
-        .session_manager
-        .list_sessions()
-        .into_iter()
-        .map(|session| SessionListItem {
-            id: session.id,
-            created_at: session.created_at,
-            page_count: session.page_count,
-        })
-        .collect())
-}
-
-#[tauri::command]
-fn browser_reload(
+async fn browser_reload(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
-    let (page, _) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
-    state.runtimes.set_loading(page.id, true);
-    app.get_webview(&page.runtime_id)
-        .ok_or_else(|| "Runtime webview not found".to_string())?
-        .reload()
-        .map_err(|e| e.to_string())
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.browser_reload().await
 }
 
 #[tauri::command]
-fn browser_back(
+async fn browser_back(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
-    let (page, _) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
-    state.runtimes.set_loading(page.id, true);
-    app.get_webview(&page.runtime_id)
-        .ok_or_else(|| "Runtime webview not found".to_string())?
-        .eval("history.back()")
-        .map_err(|e| e.to_string())
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.browser_back().await
 }
 
 #[tauri::command]
-fn browser_forward(
+async fn browser_forward(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
-    let (page, _) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
-    state.runtimes.set_loading(page.id, true);
-    app.get_webview(&page.runtime_id)
-        .ok_or_else(|| "Runtime webview not found".to_string())?
-        .eval("history.forward()")
-        .map_err(|e| e.to_string())
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.browser_forward().await
 }
 
 #[tauri::command]
@@ -592,12 +510,6 @@ fn validate_url(url: String) -> ValidateUrlResult {
         };
     };
 
-    // Scheme and destination are judged by the shared netguard boundary, not by
-    // substring. The previous `contains("javascript:")` check was wrong twice: it
-    // missed `file:`/`blob:`/`vbscript:` and casing, and it rejected legitimate https
-    // URLs that merely mention a scheme in a query string. It also performed no
-    // address check at all, so this command was not an SSRF guard despite reading
-    // like one.
     if let Some(reason) = neurobrowser::netguard::blocked_reason(&normalized) {
         return ValidateUrlResult {
             valid: false,
@@ -635,10 +547,6 @@ fn set_provider(
 }
 
 fn main() {
-    // Honor RUST_LOG when set (e.g. `RUST_LOG=debug`), falling back to the
-    // default filter. Previously the filter was a hardcoded string literal, so
-    // RUST_LOG had no effect — operators could not raise verbosity without a
-    // rebuild (FA-8 operability).
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -673,11 +581,7 @@ fn main() {
             create_page,
             create_session,
             get_action_policy,
-            get_page_info,
             get_page_snapshot,
-            get_worker,
-            list_sessions,
-            list_workers,
             navigate,
             set_active_page,
             set_action_policy,

@@ -147,10 +147,6 @@ impl AiProvider for AnthropicProvider {
     fn provider_name(&self) -> &str {
         "anthropic"
     }
-
-    fn is_configured(&self) -> bool {
-        self.config.api_key.is_some()
-    }
 }
 
 #[cfg(test)]

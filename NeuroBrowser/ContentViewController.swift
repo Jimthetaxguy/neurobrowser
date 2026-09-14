@@ -9,7 +9,6 @@ class ContentViewController: NSViewController {
     var backButton: NSButton!
     var forwardButton: NSButton!
     var reloadButton: NSButton!
-    var tabView: NSTabView!
     var webViews: [WKWebView] = []
     var tabBar: NSSegmentedControl!
     var pageUpdateHandler: (([String: Any]) -> Void)?
@@ -48,7 +47,7 @@ class ContentViewController: NSViewController {
         
         urlBar = NSTextField()
         urlBar.translatesAutoresizingMaskIntoConstraints = false
-        urlBar.placeholderString = "Enter URL or search..."
+        urlBar.placeholderString = "Enter a URL or domain..."
         urlBar.font = NSFont.systemFont(ofSize: 13)
         urlBar.bezelStyle = .roundedBezel
         urlBar.target = self

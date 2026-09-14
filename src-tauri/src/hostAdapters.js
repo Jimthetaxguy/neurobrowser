@@ -63,12 +63,6 @@ export function createTauriHostAdapter() {
     async startAgentRun(sessionId, pageId, prompt) {
       return invoke("start_agent_run", { sessionId, pageId, prompt });
     },
-    async listWorkers(sessionId) {
-      return invoke("list_workers", { sessionId });
-    },
-    async getWorker(sessionId, workerId) {
-      return invoke("get_worker", { sessionId, workerId });
-    },
     async submitApproval(runId, approved, message = null) {
       return invoke("submit_approval", { runId, approved, message });
     },
@@ -130,6 +124,7 @@ export function createAppKitHostAdapter() {
     },
     async syncBrowserViewport() {},
     async validateUrl(url) {
+      // Same first-stage rules as Tauri `validate_url`: only http(s), no substring scheme checks.
       const trimmed = url.trim();
       let normalized;
       if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {

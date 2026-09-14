@@ -453,10 +453,7 @@ export default function App({ adapter, lane }) {
     setThinking(true);
     setStatus("Agent is working...");
     try {
-      const result =
-        typeof adapter.startAgentRun === "function"
-          ? await adapter.startAgentRun(sessionId, currentPageId, trimmed)
-          : await adapter.ask(sessionId, currentPageId, trimmed);
+      const result = await adapter.startAgentRun(sessionId, currentPageId, trimmed);
       const events = result.events || [];
       setActionEvents((items) => [...items, ...events]);
       if (result.status === "awaiting_approval") {

@@ -160,6 +160,7 @@ impl ActionPolicy {
         arguments: &HashMap<String, String>,
         snapshot: &PageSnapshot,
     ) -> PolicyDecision {
+        let tool_name = crate::tools::canonical_tool_name(tool_name);
         let redacted_arguments = redact_arguments(arguments);
         let mut reasons = Vec::new();
         let mut flags = Vec::new();
@@ -274,7 +275,7 @@ impl ActionPolicy {
 
         match self.autonomy_level {
             AutonomyLevel::ReadOnly => match tool_risk.action {
-                ToolAction::Read | ToolAction::Wait | ToolAction::Scroll | ToolAction::Navigate => {
+                ToolAction::Read | ToolAction::Wait | ToolAction::Scroll => {
                     PolicyDecision::allow(redacted_arguments)
                 }
                 _ => {
@@ -349,20 +350,72 @@ fn contains_sensitive_argument(arguments: &HashMap<String, String>) -> bool {
 }
 
 fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_lowercase();
+    // Preserve word boundaries before lowercasing camelCase/acronym keys.
+    let chars: Vec<char> = key.chars().collect();
+    let mut normalized = String::with_capacity(key.len());
+    for (index, &ch) in chars.iter().enumerate() {
+        if !ch.is_ascii_alphanumeric() {
+            normalized.push('_');
+            continue;
+        }
+        if ch.is_ascii_uppercase()
+            && index > 0
+            && (chars[index - 1].is_ascii_lowercase()
+                || chars[index - 1].is_ascii_digit()
+                || (chars[index - 1].is_ascii_uppercase()
+                    && chars.get(index + 1).is_some_and(char::is_ascii_lowercase)))
+        {
+            normalized.push('_');
+        }
+        normalized.push(ch.to_ascii_lowercase());
+    }
     [
-        "password", "passcode", "token", "secret", "api_key", "apikey", "ssn", "social", "credit",
-        "card", "cvv", "otp", "auth",
+        "authorization",
+        "authentication",
+        "accesstoken",
+        "refreshtoken",
+        "idtoken",
+        "cardnumber",
+        "password",
+        "passcode",
+        "token",
+        "secret",
+        "api_key",
+        "apikey",
+        "ssn",
+        "social",
+        "credit",
+        "card",
+        "cvv",
+        "otp",
+        "auth",
     ]
     .iter()
-    .any(|needle| key.contains(needle))
+    .any(|needle| contains_token(&normalized, needle))
+}
+
+/// True when `needle` equals `key` or appears as a whole token.
+/// Tokens are bounded by the start/end of the key or a non-alphanumeric
+/// separator, so `"auth"` does not match `"author"` and `"card"` does not match
+/// `"discard"`. Credential compounds such as `authorization` are listed explicitly.
+fn contains_token(key: &str, needle: &str) -> bool {
+    let mut start = 0;
+    while let Some(offset) = key[start..].find(needle) {
+        let idx = start + offset;
+        let before_ok = idx == 0 || !key.as_bytes()[idx - 1].is_ascii_alphanumeric();
+        let after = idx + needle.len();
+        let after_ok = after == key.len() || !key.as_bytes()[after].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        start = idx + 1;
+    }
+    false
 }
 
 fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
-    // Scan BOTH the rendered text AND the raw HTML. Injection payloads are often
-    // hidden in attributes/comments that never become DOM text nodes; the previous
-    // `text.or(html)` left the HTML branch dead (text is virtually always present),
-    // so attribute/comment-hidden payloads were invisible to the detector.
+    // Scan both the rendered text and the raw HTML. Injection payloads are often
+    // hidden in attributes/comments that never become DOM text nodes.
     let mut haystack = String::new();
     if let Some(text) = snapshot.text.as_deref() {
         haystack.push_str(text);
@@ -391,11 +444,7 @@ fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
 /// never be navigated to programmatically. These execute script or read local
 /// resources and carry no host, so the domain allow/deny list cannot govern them.
 fn unsafe_navigation_scheme(url: &str) -> Option<String> {
-    let lowered = url.trim().to_ascii_lowercase();
-    ["javascript", "data", "vbscript", "file", "blob"]
-        .into_iter()
-        .find(|scheme| lowered.starts_with(&format!("{scheme}:")))
-        .map(str::to_string)
+    crate::netguard::disallowed_scheme(url)
 }
 
 fn target_domain(
@@ -403,7 +452,7 @@ fn target_domain(
     arguments: &HashMap<String, String>,
     snapshot: &PageSnapshot,
 ) -> Option<String> {
-    let url = if tool_name == "navigate" {
+    let url = if tool_name.eq_ignore_ascii_case("navigate") {
         arguments.get("url").map(String::as_str)
     } else {
         Some(snapshot.url.as_str())

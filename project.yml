@@ -26,13 +26,15 @@ targets:
         excludes:
           - "*.entitlements"
           - "Info.plist"
+          - "ControlSurface"
+      - path: NeuroBrowser/ControlSurface
+        type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neuro.neurobrowser
         INFOPLIST_FILE: NeuroBrowser/Info.plist
         PRODUCT_NAME: NeuroBrowser
         COMBINE_HIDPI_IMAGES: YES
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS:
           - $(inherited)
           - "@executable_path/../Frameworks"
@@ -43,7 +45,6 @@ targets:
       properties:
         com.apple.security.app-sandbox: false
         com.apple.security.network.client: true
-        com.apple.security.network.server: true
 
 schemes:
   NeuroBrowser:

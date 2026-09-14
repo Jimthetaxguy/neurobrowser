@@ -104,10 +104,6 @@ impl AiProvider for FakeProvider {
     fn provider_name(&self) -> &str {
         "fake"
     }
-
-    fn is_configured(&self) -> bool {
-        true
-    }
 }
 
 fn response(content: &str, tool_calls: Vec<ToolCall>, finish_reason: &str) -> AiResponse {
@@ -218,9 +214,6 @@ impl AiProvider for RecordingProvider {
     }
     fn provider_name(&self) -> &str {
         "recording"
-    }
-    fn is_configured(&self) -> bool {
-        true
     }
 }
 

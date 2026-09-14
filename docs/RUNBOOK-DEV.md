@@ -218,3 +218,19 @@ dev typically uses a `.env` file (which is gitignored).
 - `docs/stories/` — user stories.
 - `docs/adr/` — architecture decision records.
 - `verify.sh` — green-build chain.
+
+## Native AppKit shell
+
+The optional AppKit shell bundles its generated React control surface as an
+Xcode folder resource. Build that resource before building the native app:
+
+```bash
+(cd src-tauri && npm ci && npm run build:appkit)
+xcodebuild -project NeuroBrowser.xcodeproj -scheme NeuroBrowser -configuration Debug CODE_SIGNING_ALLOWED=NO build
+```
+
+`NeuroBrowser/ControlSurface` is generated and remains gitignored. Its
+`appkit.html` and relative assets must appear in the built app's
+`Contents/Resources/ControlSurface`. The XcodeGen source of truth is
+`project.yml`; after editing that file, regenerate the checked-in project
+with `xcodegen generate --spec project.yml`.

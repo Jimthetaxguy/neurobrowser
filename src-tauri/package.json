@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:appkit": "vite build --outDir ../NeuroBrowser/ControlSurface --emptyOutDir",
+    "build:appkit": "BUILD_APPKIT=1 vite build --outDir ../NeuroBrowser/ControlSurface --emptyOutDir",
     "smoke:desktop": "npm run build && CARGO_TARGET_DIR=/tmp/neurobrowser-tauri-target cargo check --manifest-path Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri"
