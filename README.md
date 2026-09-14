@@ -56,7 +56,7 @@ Shipped run/policy surface:
   navigation can run; typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
 - headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /
-  `policy.snapshot`, `snapshot`
+  `snapshot`
 
 React + Tauri is the primary frontend path
 ([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).

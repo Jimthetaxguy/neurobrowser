@@ -14,8 +14,8 @@ See `docs/RUNBOOK-DEV.md` to build and run. Changelog: `CHANGELOG.md`.
 Shipped on `main`. `./verify.sh` is the green-build chain.
 
 - **Desktop:** React + Tauri child webview per page (`src-tauri/`).
-- **Library:** ReAct agent, providers (OpenAI / Anthropic / Ollama), session +
-  worker registry and metrics (`src/`).
+- **Library:** ReAct agent, providers (OpenAI / Anthropic / Ollama), sessions,
+  episodic memory, and metrics (`src/`).
 - **Policy:** `ReadOnly` / `Assisted` / `HighAutonomy` with domain allow/deny,
   sensitive-arg redaction, and prompt-injection detection.
 - **Headless protocol stub:** `neurobrowser-headless` over a Unix socket
@@ -23,8 +23,9 @@ Shipped on `main`. `./verify.sh` is the green-build chain.
   does not execute a tool; `snapshot` returns hardcoded data. Methods:
   `ping`, `policy.get` / `policy.set` / `policy.evaluate`,
   `snapshot`.
-- **Workers:** library types and `SessionManager` registry. No Tauri worker
-  IPC, sidebar, or headless fan-out is shipped.
+- **Workers:** summary types and empty compatibility readers remain in the
+  library. Worker execution, Tauri worker IPC, sidebar, and headless fan-out
+  are not shipped.
 
 ## v0.2
 
