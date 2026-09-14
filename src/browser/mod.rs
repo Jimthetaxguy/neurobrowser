@@ -50,7 +50,6 @@ pub struct PageConfig {
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub user_agent: String,
-    pub enable_javascript: bool,
 }
 
 impl Default for PageConfig {
@@ -59,7 +58,6 @@ impl Default for PageConfig {
             viewport_width: 1280,
             viewport_height: 720,
             user_agent: "NeuroBrowser/0.1".to_string(),
-            enable_javascript: true,
         }
     }
 }
@@ -78,16 +76,14 @@ pub struct PageState {
 }
 
 pub struct BrowserEngine {
-    #[allow(dead_code)]
     config: PageConfig,
     state: Mutex<PageState>,
-    tool_registry: Mutex<ToolRegistry>,
-    http_client: reqwest::blocking::Client,
+    http_client: reqwest::Client,
 }
 
 impl BrowserEngine {
     pub fn new(config: PageConfig) -> Self {
-        let http_client = reqwest::blocking::Client::builder()
+        let http_client = reqwest::Client::builder()
             .user_agent(config.user_agent.clone())
             .timeout(std::time::Duration::from_secs(30))
             // Every redirect hop is re-validated. Without this the guard below only
@@ -116,7 +112,6 @@ impl BrowserEngine {
                 viewport_height: config.viewport_height,
                 interactive_ready: false,
             }),
-            tool_registry: Mutex::new(default_tool_registry()),
             http_client,
             config,
         }
@@ -147,10 +142,6 @@ impl BrowserEngine {
         let state = self.state.lock().map_err(|e| e.to_string())?;
         Ok(state.clone())
     }
-
-    pub fn get_tool_registry(&self) -> Result<&Mutex<ToolRegistry>, String> {
-        Ok(&self.tool_registry)
-    }
 }
 
 #[async_trait]
@@ -164,7 +155,7 @@ impl BrowserInterface for BrowserEngine {
             return Err(reason.to_string());
         }
 
-        let response = self.http_client.get(url).send().map_err(|e| {
+        let response = self.http_client.get(url).send().await.map_err(|e| {
             tracing::error!("HTTP request failed for {}: {}", url, e);
             format!("Failed to fetch URL: {}", e)
         })?;
@@ -175,7 +166,7 @@ impl BrowserInterface for BrowserEngine {
             return Err(format!("HTTP error: {}", status));
         }
 
-        let html = response.text().map_err(|e| {
+        let html = response.text().await.map_err(|e| {
             tracing::error!("Failed to read response body for {}: {}", url, e);
             format!("Failed to read response: {}", e)
         })?;
@@ -242,9 +233,7 @@ impl BrowserInterface for BrowserEngine {
     async fn type_text(&self, selector: &str, _text: &str) -> Result<(), String> {
         // `_text` is the `.sensitive(true)` typed value (see `TypeTool`'s
         // argument definition); it is intentionally unused and never logged,
-        // since tracing output flows to the log sink. The static engine cannot
-        // type into a live DOM, so report that honestly instead of the old
-        // success-reporting no-op.
+        // since tracing output flows to the log sink.
         let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
         Err(static_interaction_error(&html, "type into", selector))
     }
@@ -1255,10 +1244,7 @@ mod tests {
         assert!(snapshot.interactive_ready);
     }
 
-    /// Minimal `BrowserInterface` stub for tool-level unit tests. Avoids
-    /// `BrowserEngine`, whose `reqwest::blocking::Client` spins up its own
-    /// nested Tokio runtime and panics on drop inside a `#[tokio::test]`
-    /// async context.
+    /// Minimal `BrowserInterface` stub for tool-level unit tests.
     struct NoopBrowser;
 
     #[async_trait]

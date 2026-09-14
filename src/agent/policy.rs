@@ -160,6 +160,7 @@ impl ActionPolicy {
         arguments: &HashMap<String, String>,
         snapshot: &PageSnapshot,
     ) -> PolicyDecision {
+        let tool_name = crate::tools::canonical_tool_name(tool_name);
         let redacted_arguments = redact_arguments(arguments);
         let mut reasons = Vec::new();
         let mut flags = Vec::new();
@@ -443,11 +444,7 @@ fn snapshot_contains_prompt_injection(snapshot: &PageSnapshot) -> bool {
 /// never be navigated to programmatically. These execute script or read local
 /// resources and carry no host, so the domain allow/deny list cannot govern them.
 fn unsafe_navigation_scheme(url: &str) -> Option<String> {
-    let lowered = url.trim().to_ascii_lowercase();
-    ["javascript", "data", "vbscript", "file", "blob"]
-        .into_iter()
-        .find(|scheme| lowered.starts_with(&format!("{scheme}:")))
-        .map(str::to_string)
+    crate::netguard::disallowed_scheme(url)
 }
 
 fn target_domain(

@@ -4,12 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod contracts;
-pub mod errors;
 
-pub use contracts::{
-    RiskLevel, StructuredToolCall, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk,
-};
-pub use errors::{AgentError, AgentResult, ToolError};
+pub use contracts::{RiskLevel, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
@@ -120,8 +116,6 @@ pub struct PageSnapshot {
     pub tables: Vec<TableInfo>,
 }
 
-pub type PageInfo = PageSnapshot;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementInfo {
     pub tag: String,
@@ -194,27 +188,21 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
-        self.tools.get(name).cloned()
-    }
-
-    pub fn list(&self) -> Vec<(&str, &str)> {
-        self.tools
-            .iter()
-            .map(|(name, tool)| (name.as_str(), tool.description()))
-            .collect()
-    }
-
-    pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|tool| tool.definition()).collect()
-    }
-
-    pub fn names(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
+        self.tools.get(canonical_tool_name(name)).cloned()
     }
 }
 
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// SKILL-facing names for the two tools that were renamed, not reimplemented.
+pub(crate) fn canonical_tool_name(name: &str) -> &str {
+    match name {
+        "type_text" => "type",
+        "query_selector" => "query_dom",
+        _ => name,
     }
 }
