@@ -24,7 +24,8 @@ control autonomous web workflows.
 - The React shell shows policy mode, pending approvals, run status, and action
   history.
 - Compatibility `ask` behavior remains available.
-- Verification passes through `./verify.sh`.
+- Verification passes through `./verify.sh` and the separate moderate-severity
+  dependency audit documented below.
 
 ## Implementation Links
 
@@ -43,4 +44,5 @@ The implemented slice is expected to pass:
 
 ```bash
 ./verify.sh
+(cd src-tauri && npm audit --audit-level=moderate)
 ```

@@ -19,7 +19,8 @@ remain 0.1.0 until an actual version bump and release tag.
 - Empty-history Back/Forward no longer leave the desktop loading indicator stuck.
 - The native AppKit app bundles its generated React controls, and its address
   field describes URL/domain entry after removal of native agent/search controls.
-- Frontend dependency lockfile updated within the existing package constraints.
+- Frontend dependency lockfile updated within the existing package constraints;
+  the moderate-severity npm audit check is retained in the spec and story.
 
 ### Removed
 
