@@ -26,9 +26,9 @@ remain 0.1.0 until an actual version bump and release tag.
 - Unused agent scaffolding, worker spawn/inbox plumbing, and unused exports/tests.
   Worker summary types and empty compatibility readers remain; worker execution
   is not shipped.
-- The unused Tauri shell plugin and four unused IPC commands (`get_page_info`,
-  `list_sessions`, `list_workers`, `get_worker`). The command manifest and
-  generated permissions now cover the 20 actual commands.
+- The unused Tauri shell plugin and unused IPC commands (`get_page_info`,
+  `list_sessions`, `list_workers`, `get_worker`, `ask`). The command manifest and
+  generated permissions now cover the 18 actual commands.
 - The redundant headless `policy.snapshot` method; `policy.get` reads policy.
 - Obsolete status dumps and misleading architectural claims. The root glossary,
   project summary, agent surface, and skill describe the maintained boundaries.

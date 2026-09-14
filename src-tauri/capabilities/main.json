@@ -4,7 +4,6 @@
   "webviews": ["main"],
   "permissions": [
     "core:default",
-    "allow-ask",
     "allow-browser-back",
     "allow-browser-forward",
     "allow-browser-reload",
