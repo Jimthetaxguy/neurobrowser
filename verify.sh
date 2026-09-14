@@ -15,6 +15,8 @@ cargo check --manifest-path src-tauri/Cargo.toml --locked
 echo "→ Headless check and tests..."
 cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
 cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
+echo "→ Webview capability regression tests..."
+cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities
 echo "→ cargo build --release..."
 cargo build --release
 echo "=== All checks passed ==="

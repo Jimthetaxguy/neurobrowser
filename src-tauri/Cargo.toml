@@ -9,6 +9,9 @@ default = []
 # feature gates the bin and the additional deps so the desktop app build
 # stays slim.
 headless = []
+# Cargo cannot cfg-gate crate features on debug_assertions. Keep inspector
+# off by default; enable with `--features devtools` in local debug builds.
+devtools = ["tauri/devtools"]
 
 [[bin]]
 name = "neurobrowser-headless"
@@ -17,7 +20,7 @@ required-features = ["headless"]
 
 [dependencies]
 neurobrowser = { path = "..", features = [] }
-tauri = { version = "2", features = ["devtools", "unstable"] }
+tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full", "net", "io-util", "macros", "rt-multi-thread", "sync"] }
