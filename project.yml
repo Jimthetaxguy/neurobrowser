@@ -26,6 +26,9 @@ targets:
         excludes:
           - "*.entitlements"
           - "Info.plist"
+          - "ControlSurface"
+      - path: NeuroBrowser/ControlSurface
+        type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neuro.neurobrowser

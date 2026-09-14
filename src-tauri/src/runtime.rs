@@ -382,7 +382,6 @@ impl BrowserRuntimeRegistry {
             .map(|(page_id, page)| (*page_id, page.runtime_id.clone()))
             .collect()
     }
-
 }
 
 #[derive(Deserialize)]
@@ -556,21 +555,17 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn browser_back(&self) -> Result<(), String> {
-        self.registry.set_loading(self.page_id, true);
-        self.webview()?
-            .eval("history.back()")
-            .map_err(|e| e.to_string())?;
-        let _ = self.wait_for_navigation().await;
-        Ok(())
+        // A missing history entry emits no load event. Let real page-load
+        // callbacks own loading, as for click/submit, rather than inventing one.
+        self.execute_action("history.back()").await?;
+        self.wait_for_navigation().await
     }
 
     async fn browser_forward(&self) -> Result<(), String> {
-        self.registry.set_loading(self.page_id, true);
-        self.webview()?
-            .eval("history.forward()")
-            .map_err(|e| e.to_string())?;
-        let _ = self.wait_for_navigation().await;
-        Ok(())
+        // A missing history entry emits no load event. Let real page-load
+        // callbacks own loading, as for click/submit, rather than inventing one.
+        self.execute_action("history.forward()").await?;
+        self.wait_for_navigation().await
     }
 
     async fn browser_reload(&self) -> Result<(), String> {
