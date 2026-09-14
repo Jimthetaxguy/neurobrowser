@@ -177,12 +177,6 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Enables the ask command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-ask",
-          "markdownDescription": "Enables the ask command without any pre-configured scope."
-        },
-        {
           "description": "Enables the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "allow-browser-back",
@@ -295,12 +289,6 @@
           "type": "string",
           "const": "allow-wait-for-page-ready",
           "markdownDescription": "Enables the wait_for_page_ready command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the ask command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-ask",
-          "markdownDescription": "Denies the ask command without any pre-configured scope."
         },
         {
           "description": "Denies the browser_back command without any pre-configured scope.",
