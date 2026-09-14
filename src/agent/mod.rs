@@ -4,17 +4,15 @@ pub mod policy;
 pub mod streaming;
 pub mod worker;
 
-use crate::agent::memory::{AgentEvent, AgentMemory, EpisodicMemory, StateMemory};
+use crate::agent::memory::{AgentEvent, AgentMemory};
 use crate::agent::observability::AgentMetrics;
 use crate::agent::policy::{
     ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, PolicyOutcome,
 };
-use crate::agent::streaming::{AgentStatus, StreamEvent, StreamingAgent};
 use crate::providers::{
-    create_provider, AiContext, AiProvider, Message, ProviderConfig, ScrollPosition, ToolCall,
-    ToolResult as AiToolResult,
+    create_provider, AiContext, AiProvider, ProviderConfig, ScrollPosition, ToolCall, ToolResult,
 };
-use crate::tools::{AgentError, BrowserInterface, BrowserTool, ToolRegistry};
+use crate::tools::{BrowserInterface, BrowserTool, ToolRegistry};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -46,7 +44,7 @@ impl Default for AgentConfig {
 pub struct AgentState {
     pub current_url: String,
     pub page_title: String,
-    pub tool_results: Vec<AiToolResult>,
+    pub tool_results: Vec<ToolResult>,
     pub conversation: VecDeque<AgentMessage>,
     pub iterations: usize,
 }
@@ -78,11 +76,7 @@ impl ReActAgent {
                 conversation: VecDeque::with_capacity(CONVERSATION_WINDOW),
                 iterations: 0,
             }),
-            memory: Mutex::new(AgentMemory {
-                episodic: EpisodicMemory::default(),
-                semantic: Default::default(),
-                state: StateMemory::default(),
-            }),
+            memory: Mutex::new(AgentMemory::default()),
         }
     }
 
@@ -90,11 +84,6 @@ impl ReActAgent {
         let state = self.state.lock().map_err(|e| e.to_string())?.clone();
         let memory = self.memory.lock().map_err(|e| e.to_string())?.clone();
         Ok(AgentSnapshot { state, memory })
-    }
-
-    pub fn with_tools(self, tools: ToolRegistry) -> Self {
-        *self.tool_registry.lock().unwrap() = tools;
-        self
     }
 
     pub fn set_provider_config(&self, provider_config: ProviderConfig) -> Result<(), String> {
@@ -147,9 +136,6 @@ impl ReActAgent {
             state.conversation.clear();
         }
 
-        // Seed the conversation with the user's intent. Subsequent iterations
-        // derive the LLM input from build_context (system + history + tool_results);
-        // the original user_prompt is preserved as the first user message.
         self.push_conversation_bounded(AgentMessage {
             role: "user".to_string(),
             content: user_prompt.to_string(),
@@ -164,15 +150,9 @@ impl ReActAgent {
         metrics().record_request();
 
         for iteration in 0..max_iterations {
-            let context = self.build_context(browser).await?;
+            let context = self.build_context()?;
             let provider = self.provider.lock().map_err(|e| e.to_string())?.clone();
 
-            // The LLM always sees the user's original prompt plus the
-            // accumulated tool results / conversation. We no longer overwrite
-            // current_prompt each iteration (the previous design's
-            // `current_prompt = format!("Observation: {result}")` discarded
-            // prior observations when a single response carried multiple
-            // tool calls).
             let response = provider
                 .complete(user_prompt, &context)
                 .await
@@ -317,7 +297,7 @@ impl ReActAgent {
                     timestamp: AgentEvent::now("ToolCall"),
                 })?;
 
-                let tool_result = AiToolResult {
+                let tool_result = ToolResult {
                     tool_name: tool_call.name.clone(),
                     arguments: tool_call.arguments.clone(),
                     result: result.clone(),
@@ -456,7 +436,7 @@ impl ReActAgent {
 
         {
             let mut state = self.state.lock().map_err(|e| e.to_string())?;
-            state.tool_results.push(AiToolResult {
+            state.tool_results.push(ToolResult {
                 tool_name: tool_call.name.clone(),
                 arguments: tool_call.arguments.clone(),
                 result: result.clone(),
@@ -481,47 +461,24 @@ impl ReActAgent {
         })
     }
 
-    async fn build_context(&self, browser: &dyn BrowserInterface) -> Result<AiContext, String> {
-        let page_info = browser.snapshot().await?;
-
-        let (current_url, page_title, tool_results, conversation_history) = {
+    fn build_context(&self) -> Result<AiContext, String> {
+        let (current_url, page_title, tool_results) = {
             let state = self.state.lock().map_err(|e| e.to_string())?;
             (
                 state.current_url.clone(),
                 state.page_title.clone(),
                 state.tool_results.clone(),
-                state
-                    .conversation
-                    .iter()
-                    .map(|message| Message {
-                        role: message.role.clone(),
-                        content: message.content.clone(),
-                    })
-                    .collect::<Vec<_>>(),
             )
         };
-
-        let dom_snapshot = format!(
-            "URL: {}\nTitle: {}\nInteractive: {}\nLinks: {}\nImages: {}\nForms: {}",
-            page_info.url,
-            page_info.title,
-            page_info.interactive_ready,
-            page_info.links.len(),
-            page_info.images.len(),
-            page_info.forms.len()
-        );
 
         Ok(AiContext {
             current_url,
             page_title,
-            dom_snapshot,
-            accessibility_tree: browser.accessibility_tree().await?,
-            scroll_position: ScrollPosition {
-                x: page_info.scroll_x,
-                y: page_info.scroll_y,
-            },
+            dom_snapshot: String::new(),
+            accessibility_tree: None,
+            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results,
-            conversation_history,
+            conversation_history: Vec::new(),
         })
     }
 
@@ -586,141 +543,4 @@ impl ReActAgent {
 pub struct AgentSnapshot {
     pub state: AgentState,
     pub memory: AgentMemory,
-}
-
-#[async_trait::async_trait]
-impl StreamingAgent for ReActAgent {
-    async fn execute_stream(
-        &self,
-        prompt: &str,
-        browser: Arc<dyn BrowserInterface>,
-        sender: tokio::sync::mpsc::Sender<StreamEvent>,
-    ) -> Result<String, AgentError> {
-        // The current execute_with_policy builds a complete event log; we
-        // run it once with the default policy and forward the resulting
-        // events through the streaming channel. This satisfies the trait
-        // contract; full incremental streaming is tracked for a follow-up.
-        let _ = sender
-            .send(StreamEvent::Status(AgentStatus::Thinking))
-            .await;
-
-        match self
-            .execute_with_policy(prompt, browser.as_ref(), &ActionPolicy::default())
-            .await
-        {
-            Ok(run) => {
-                for event in run.events {
-                    let mapped = map_run_event_to_stream(event);
-                    if let Some(mapped) = mapped {
-                        if sender.send(mapped).await.is_err() {
-                            // Receiver dropped — best-effort stop.
-                            break;
-                        }
-                    }
-                }
-                let final_answer = run
-                    .final_response
-                    .clone()
-                    .unwrap_or_else(|| "Run completed without a final response".to_string());
-
-                match run.status {
-                    AgentRunStatus::Completed => {
-                        let _ = sender
-                            .send(StreamEvent::Done {
-                                final_response: final_answer.clone(),
-                                iterations: run.iterations,
-                            })
-                            .await;
-                        Ok(final_answer)
-                    }
-                    AgentRunStatus::AwaitingApproval => {
-                        // Don't emit Done; the caller is expected to listen
-                        // for ApprovalRequested and either submit_approval or
-                        // cancel_agent_run.
-                        Ok("AwaitingApproval".to_string())
-                    }
-                    AgentRunStatus::Blocked => {
-                        let _ = sender.send(StreamEvent::Status(AgentStatus::Idle)).await;
-                        Ok("Blocked".to_string())
-                    }
-                    AgentRunStatus::Cancelled => {
-                        let _ = sender.send(StreamEvent::Status(AgentStatus::Idle)).await;
-                        Ok("Cancelled".to_string())
-                    }
-                    AgentRunStatus::Failed => {
-                        let _ = sender
-                            .send(StreamEvent::Error {
-                                code: "FAILED".to_string(),
-                                message: final_answer.clone(),
-                            })
-                            .await;
-                        Err(AgentError::Validation(final_answer))
-                    }
-                }
-            }
-            Err(error) => {
-                let _ = sender
-                    .send(StreamEvent::Error {
-                        code: "EXECUTION_ERROR".to_string(),
-                        message: error.clone(),
-                    })
-                    .await;
-                Err(AgentError::Validation(error))
-            }
-        }
-    }
-}
-
-fn map_run_event_to_stream(event: AgentRunEvent) -> Option<StreamEvent> {
-    use AgentRunEvent::*;
-    match event {
-        ToolCallStarted { tool, .. } => Some(StreamEvent::ToolCallStart {
-            tool,
-            arguments: serde_json::Value::Null,
-        }),
-        ToolCallResult {
-            tool,
-            result,
-            success,
-            ..
-        } => Some(StreamEvent::ToolCallResult {
-            tool,
-            result,
-            success,
-        }),
-        ToolCallBlocked { tool, decision, .. } => Some(StreamEvent::ToolCallBlocked {
-            run_id: String::new(),
-            tool,
-            reasons: decision.reasons,
-        }),
-        ApprovalRequested {
-            tool,
-            approval_id,
-            decision,
-            ..
-        } => {
-            let arguments = decision.redacted_arguments;
-            Some(StreamEvent::ApprovalRequested {
-                run_id: String::new(),
-                approval_id,
-                tool,
-                arguments,
-                reasons: decision.reasons,
-            })
-        }
-        ApprovalResolved {
-            approval_id,
-            approved,
-            ..
-        } => Some(StreamEvent::ApprovalResolved {
-            run_id: String::new(),
-            approval_id,
-            approved,
-        }),
-        RunCancelled { reason, .. } => Some(StreamEvent::RunCancelled {
-            run_id: String::new(),
-            reason,
-        }),
-        RunDone { .. } => None, // mapped at the call site
-    }
 }

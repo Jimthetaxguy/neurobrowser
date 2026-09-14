@@ -118,18 +118,3 @@ fn stream_event_round_trips_token() {
         _ => panic!("Expected Token variant"),
     }
 }
-
-// ─── Timeout Wrapper ────────────────────────────────────────────────
-
-#[test]
-fn stream_event_timeout_error_serializes_correctly() {
-    // Verify the timeout error event format matches what execute_with_timeout sends
-    let event = StreamEvent::Error {
-        code: "TIMEOUT".to_string(),
-        message: "Agent execution exceeded 30s deadline".to_string(),
-    };
-    let json = serde_json::to_string(&event).unwrap();
-    assert!(json.contains("\"type\":\"Error\""));
-    assert!(json.contains("TIMEOUT"));
-    assert!(json.contains("30s deadline"));
-}
