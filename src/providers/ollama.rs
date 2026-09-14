@@ -1,6 +1,6 @@
 use crate::providers::{
-    parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig, ProviderError,
-    ProviderResult,
+    build_system_prompt, parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig,
+    ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -32,31 +32,7 @@ impl OllamaProvider {
     }
 
     fn build_prompt(&self, prompt: &str, context: &AiContext) -> String {
-        let mut prompt_str = format!(
-            "Current URL: {}\nPage title: {}\n\n",
-            context.current_url, context.page_title
-        );
-
-        if !context.tool_results.is_empty() {
-            prompt_str.push_str("Recent tool results:\n");
-            for result in &context.tool_results {
-                prompt_str.push_str(&format!(
-                    "- {}: {}\n",
-                    result.tool_name,
-                    if result.success {
-                        &result.result
-                    } else {
-                        "Error"
-                    }
-                ));
-            }
-            prompt_str.push('\n');
-        }
-
-        prompt_str.push_str("User request: ");
-        prompt_str.push_str(prompt);
-
-        prompt_str
+        format!("{}\nUser request: {prompt}", build_system_prompt(context))
     }
 }
 
@@ -121,9 +97,5 @@ impl AiProvider for OllamaProvider {
 
     fn provider_name(&self) -> &str {
         "ollama"
-    }
-
-    fn is_configured(&self) -> bool {
-        true
     }
 }

@@ -1,7 +1,4 @@
-use crate::agent::worker::{
-    CrossWorkerObservations, WorkerHandle, WorkerMessage, WorkerSnapshot, WorkerSpec, WorkerStatus,
-    WorkerSummary,
-};
+use crate::agent::worker::{WorkerSnapshot, WorkerSummary};
 use crate::agent::{AgentConfig, ReActAgent};
 use crate::browser::PageConfig;
 use crate::providers::{create_provider, ProviderConfig};
@@ -10,8 +7,6 @@ use std::sync::{Arc, Mutex};
 
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionState>>,
-    #[allow(dead_code)]
-    browser_config: PageConfig,
     agent_config: Mutex<AgentConfig>,
     page_counter: Mutex<usize>,
 }
@@ -21,16 +16,12 @@ struct SessionState {
     created_at: u64,
     pages: Vec<PageHandle>,
     active_page: Option<usize>,
-    workers: HashMap<String, WorkerHandle>,
-    inbox: Vec<WorkerMessage>,
-    observations: CrossWorkerObservations,
 }
 
 impl SessionManager {
-    pub fn new(browser_config: PageConfig, agent_config: AgentConfig) -> Self {
+    pub fn new(_browser_config: PageConfig, agent_config: AgentConfig) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
-            browser_config,
             agent_config: Mutex::new(agent_config),
             page_counter: Mutex::new(0),
         }
@@ -51,9 +42,6 @@ impl SessionManager {
                 created_at: now,
                 pages: Vec::new(),
                 active_page: None,
-                workers: HashMap::new(),
-                inbox: Vec::new(),
-                observations: CrossWorkerObservations::default(),
             },
         );
 
@@ -145,7 +133,6 @@ impl SessionManager {
 
         session.pages.remove(pos);
 
-        // If we removed the active page, update active_page
         if let Some(active) = session.active_page {
             if active == page_id {
                 session.active_page = session.pages.first().map(|p| p.id);
@@ -170,170 +157,23 @@ impl SessionManager {
 
         Ok(())
     }
-}
 
-impl SessionManager {
-    // ---------------------------------------------------------------------
-    // Worker model — Phase E1/E2/E4
-    //
-    // Workers are long-running ReAct agents with their own ActionPolicy and
-    // AgentMemory. They live inside a session and share `observations` so
-    // siblings can read what other workers have recently discovered.
-    // ---------------------------------------------------------------------
-
-    /// Spawn a new worker inside `session_id`. The worker takes ownership
-    /// of either an explicitly pinned page or, if `pinned_page_id` is
-    /// None, the session's currently-active page. Returns a `WorkerHandle`
-    /// with a fresh `worker_id`.
-    pub fn spawn_worker(
-        &self,
-        session_id: &str,
-        mut spec: WorkerSpec,
-    ) -> Result<WorkerHandle, String> {
-        // Build the provider/agent BEFORE taking the global sessions lock
-        // (mirrors create_page — don't do heavy construction under the lock).
-        let agent_config = self.agent_config.lock().map_err(|e| e.to_string())?.clone();
-        let provider = create_provider(&agent_config.provider_config);
-        let agent = Arc::new(ReActAgent::new(agent_config, provider));
-
-        let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-
-        // Bind the worker to a page: an explicit pin must refer to a real page;
-        // otherwise inherit the session's active page. Previously `pinned_page_id`
-        // was never read, so a worker could silently bind to a non-existent page
-        // despite the doc comment promising otherwise.
-        spec.pinned_page_id = match spec.pinned_page_id {
-            Some(pid) => {
-                if !session.pages.iter().any(|page| page.id == pid) {
-                    return Err(format!("Page {pid} not found in session"));
-                }
-                Some(pid)
-            }
-            None => session.active_page,
-        };
-
-        let handle = WorkerHandle::new(session_id.to_string(), spec, agent);
-        session
-            .workers
-            .insert(handle.worker_id.clone(), handle.clone());
-        Ok(handle)
-    }
-
-    /// Return summaries of all workers in `session_id`, sorted by last
-    /// update (most recently active first).
+    /// Empty-map reader. Worker spawn/inbox is unwired; Tauri still compiles against this.
     pub fn list_workers(&self, session_id: &str) -> Result<Vec<WorkerSummary>, String> {
         let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        let mut out: Vec<WorkerSummary> =
-            session.workers.values().map(|h| h.summary(None)).collect();
-        out.sort_by_key(|w| std::cmp::Reverse(w.last_update_ms));
-        Ok(out)
-    }
-
-    pub fn get_worker(&self, session_id: &str, worker_id: &str) -> Result<WorkerSnapshot, String> {
-        let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        let handle = session
-            .workers
-            .get(worker_id)
-            .ok_or_else(|| "Worker not found".to_string())?;
-        Ok(handle.snapshot(None))
-    }
-
-    /// Update a worker's status (called from the agent loop / Tauri command
-    /// after `start_agent_run` completes).
-    pub fn set_worker_status(
-        &self,
-        session_id: &str,
-        worker_id: &str,
-        status: WorkerStatus,
-    ) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        let worker = session
-            .workers
-            .get_mut(worker_id)
-            .ok_or_else(|| "Worker not found".to_string())?;
-        worker.status = status;
-        Ok(())
-    }
-
-    /// Send a `WorkerMessage` from one worker to another within the same
-    /// session. The recipient pulls its inbox via `drain_inbox`.
-    pub fn send_message(&self, session_id: &str, message: WorkerMessage) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        if !session.workers.contains_key(&message.to) {
-            return Err(format!("Recipient worker not found: {}", message.to));
+        if !sessions.contains_key(session_id) {
+            return Err("Session not found".to_string());
         }
-        session.inbox.push(message);
-        Ok(())
+        Ok(Vec::new())
     }
 
-    /// Drain the entire session's worker inbox. Returns messages addressed
-    /// to `worker_id` (or all if worker_id is None) and clears them.
-    pub fn drain_inbox(
-        &self,
-        session_id: &str,
-        worker_id: Option<&str>,
-    ) -> Result<Vec<WorkerMessage>, String> {
-        let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        let (kept, drained): (Vec<_>, Vec<_>) = session
-            .inbox
-            .drain(..)
-            .partition(|m| worker_id.is_some_and(|w| w != m.to));
-        // Re-stash the kept (= not for this worker) so future drain calls see them.
-        session.inbox = kept;
-        Ok(drained)
-    }
-
-    /// Read the latest N observations (Phase E2). Workers call this at the
-    /// start of each iteration to fold sibling discoveries into their
-    /// context.
-    pub fn cross_worker_observations(
-        &self,
-        session_id: &str,
-        n: usize,
-    ) -> Result<Vec<serde_json::Value>, String> {
+    /// Empty-map reader. Worker spawn/inbox is unwired; Tauri still compiles against this.
+    pub fn get_worker(&self, session_id: &str, _worker_id: &str) -> Result<WorkerSnapshot, String> {
         let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        Ok(session
-            .observations
-            .latest_n(n)
-            .into_iter()
-            .filter_map(|e| serde_json::to_value(e).ok())
-            .collect())
-    }
-
-    /// Record an observation about the session (Phase E2 hook). Workers
-    /// call this after each `execute_tool`.
-    pub fn record_observation(
-        &self,
-        session_id: &str,
-        event: crate::agent::memory::AgentEvent,
-    ) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| "Session not found".to_string())?;
-        session.observations.push(event);
-        Ok(())
+        if !sessions.contains_key(session_id) {
+            return Err("Session not found".to_string());
+        }
+        Err("Worker not found".to_string())
     }
 }
 
