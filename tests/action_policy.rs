@@ -87,8 +87,7 @@ fn sensitive_arguments_are_redacted_and_require_approval() {
 
 #[test]
 fn sensitive_key_match_is_token_bounded() {
-    // Substring needles are false positives: "auth" ⊂ "author"/"authorization",
-    // "card" ⊂ "discard". Token-boundary still flags credit_card.
+    // Harmless substrings stay visible; credentials still require redaction.
     let snapshot = snapshot("https://docs.example", "Ready");
     let mut args = HashMap::new();
     args.insert("author".to_string(), "jane".to_string());
@@ -120,7 +119,7 @@ fn sensitive_key_match_is_token_bounded() {
             .redacted_arguments
             .get("authorization")
             .map(String::as_str),
-        Some("bearer")
+        Some("[REDACTED]")
     );
     assert_eq!(
         decision
@@ -226,4 +225,85 @@ fn navigate_domain_check_is_case_insensitive() {
 
     assert_eq!(decision.outcome, PolicyOutcome::Block);
     assert!(decision.risk_flags.contains(&RiskFlag::DomainNotAllowed));
+}
+
+#[test]
+fn credential_keys_individually_require_approval_and_redaction() {
+    let snapshot = snapshot("https://docs.example", "Ready");
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        ..ActionPolicy::default()
+    };
+    for key in [
+        "authorization",
+        "Authorization",
+        "authorizationHeader",
+        "proxy-authorization",
+        "accessToken",
+        "refreshTOKEN",
+        "IDToken",
+        "access_token",
+        "access-token",
+        "access.token",
+        "access token",
+        "cardNumber",
+        "creditCardNumber",
+        "APIKey",
+        "apiKey",
+        "api-key",
+        "password",
+        "clientSecret",
+        "session_token",
+        "accesstoken",
+        "cardnumber",
+    ] {
+        let args = HashMap::from([(key.to_string(), "credential-value".to_string())]);
+        let decision = policy.evaluate(
+            "get_text",
+            &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            &args,
+            &snapshot,
+        );
+        assert_eq!(decision.outcome, PolicyOutcome::RequireApproval, "{key}");
+        assert!(
+            decision.risk_flags.contains(&RiskFlag::SensitiveArgument),
+            "{key}"
+        );
+        assert_eq!(
+            decision.redacted_arguments.get(key).map(String::as_str),
+            Some("[REDACTED]"),
+            "{key}"
+        );
+    }
+}
+
+#[test]
+fn harmless_key_substrings_do_not_require_sensitive_approval() {
+    let snapshot = snapshot("https://docs.example", "Ready");
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        ..ActionPolicy::default()
+    };
+    for key in [
+        "author",
+        "authorName",
+        "discard",
+        "discardChanges",
+        "postcard",
+        "authorship",
+    ] {
+        let args = HashMap::from([(key.to_string(), "ordinary-value".to_string())]);
+        let decision = policy.evaluate(
+            "get_text",
+            &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            &args,
+            &snapshot,
+        );
+        assert_eq!(decision.outcome, PolicyOutcome::Allow, "{key}");
+        assert_eq!(
+            decision.redacted_arguments.get(key).map(String::as_str),
+            Some("ordinary-value"),
+            "{key}"
+        );
+    }
 }

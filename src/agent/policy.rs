@@ -349,19 +349,54 @@ fn contains_sensitive_argument(arguments: &HashMap<String, String>) -> bool {
 }
 
 fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
+    // Preserve word boundaries before lowercasing camelCase/acronym keys.
+    let chars: Vec<char> = key.chars().collect();
+    let mut normalized = String::with_capacity(key.len());
+    for (index, &ch) in chars.iter().enumerate() {
+        if !ch.is_ascii_alphanumeric() {
+            normalized.push('_');
+            continue;
+        }
+        if ch.is_ascii_uppercase()
+            && index > 0
+            && (chars[index - 1].is_ascii_lowercase()
+                || chars[index - 1].is_ascii_digit()
+                || (chars[index - 1].is_ascii_uppercase()
+                    && chars.get(index + 1).is_some_and(char::is_ascii_lowercase)))
+        {
+            normalized.push('_');
+        }
+        normalized.push(ch.to_ascii_lowercase());
+    }
     [
-        "password", "passcode", "token", "secret", "api_key", "apikey", "ssn", "social", "credit",
-        "card", "cvv", "otp", "auth",
+        "authorization",
+        "authentication",
+        "accesstoken",
+        "refreshtoken",
+        "idtoken",
+        "cardnumber",
+        "password",
+        "passcode",
+        "token",
+        "secret",
+        "api_key",
+        "apikey",
+        "ssn",
+        "social",
+        "credit",
+        "card",
+        "cvv",
+        "otp",
+        "auth",
     ]
     .iter()
-    .any(|needle| contains_token(&key, needle))
+    .any(|needle| contains_token(&normalized, needle))
 }
 
 /// True when `needle` equals `key` or appears as a whole token.
 /// Tokens are bounded by the start/end of the key or a non-alphanumeric
-/// separator, so `"auth"` does not match `"author"` / `"authorization"`
-/// and `"card"` does not match `"discard"`.
+/// separator, so `"auth"` does not match `"author"` and `"card"` does not match
+/// `"discard"`. Credential compounds such as `authorization` are listed explicitly.
 fn contains_token(key: &str, needle: &str) -> bool {
     let mut start = 0;
     while let Some(offset) = key[start..].find(needle) {
