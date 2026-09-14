@@ -11,7 +11,10 @@ cargo test --all-targets
 echo "→ Tauri frontend build..."
 (cd src-tauri && npm ci && npm run build)
 echo "→ Tauri cargo check..."
-CARGO_TARGET_DIR=/tmp/neurobrowser-tauri-target cargo check --manifest-path src-tauri/Cargo.toml
+cargo check --manifest-path src-tauri/Cargo.toml --locked
+echo "→ Headless check and tests..."
+cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
+cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
 echo "→ cargo build --release..."
 cargo build --release
 echo "=== All checks passed ==="

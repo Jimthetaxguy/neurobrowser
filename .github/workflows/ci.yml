@@ -1,6 +1,3 @@
-# neurobrowser — CI Workflow
-# Source: Framework rust/ci/ci-base.yml + ci-guards.yml (Loops 12, 19)
-# Repo: Rust + Tauri, tokio, thiserror v2, 18 source files
 name: ci
 
 on:
@@ -68,29 +65,58 @@ jobs:
       - name: cargo check tauri
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
+      - name: cargo check tauri (headless)
+        run: cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
+
+      - name: cargo test headless
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
+
   guards:
     name: "Guards: no-mock + merge conflicts + iCloud"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # grep is on ubuntu-latest; never wrap it in `if`/`2>/dev/null` — a
+      # missing tool must fail the job, not skip the scan.
       - name: No-mock dependency guard
         run: |
-          if rg -n --fixed-strings -e mockall -e mockito -e wiremock Cargo.toml Cargo.lock 2>/dev/null; then
+          set -euo pipefail
+          set +e
+          grep -n -F -e mockall -e mockito -e wiremock -- \
+            Cargo.toml Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
             echo "::error::Mock crates are forbidden."
             exit 1
           fi
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::no-mock scan failed (exit $rc)."
+            exit "$rc"
+          fi
 
-      - name: Merge conflict detection (XP-20)
+      - name: Merge conflict detection
         run: |
-          if rg -n '<<<<<<< |======= |>>>>>>> ' --glob '!*.lock' src/ 2>/dev/null; then
+          set -euo pipefail
+          set +e
+          grep -R -n -I -E '<<<<<<<|>>>>>>>' --exclude='*.lock' \
+            src src-tauri tests NeuroBrowser
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
             echo "::error::Unresolved merge conflict markers found."
             exit 1
           fi
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::conflict scan failed (exit $rc)."
+            exit "$rc"
+          fi
 
-      - name: iCloud duplicate detection (XP-25)
+      - name: iCloud duplicate detection
         run: |
-          dupes=$(find src -name "* 2*" 2>/dev/null)
+          set -euo pipefail
+          dupes=$(find src src-tauri tests NeuroBrowser -name '* 2*')
           if [ -n "$dupes" ]; then
             echo "$dupes"
             echo "::error::iCloud duplicate files detected."
