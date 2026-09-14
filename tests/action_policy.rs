@@ -128,6 +128,28 @@ fn injection_hidden_in_html_attribute_is_detected() {
 }
 
 #[test]
+fn readonly_mode_blocks_navigate() {
+    let snapshot = snapshot("https://current.example", "Ready");
+    let mut args = HashMap::new();
+    args.insert("url".to_string(), "https://other.example".to_string());
+
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::ReadOnly,
+        ..ActionPolicy::default()
+    };
+
+    let decision = policy.evaluate(
+        "navigate",
+        &ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        &args,
+        &snapshot,
+    );
+
+    assert_eq!(decision.outcome, PolicyOutcome::Block);
+    assert!(decision.risk_flags.contains(&RiskFlag::ReadOnlyMode));
+}
+
+#[test]
 fn navigation_to_javascript_scheme_is_blocked() {
     // A hostless dangerous scheme must not slip past the domain allow/deny check.
     let snapshot = snapshot("https://current.example", "Ready");
