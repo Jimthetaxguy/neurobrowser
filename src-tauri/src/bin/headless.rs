@@ -1,15 +1,20 @@
-//! NeuroBrowser — headless daemon (Phase D4).
+//! NeuroBrowser — headless daemon: policy JSON-RPC + stub snapshot.
 //!
-//! A small cross-process binary that exposes the agent-facing tool surface
-//! over a Unix Domain Socket (local TCP on non-Unix). External agents (ROSA,
-//! Claude Code, custom workers) connect, send JSON-RPC-shaped requests, and
-//! receive the tool results.
+//! External agents connect over a Unix domain socket and send newline-delimited
+//! JSON-RPC-shaped requests. Dispatch never constructs a `BrowserEngine` or a
+//! webview. The `snapshot` method returns a hardcoded `about:blank` stub.
 //!
-//! For v0.1 the daemon uses the in-process `BrowserEngine` over reqwest +
-//! scraper rather than a Tauri child webview. That keeps the daemon
-//! platform-portable and dependency-light at the cost of full JS execution.
-//! v0.1.1 will add a `--tauri` flag that boots a real Tauri child webview
-//! and routes through the IPC bridge.
+//! Methods: `ping`, `policy.get`, `policy.set`, `policy.evaluate`,
+//! `snapshot` (stub).
+//!
+//! Socket path, first match: `--socket PATH`, else `$NEUROBROWSER_SOCKET`,
+//! else a per-pid file in the temp directory. `--help` prints usage. Unknown
+//! arguments are rejected (they are not ignored).
+//!
+//! The listener is Unix-only. Non-Unix targets compile (`--help` works) but
+//! refuse to listen. If the Unix socket cannot be bound, the process falls
+//! back to `127.0.0.1:0` and prints `NEUROBROWSER_LISTENING=tcp://…`. That
+//! fallback is not a non-Unix transport.
 //!
 //! Wire format (newline-delimited JSON over the socket):
 //!
@@ -21,8 +26,6 @@
 //! // or
 //! { "id": "uuid", "ok": false, "error": { "code": "TIMEOUT", "message": "..." } }
 //! ```
-//!
-//! See `docs/AGENT-SURFACE.md` for the full schema.
 
 #![cfg(feature = "headless")]
 
@@ -36,6 +39,7 @@ use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, Too
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::Mutex;
 
@@ -101,7 +105,12 @@ impl SessionState {
         }
     }
 
-    async fn evaluate_tool_call(&self, id: &str, name: &str, args: &HashMap<String, String>) -> Response {
+    async fn evaluate_tool_call(
+        &self,
+        id: &str,
+        name: &str,
+        args: &HashMap<String, String>,
+    ) -> Response {
         // Construct a minimal PageSnapshot for the policy's prompt-injection
         // check. Headless mode has no live page; we hand-build the safest
         // shape (empty URL, empty text) so the eval doesn't false-positive.
@@ -160,23 +169,120 @@ impl SessionState {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("neurobrowser=info,headless=info")),
-        )
-        .init();
+#[derive(Debug)]
+struct Cli {
+    socket: Option<PathBuf>,
+}
 
-    let socket_path = std::env::var("NEUROBROWSER_SOCKET")
+#[derive(Debug)]
+enum CliError {
+    Help,
+    Message(String),
+}
+
+fn print_help() {
+    println!(
+        "neurobrowser-headless — policy JSON-RPC + stub snapshot\n\
+         \n\
+         Usage: neurobrowser-headless [--socket PATH]\n\
+         \n\
+         --socket PATH   Unix socket path (overrides NEUROBROWSER_SOCKET)\n\
+         --help          Print this help and exit\n\
+         \n\
+         If --socket is omitted, the path is $NEUROBROWSER_SOCKET or a per-pid\n\
+         file in the temp directory. This process does not construct a\n\
+         BrowserEngine and does not drive a webview."
+    );
+}
+
+fn parse_args<I>(args: I) -> Result<Cli, CliError>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut socket = None;
+    let mut iter = args.into_iter();
+    let _exe = iter.next();
+    while let Some(arg) = iter.next() {
+        if arg == "-h" || arg == "--help" {
+            return Err(CliError::Help);
+        }
+        if arg == "--socket" {
+            let path = iter
+                .next()
+                .ok_or_else(|| CliError::Message("--socket requires a path".into()))?;
+            if path.is_empty() || path.starts_with('-') {
+                return Err(CliError::Message(
+                    "--socket requires a path; use --socket=PATH for a dash-prefixed path".into(),
+                ));
+            }
+            socket = Some(PathBuf::from(path));
+            continue;
+        }
+        if let Some(path) = arg.strip_prefix("--socket=") {
+            if path.is_empty() {
+                return Err(CliError::Message("--socket requires a path".into()));
+            }
+            socket = Some(PathBuf::from(path));
+            continue;
+        }
+        return Err(CliError::Message(format!("unknown argument: {arg}")));
+    }
+    Ok(Cli { socket })
+}
+
+fn resolve_socket_path(cli: &Cli) -> PathBuf {
+    if let Some(path) = &cli.socket {
+        return path.clone();
+    }
+    std::env::var("NEUROBROWSER_SOCKET")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let mut p = std::env::temp_dir();
             p.push(format!("neurobrowser-{}.sock", std::process::id()));
             p
-        });
+        })
+}
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("neurobrowser=info,headless=info")
+            }),
+        )
+        .init();
+
+    let cli = match parse_args(std::env::args()) {
+        Ok(cli) => cli,
+        Err(CliError::Help) => {
+            print_help();
+            return Ok(());
+        }
+        Err(CliError::Message(message)) => {
+            eprintln!("neurobrowser-headless: {message}");
+            eprintln!("Try --help for usage.");
+            std::process::exit(2);
+        }
+    };
+
+    let socket_path = resolve_socket_path(&cli);
+
+    #[cfg(unix)]
+    return listen_unix(socket_path).await;
+
+    #[cfg(not(unix))]
+    {
+        let _ = socket_path;
+        eprintln!(
+            "neurobrowser-headless listens on a Unix domain socket and is not supported on this target."
+        );
+        std::process::exit(1);
+    }
+}
+
+#[cfg(unix)]
+async fn listen_unix(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     // Ensure parent dir exists.
     if let Some(parent) = socket_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -224,6 +330,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[cfg(unix)]
 async fn wait_for_signal() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
@@ -234,6 +341,7 @@ async fn wait_for_signal() {
     }
 }
 
+#[cfg(unix)]
 async fn run_tcp(listener: TcpListener) {
     let state = SessionState::new();
     loop {
@@ -326,6 +434,7 @@ async fn dispatch(request: &Request, _state: &SessionState) -> Response {
                 .await
         }
         "snapshot" => {
+            // Stub: no BrowserEngine, no live page.
             let result = serde_json::json!({
                 "url": "about:blank",
                 "title": "",
@@ -345,6 +454,95 @@ async fn dispatch(request: &Request, _state: &SessionState) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(argv: &[&str]) -> Vec<String> {
+        std::iter::once("neurobrowser-headless")
+            .chain(argv.iter().copied())
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn parse_args_accepts_socket() {
+        let cli = parse_args(args(&["--socket", "/tmp/nb.sock"])).unwrap();
+        assert_eq!(
+            cli.socket.as_deref(),
+            Some(std::path::Path::new("/tmp/nb.sock"))
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_socket_equals() {
+        let cli = parse_args(args(&["--socket=/tmp/nb.sock"])).unwrap();
+        assert_eq!(
+            cli.socket.as_deref(),
+            Some(std::path::Path::new("/tmp/nb.sock"))
+        );
+    }
+
+    #[test]
+    fn parse_args_help() {
+        assert!(matches!(parse_args(args(&["--help"])), Err(CliError::Help)));
+        assert!(matches!(parse_args(args(&["-h"])), Err(CliError::Help)));
+    }
+
+    #[test]
+    fn parse_args_rejects_unknown() {
+        match parse_args(args(&["--tauri"])) {
+            Err(CliError::Message(message)) => {
+                assert!(message.contains("unknown argument: --tauri"), "{message}");
+            }
+            other => panic!("expected unknown-argument error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_args_socket_requires_path() {
+        match parse_args(args(&["--socket"])) {
+            Err(CliError::Message(message)) => {
+                assert!(message.contains("--socket requires a path"), "{message}");
+            }
+            other => panic!("expected missing-path error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_args_rejects_options_in_place_of_socket_path() {
+        for option in [
+            "--help",
+            "-h",
+            "--tauri",
+            "--socket",
+            "--socket=/tmp/other.sock",
+        ] {
+            match parse_args(args(&["--socket", option])) {
+                Err(CliError::Message(message)) => {
+                    assert!(
+                        message.contains("--socket requires a path"),
+                        "{option}: {message}"
+                    );
+                }
+                other => panic!("expected missing-path error for {option}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_args_accepts_explicit_dash_prefixed_socket_path() {
+        let cli = parse_args(args(&["--socket=--help"])).unwrap();
+        assert_eq!(cli.socket.as_deref(), Some(std::path::Path::new("--help")));
+    }
+
+    #[test]
+    fn resolve_socket_path_prefers_flag_over_env() {
+        let cli = Cli {
+            socket: Some(PathBuf::from("/tmp/from-flag.sock")),
+        };
+        assert_eq!(
+            resolve_socket_path(&cli),
+            PathBuf::from("/tmp/from-flag.sock")
+        );
+    }
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_high_risk_tool() {

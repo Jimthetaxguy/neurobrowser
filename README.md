@@ -28,8 +28,6 @@ This repository keeps the architecture in the Rust modules and project docs, inc
 - Async streaming via mpsc channels + StreamEvent tagged JSON
 - Tauri IPC bridge between the desktop shell and Rust backend
 
-See [docs/frontend-architecture-spike.md](docs/frontend-architecture-spike.md)
-for the React + Tauri and React + AppKit frontend lane comparison.
 See [docs/adr/ADR-001-react-tauri-primary.md](docs/adr/ADR-001-react-tauri-primary.md)
 for the accepted frontend path.
 
