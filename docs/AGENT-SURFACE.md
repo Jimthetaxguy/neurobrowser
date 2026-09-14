@@ -1,6 +1,7 @@
 # NeuroBrowser — Agent Surface (spec-of-record)
 
-Canonical agent-facing surface for the **shipped crate**.
+Canonical agent-facing surface for the **shipped crate**. Update `SKILL.md`
+with this file.
 
 - **17 tools** from `default_tool_registry()` in `src/browser/mod.rs`.
 - CSS selectors (or pixels / a key). There is no `ref_map`

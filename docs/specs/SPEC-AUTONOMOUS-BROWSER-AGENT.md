@@ -83,7 +83,15 @@ Approval-required actions must not execute silently.
 
 ## Verification
 
-Promote check is `./verify.sh` (same chain CI runs).
+Required checks before promoting changes against this spec:
+
+```bash
+./verify.sh
+(cd src-tauri && npm audit --audit-level=moderate)
+```
+
+The dependency audit is a separate required check; it is not currently a step
+in `verify.sh` or CI.
 
 AppKit parity remains deferred unless the Tauri child-webview path fails a real
 browser smoke test.
