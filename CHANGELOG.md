@@ -19,8 +19,7 @@ remain 0.1.0 until an actual version bump and release tag.
 - Empty-history Back/Forward no longer leave the desktop loading indicator stuck.
 - The native AppKit app bundles its generated React controls, and its address
   field describes URL/domain entry after removal of native agent/search controls.
-- Frontend dependency lockfile updated within the existing package constraints;
-  the moderate-severity npm audit gate is retained in the spec and story.
+- Frontend dependency lockfile updated within the existing package constraints.
 
 ### Removed
 
@@ -34,14 +33,6 @@ remain 0.1.0 until an actual version bump and release tag.
 - Obsolete status dumps and misleading architectural claims. The root glossary,
   project summary, agent surface, and skill describe the maintained boundaries.
 
-### Verification
-
-`verify.sh` runs Rust formatting, clippy with warnings denied, all library tests,
-frontend installation/build, locked desktop and headless cargo checks, explicit
-headless binary tests, and the library release build. It respects the caller's
-`CARGO_TARGET_DIR`. CI's guard checks fail on prohibited patterns or merge markers.
-The development runbook also documents native resource generation and Xcode build.
-
 ## [0.1.1] — 2026-07-08
 
 The first documented release after the live Tauri browser runtime was integrated.
@@ -50,9 +41,9 @@ Later removals and fixes are recorded above; the current surface is described in
 
 ### Added
 
-- A Tauri desktop shell with a React tab strip, URL bar, chat panel, command
-  palette, settings, policy controls, and agent run events. Rust owns a real
-  child webview per page on macOS.
+- A Tauri desktop shell with a React tab strip, URL bar, chat panel,
+  provider/policy selects, approval card, action history, and agent run
+  events. Rust owns a real child webview per page on macOS.
 - A default library registry of 17 CSS-selector tools: `navigate`, `wait`,
   `query_dom`, `get_text`, `get_links`, `get_prices`, `get_tables`, `click`,
   `type`, `scroll_to`, `scroll_by`, `submit_form`, `keypress`, `screenshot`,
