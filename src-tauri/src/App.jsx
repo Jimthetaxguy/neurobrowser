@@ -34,7 +34,6 @@ function Message({ item }) {
   return (
     <div className={`message ${item.role}`}>
       <div>{item.text}</div>
-      {item.tools?.length > 0 && <div className="tools-used">Tools: {item.tools.join(", ")}</div>}
     </div>
   );
 }
@@ -306,14 +305,13 @@ export default function App({ adapter, lane }) {
         lane === "appkit"
           ? "Native AppKit lane ready. Page rendering stays in WKWebView while this React surface sends browser commands."
           : "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
-      tools: [],
     },
   ]);
 
-  const appendMessage = useCallback((role, text, tools = []) => {
+  const appendMessage = useCallback((role, text) => {
     const id = nextMessageId.current;
     nextMessageId.current += 1;
-    setMessages((items) => [...items, { id, role, text, tools }]);
+    setMessages((items) => [...items, { id, role, text }]);
   }, []);
 
   const updateSnapshot = useCallback((pageId, nextSnapshot) => {
@@ -328,11 +326,6 @@ export default function App({ adapter, lane }) {
     setStatus(nextSnapshot.title ? `Loaded: ${nextSnapshot.title}` : "Ready");
   }, []);
 
-  const syncBrowserViewport = useCallback(async () => {
-    if (!adapter.rendersPageInHost || currentPageId == null || !browserStageRef.current) return;
-    await adapter.syncBrowserViewport(currentPageId, browserStageRef.current.getBoundingClientRect());
-  }, [adapter, currentPageId]);
-
   const syncBrowserViewportForPage = useCallback(
     async (pageId) => {
       if (!adapter.rendersPageInHost || pageId == null || !browserStageRef.current) return;
@@ -340,6 +333,10 @@ export default function App({ adapter, lane }) {
     },
     [adapter]
   );
+
+  const syncBrowserViewport = useCallback(async () => {
+    await syncBrowserViewportForPage(currentPageId);
+  }, [currentPageId, syncBrowserViewportForPage]);
 
   const refreshSnapshot = useCallback(
     async ({ waitForReady = true } = {}) => {
@@ -467,7 +464,7 @@ export default function App({ adapter, lane }) {
         appendMessage("assistant", result.final_response || "Run cancelled.");
         setStatus("Run cancelled");
       } else {
-        appendMessage("assistant", result.final_response ?? result.response ?? "", result.tools_used || []);
+        appendMessage("assistant", result.final_response ?? result.response ?? "");
         setStatus("Ready");
       }
       await refreshSnapshot({ waitForReady: false });
@@ -686,7 +683,7 @@ export default function App({ adapter, lane }) {
   return (
     <div className="app-shell">
       {loading && (
-        <div className="loading-overlay active">
+        <div className="loading-overlay">
           <div className="loading-card">
             <div className="spinner" />
             <div>{loading}</div>
