@@ -8,7 +8,9 @@ How to build, run, and test NeuroBrowser locally.
 - **Node.js** + **npm** (Vite frontend under `src-tauri/`).
 - **macOS** for the desktop app (icon set + CSP are macOS-flavored).
   Windows/Linux desktop builds are not shipped. The library crate and
-  headless daemon build on Unix without a display.
+  headless daemon build on Unix without a display. Full `./verify.sh` is
+  not a portable one-shot green on bare Ubuntu: the Tauri `cargo check`
+  steps need macOS or GTK/WebKit on Linux.
 
 ## One-shot green build
 
