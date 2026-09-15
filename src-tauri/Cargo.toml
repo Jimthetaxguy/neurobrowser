@@ -5,9 +5,8 @@ edition = "2021"
 
 [features]
 default = []
-# Headless daemon uses Tauri + a Tokio Unix Domain Socket listener. The
-# feature gates the bin and the additional deps so the desktop app build
-# stays slim.
+# Gates the neurobrowser-headless bin only. The bin is a Tokio Unix-socket
+# listener and does not use the Tauri runtime.
 headless = []
 
 [[bin]]
