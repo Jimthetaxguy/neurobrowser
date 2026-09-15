@@ -44,40 +44,8 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     classes: Array.from(element.classList || []),
     text: limitText(element.innerText || element.textContent || '', 220),
     attributes: attrsToObject(element),
-    selector,
-    xpath: elementToXPath(element)
+    selector
   });
-
-  const elementToXPath = (element) => {
-    if (!element || element.nodeType !== 1) {
-      return '';
-    }
-    const parts = [];
-    let current = element;
-    while (current && current.nodeType === 1 && current !== document.body) {
-      let segment = current.tagName ? current.tagName.toLowerCase() : '';
-      if (current.id) {
-        segment += `[@id='${current.id}']`;
-        parts.unshift(segment);
-        break;
-      }
-      const parent = current.parentElement;
-      if (parent) {
-        let i = 1;
-        let sibling = current.previousElementSibling;
-        while (sibling) {
-          if (sibling.tagName === current.tagName) {
-            i += 1;
-          }
-          sibling = sibling.previousElementSibling;
-        }
-        segment += `[${i}]`;
-      }
-      parts.unshift(segment);
-      current = current.parentElement;
-    }
-    return '//' + parts.join('/');
-  };
 
   const collectForms = () =>
     Array.from(document.querySelectorAll('form')).slice(0, 40).map((form) => ({
@@ -170,14 +138,6 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         .slice(0, 100)
         .map((element) => limitText(element.innerText || element.textContent || '', 1000))
         .join('\n');
-    },
-
-    getAttributes(selector) {
-      const element = document.querySelector(selector);
-      if (!element) {
-        throw new Error(`No element matched selector: ${selector}`);
-      }
-      return attrsToObject(element);
     },
 
     click(selector) {
@@ -460,17 +420,7 @@ impl TauriBrowserRuntime {
     }
 
     pub async fn wait_for_ready(&self, timeout_ms: u64) -> Result<(), String> {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        while Instant::now() <= deadline {
-            if !self.registry.is_loading(self.page_id)? {
-                return Ok(());
-            }
-            sleep(Duration::from_millis(40)).await;
-        }
-        Err(format!(
-            "Timed out waiting for page {} to finish loading",
-            self.page_id
-        ))
+        wait_for_runtime_page(&self.registry, self.page_id, timeout_ms).await
     }
 }
 
