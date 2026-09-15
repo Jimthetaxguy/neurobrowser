@@ -626,6 +626,7 @@ export default function App({ adapter, lane }) {
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
       if (event.key.toLowerCase() === "t") {
+        if (compact) return;
         event.preventDefault();
         createNewTab();
       }
@@ -634,13 +635,14 @@ export default function App({ adapter, lane }) {
         document.querySelector(".url-input")?.focus();
       }
       if (event.key.toLowerCase() === "w" && currentPageId != null) {
+        if (compact) return;
         event.preventDefault();
         closeTab(currentPageId);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [closeTab, createNewTab, currentPageId]);
+  }, [closeTab, compact, createNewTab, currentPageId]);
 
   const stageText = useMemo(() => {
     if (lane === "appkit") return "Real pages render in the AppKit WKWebView content pane.";

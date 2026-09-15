@@ -153,8 +153,7 @@ export function createAppKitHostAdapter() {
       await send("navigate", { sessionId: activeSessionId, pageId, url });
     },
     async waitForPageReady() {},
-    async getPageSnapshot(activeSessionId, pageId) {
-      await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
+    async getPageSnapshot() {
       return latestSnapshot;
     },
     async startAgentRun() {
@@ -207,7 +206,6 @@ export function createAppKitHostAdapter() {
       await send(command, { sessionId: activeSessionId, pageId });
     },
     async setProvider(provider) {
-      await send("set_provider", { provider });
       return { provider, model: "native-host", configured: true };
     },
     onHostEvent(callback) {
