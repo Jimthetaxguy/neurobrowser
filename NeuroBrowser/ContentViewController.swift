@@ -13,10 +13,14 @@ class ContentViewController: NSViewController {
     var tabBar: NSSegmentedControl!
     var pageUpdateHandler: (([String: Any]) -> Void)?
     private var webViewContainer: NSView!
+    private var pageIds: [Int] = []
     
     // MARK: - State
     
     var currentTabIndex: Int = 0
+    var currentPageId: Int? {
+        pageIds.indices.contains(currentTabIndex) ? pageIds[currentTabIndex] : nil
+    }
     
     // MARK: - Lifecycle
     
@@ -60,9 +64,9 @@ class ContentViewController: NSViewController {
         tabBar = NSSegmentedControl()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.segmentCount = 1
-        tabBar.setLabel("New Tab", forSegment: 0)
+        tabBar.setLabel("+", forSegment: 0)
         tabBar.setWidth(100, forSegment: 0)
-        tabBar.selectedSegment = 0
+        tabBar.selectedSegment = -1
         tabBar.target = self
         tabBar.action = #selector(tabBarChanged)
         tabBar.segmentStyle = .rounded
@@ -104,8 +108,6 @@ class ContentViewController: NSViewController {
             webViewContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webViewContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-        
-        addNewTab()
     }
     
     private func createNavButton(title: String, action: Selector) -> NSButton {
@@ -118,12 +120,20 @@ class ContentViewController: NSViewController {
     
     // MARK: - Tab Management
     
-    func addNewTab() {
+    func addNewTab(pageId: Int? = nil) {
+        if let pageId, let existing = pageIds.firstIndex(of: pageId) {
+            currentTabIndex = existing
+            tabBar.selectedSegment = existing
+            showCurrentTab()
+            return
+        }
+
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         
         webViews.append(webView)
+        pageIds.append(pageId ?? (pageIds.max() ?? -1) + 1)
         
         let newIndex = webViews.count - 1
         tabBar.segmentCount = webViews.count + 1
@@ -148,25 +158,45 @@ class ContentViewController: NSViewController {
     }
     
     func closeCurrentTab() {
+        closePage(pageId: currentPageId)
+    }
+
+    func closePage(pageId: Int? = nil) {
         guard webViews.count > 1 else { return }
-        
-        let webView = webViews[currentTabIndex]
+        let id = pageId ?? currentPageId
+        guard let id, let index = pageIds.firstIndex(of: id) else { return }
+
+        let webView = webViews[index]
         webView.removeFromSuperview()
-        webViews.remove(at: currentTabIndex)
-        
+        webViews.remove(at: index)
+        pageIds.remove(at: index)
+
+        if currentTabIndex > index {
+            currentTabIndex -= 1
+        } else if currentTabIndex == index {
+            currentTabIndex = min(index, webViews.count - 1)
+        }
+
         tabBar.segmentCount = webViews.count + 1
-        tabBar.selectedSegment = min(currentTabIndex, webViews.count - 1)
-        currentTabIndex = tabBar.selectedSegment
-        
+        tabBar.setLabel("+", forSegment: webViews.count)
+        tabBar.selectedSegment = currentTabIndex
+
         showCurrentTab()
         updateNavigationButtons()
     }
 
     func selectTab(pageId: Int) {
-        guard pageId >= 0, pageId < webViews.count else { return }
-        currentTabIndex = pageId
-        tabBar.selectedSegment = pageId
+        guard let index = pageIds.firstIndex(of: pageId) else { return }
+        currentTabIndex = index
+        tabBar.selectedSegment = index
         showCurrentTab()
+    }
+
+    func navigate(pageId: Int?, to input: String) {
+        if let pageId {
+            selectTab(pageId: pageId)
+        }
+        navigateCurrentTab(to: input)
     }
     
     @objc private func tabBarChanged() {
@@ -301,7 +331,7 @@ class ContentViewController: NSViewController {
             guard let self else { return }
             self.pageUpdateHandler?([
                 "type": "snapshot",
-                "pageId": self.currentTabIndex,
+                "pageId": self.currentPageId ?? 0,
                 "snapshot": snapshot
             ])
         }

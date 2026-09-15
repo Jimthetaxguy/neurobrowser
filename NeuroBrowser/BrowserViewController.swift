@@ -76,16 +76,16 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
                 "message": "Native AppKit session ready"
             ])
         case "create_page":
-            contentViewController.addNewTab()
+            contentViewController.addNewTab(pageId: Self.payloadPageId(payload))
         case "close_page":
-            contentViewController.closeCurrentTab()
+            contentViewController.closePage(pageId: Self.payloadPageId(payload))
         case "set_active_page":
-            if let pageId = payload["pageId"] as? Int {
+            if let pageId = Self.payloadPageId(payload) {
                 contentViewController.selectTab(pageId: pageId)
             }
         case "navigate":
             if let url = payload["url"] as? String {
-                contentViewController.navigateCurrentTab(to: url)
+                contentViewController.navigate(pageId: Self.payloadPageId(payload), to: url)
             }
         case "browser_back":
             contentViewController.goBack()
@@ -93,25 +93,17 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
             contentViewController.goForward()
         case "browser_reload":
             contentViewController.reloadCurrentPage()
-        case "get_page_snapshot":
-            contentViewController.snapshotCurrentPage { [weak self] snapshot in
-                self?.sidebarViewController.dispatchToReact([
-                    "type": "snapshot",
-                    "pageId": payload["pageId"] as? Int ?? self?.contentViewController.currentTabIndex ?? 0,
-                    "snapshot": snapshot
-                ])
-            }
-        case "set_provider":
-            let provider = payload["provider"] as? String ?? "unknown"
-            sidebarViewController.dispatchToReact([
-                "type": "status",
-                "message": "Provider selected in AppKit host: \(provider)"
-            ])
         default:
             sidebarViewController.dispatchToReact([
                 "type": "status",
                 "message": "Unhandled native command: \(command)"
             ])
         }
+    }
+
+    private static func payloadPageId(_ payload: [String: Any]) -> Int? {
+        if let value = payload["pageId"] as? Int { return value }
+        if let value = payload["pageId"] as? NSNumber { return value.intValue }
+        return nil
     }
 }
