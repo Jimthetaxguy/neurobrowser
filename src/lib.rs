@@ -23,6 +23,6 @@ pub use providers::{
 pub use session::{PageHandle, SessionInfo, SessionManager};
 pub use tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition,
-    ToolDefinition, ToolRegistry, ToolResult, ToolRisk,
+    PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition, ToolDefinition,
+    ToolRegistry, ToolResult, ToolRisk,
 };

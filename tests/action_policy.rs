@@ -67,12 +67,7 @@ fn sensitive_arguments_are_redacted_and_require_approval() {
         autonomy_level: AutonomyLevel::HighAutonomy,
         ..ActionPolicy::default()
     }
-    .evaluate(
-        "type",
-        &ToolRisk::new(ToolAction::Type),
-        &args,
-        &snapshot,
-    );
+    .evaluate("type", &ToolRisk::new(ToolAction::Type), &args, &snapshot);
 
     assert_eq!(decision.outcome, PolicyOutcome::RequireApproval);
     assert_eq!(
@@ -98,12 +93,7 @@ fn sensitive_key_match_is_token_bounded() {
         autonomy_level: AutonomyLevel::HighAutonomy,
         ..ActionPolicy::default()
     }
-    .evaluate(
-        "type",
-        &ToolRisk::new(ToolAction::Type),
-        &args,
-        &snapshot,
-    );
+    .evaluate("type", &ToolRisk::new(ToolAction::Type), &args, &snapshot);
 
     assert_eq!(decision.outcome, PolicyOutcome::RequireApproval);
     assert_eq!(
