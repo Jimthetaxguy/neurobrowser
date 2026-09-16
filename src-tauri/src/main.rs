@@ -1,5 +1,3 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 mod runtime;
 
 use neurobrowser::{
@@ -42,16 +40,11 @@ struct AskResult {
 struct SnapshotResponse {
     url: String,
     title: String,
-    html: String,
-    text: String,
     link_count: usize,
     image_count: usize,
     form_count: usize,
     price_count: usize,
     table_count: usize,
-    viewport_width: u32,
-    viewport_height: u32,
-    interactive_ready: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -147,16 +140,11 @@ fn snapshot_response(snapshot: PageSnapshot) -> SnapshotResponse {
     SnapshotResponse {
         url: snapshot.url,
         title: snapshot.title,
-        html: snapshot.html.unwrap_or_default(),
-        text: snapshot.text.unwrap_or_default(),
         link_count: snapshot.links.len(),
         image_count: snapshot.images.len(),
         form_count: snapshot.forms.len(),
         price_count: snapshot.prices.len(),
         table_count: snapshot.tables.len(),
-        viewport_width: snapshot.viewport_width,
-        viewport_height: snapshot.viewport_height,
-        interactive_ready: snapshot.interactive_ready,
     }
 }
 
