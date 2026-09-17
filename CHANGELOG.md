@@ -4,7 +4,7 @@ All notable changes to NeuroBrowser are recorded here. Dates are UTC.
 The 0.1.1 heading is a documentation/release label; both Rust package versions
 remain 0.1.0 until an actual version bump and release tag.
 
-## Unreleased — maintenance through 2026-09-14
+## Unreleased — maintenance through 2026-09-17
 
 ### Fixed
 
@@ -19,8 +19,7 @@ remain 0.1.0 until an actual version bump and release tag.
 - Empty-history Back/Forward no longer leave the desktop loading indicator stuck.
 - The native AppKit app bundles its generated React controls, and its address
   field describes URL/domain entry after removal of native agent/search controls.
-- Frontend dependency lockfile updated within the existing package constraints;
-  the moderate-severity npm audit gate is retained in the spec and story.
+- Frontend dependency lockfile updated within the existing package constraints.
 
 ### Removed
 
@@ -31,8 +30,9 @@ remain 0.1.0 until an actual version bump and release tag.
   `list_sessions`, `list_workers`, `get_worker`). The command manifest and
   generated permissions now cover the 20 actual commands.
 - The redundant headless `policy.snapshot` method; `policy.get` reads policy.
-- Obsolete status dumps and misleading architectural claims. The root glossary,
-  project summary, agent surface, and skill describe the maintained boundaries.
+- Obsolete status dumps and misleading architectural claims. README, the agent
+  surface, ADR-001, and the skill describe the maintained boundaries.
+- Redundant status glossary, project summary, and the implemented GitSpec pair.
 
 ### Verification
 
@@ -73,9 +73,9 @@ Later removals and fixes are recorded above; the current surface is described in
 
 - Real browser and agent execution through the headless protocol.
 - CLI and MCP clients, cross-process worker execution, and a worker sidebar.
-- Native function calling in the ReAct loop, full screenshot support, and
-  budget-capped real-provider integration coverage. Unit test provider fixtures
-  do not constitute real-provider integration verification.
+- Native function calling in the ReAct loop, full screenshot support, visual
+  regression tests, and budget-capped real-provider integration coverage. Unit
+  test provider fixtures do not constitute real-provider integration verification.
 
 ## [0.1.0] — 2026-02-23
 
