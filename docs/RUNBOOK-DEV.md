@@ -15,9 +15,11 @@ How to build, run, and test NeuroBrowser locally.
 From repo root:
 
 ```bash
-chmod +x verify.sh   # only needed the first time
 ./verify.sh
 ```
+
+`verify.sh` is executable in-tree. The Tauri `cargo check` steps need macOS
+or GTK/WebKit; the library crate does not.
 
 This is the verification chain in `verify.sh`:
 
@@ -137,18 +139,17 @@ Local keys go in a gitignored `.env`.
 | Tauri IPC bridge | `src-tauri/src/main.rs` |
 | Webview JS bridge | `src-tauri/src/runtime.rs` |
 | AppKit Swift spike | `NeuroBrowser/` |
-| Specs / stories / ADRs | `docs/specs/`, `docs/stories/`, `docs/adr/` |
+| Status / agent / ADR | `README.md`, `CHANGELOG.md`, `docs/AGENT-SURFACE.md`, `docs/adr/` |
 | Verification | `verify.sh` |
 | Tests | `tests/` |
 
 ## See also
 
-- `PROJECT.md` — current status and v0.2 list.
+- `README.md` — current status and shipped surface.
+- `CHANGELOG.md` — history and still-unimplemented work.
 - `docs/AGENT-SURFACE.md` — agent tool / policy spec.
+- `docs/adr/ADR-001-react-tauri-primary.md` — primary frontend path.
 - `docs/references/prior-art.md` — prior art.
-- `docs/specs/` — product specs.
-- `docs/stories/` — user stories.
-- `docs/adr/` — architecture decision records.
 
 ## Native AppKit shell
 

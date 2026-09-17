@@ -24,12 +24,13 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 cargo build                # Library crate (neurobrowser)
 cargo test                 # Unit + integration tests
 cargo clippy --all-targets # Lint
-cargo check --manifest-path src-tauri/Cargo.toml # Desktop crate type-check
 cargo build --release      # Library release (LTO + strip + abort)
 ./verify.sh                # Full verification chain
 ```
 
-Desktop (`npx tauri dev` in `src-tauri/`) is macOS.
+Desktop (`npx tauri dev` in `src-tauri/`) is macOS. Full `./verify.sh` also
+type-checks the Tauri crate (macOS, or GTK/WebKit on Linux); see
+[docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
 
 Start the headless policy stub on Unix:
 
@@ -60,10 +61,8 @@ Shipped run/policy surface:
 
 React + Tauri is the primary frontend path
 ([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).
-
-Spec and acceptance trail:
-[SPEC-AUTONOMOUS-BROWSER-AGENT](docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md),
-[STORY-001](docs/stories/STORY-001-autonomous-browser-agent-core.md).
+Agent contract: [docs/AGENT-SURFACE.md](docs/AGENT-SURFACE.md).
+Unimplemented work: [CHANGELOG.md](CHANGELOG.md#still-unimplemented).
 
 ## Documentation Workflow
 
