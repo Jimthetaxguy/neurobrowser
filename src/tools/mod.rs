@@ -190,6 +190,12 @@ impl ToolRegistry {
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
         self.tools.get(canonical_tool_name(name)).cloned()
     }
+
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions: Vec<_> = self.tools.values().map(|tool| tool.definition()).collect();
+        definitions.sort_by(|left, right| left.name.cmp(&right.name));
+        definitions
+    }
 }
 
 impl Default for ToolRegistry {

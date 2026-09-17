@@ -104,25 +104,8 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
         if line.starts_with("ToolCall:") {
             let json_part = line.strip_prefix("ToolCall:").unwrap().trim();
             if let Some(call) = parse_structured_tool_call(json_part) {
-                calls.push(call);
-            }
-            continue;
-        }
-
-        if line.starts_with("Action:") {
-            let action_part = line.strip_prefix("Action:").unwrap().trim();
-
-            if let Some((name, args_str)) = action_part.split_once('(') {
-                let name = name.trim();
-                let args_str = args_str.trim_end_matches(')').trim();
-
-                let arguments = parse_arguments(name, args_str);
-
-                if !arguments.is_empty() {
-                    calls.push(ToolCall {
-                        name: name.to_string(),
-                        arguments,
-                    });
+                if missing_required_arguments(&call).is_empty() {
+                    calls.push(call);
                 }
             }
         }
@@ -156,112 +139,40 @@ fn parse_structured_tool_call(json_part: &str) -> Option<ToolCall> {
     })
 }
 
-fn parse_arguments(tool_name: &str, args_str: &str) -> HashMap<String, String> {
-    let mut arguments = HashMap::new();
-
-    if args_str.is_empty() {
-        return arguments;
-    }
-
-    // `split_arguments` already splits `args_str` on top-level commas, so by
-    // the time we get here each `arg` is a single token — there is never an
-    // embedded ',' left to split on. Positional (unlabeled) args are mapped
-    // by index to the tool's real, ordered parameter names (as declared on
-    // `BrowserTool::definition()`, e.g. `type` -> ["selector", "text"]) so
-    // multi-arg positional calls like `type(#input, hello)` land on the same
-    // keys `TypeTool::execute` reads, instead of every positional arg
-    // overwriting a single "value" key.
-    let args = split_arguments(args_str);
-    let positional_names = positional_argument_names(tool_name);
-    let mut positional_index = 0usize;
-
-    for arg in args {
-        let arg = arg.trim();
-        if arg.is_empty() {
-            continue;
-        }
-
-        if let Some((key, value)) = arg.split_once('=') {
-            let key = key.trim();
-            let value = value.trim().trim_matches('"').trim_matches('\'');
-            arguments.insert(key.to_string(), value.to_string());
-        } else {
-            let value = arg.trim_matches('"').trim_matches('\'');
-            if !value.is_empty() {
-                let key = positional_names
-                    .get(positional_index)
-                    .cloned()
-                    .unwrap_or_else(|| format!("value{}", positional_index + 1));
-                arguments.insert(key, value.to_string());
-            }
-            positional_index += 1;
-        }
-    }
-
-    arguments
-}
-
-/// Looks up the real, ordered argument names for `tool_name` from the
-/// browser tool registry (the same registry `ReActAgent` dispatches
-/// through) so legacy positional `Action: tool(a, b)` calls feed the same
-/// keys the tool's `execute()` reads. Falls back to an empty list for
-/// unknown tool names, in which case positional args get distinct
-/// `value1`, `value2`, ... keys rather than overwriting each other.
-fn positional_argument_names(tool_name: &str) -> Vec<String> {
-    crate::browser::default_tool_registry()
-        .get(tool_name)
-        .map(|tool| {
-            tool.definition()
-                .arguments
-                .into_iter()
-                .map(|argument| argument.name)
-                .collect()
+fn missing_required_arguments(call: &ToolCall) -> Vec<String> {
+    let Some(tool) = crate::browser::default_tool_registry().get(&call.name) else {
+        return Vec::new();
+    };
+    tool.definition()
+        .arguments
+        .into_iter()
+        .filter(|argument| argument.required)
+        .filter(|argument| {
+            call.arguments
+                .get(&argument.name)
+                .map(String::as_str)
+                .unwrap_or("")
+                .trim()
+                .is_empty()
         })
-        .unwrap_or_default()
+        .map(|argument| argument.name)
+        .collect()
 }
 
-fn split_arguments(args_str: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut quote_char = ' ';
-    let mut paren_depth = 0;
-
-    for ch in args_str.chars() {
-        match ch {
-            '"' | '\'' if !in_quotes => {
-                in_quotes = true;
-                quote_char = ch;
-                current.push(ch);
-            }
-            c if c == quote_char && in_quotes => {
-                in_quotes = false;
-                quote_char = ' ';
-                current.push(ch);
-            }
-            ',' if !in_quotes && paren_depth == 0 => {
-                args.push(current.trim().to_string());
-                current.clear();
-            }
-            '(' | '[' | '{' if !in_quotes => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' | ']' | '}' if !in_quotes && paren_depth > 0 => {
-                paren_depth -= 1;
-                current.push(ch);
-            }
-            _ => {
-                current.push(ch);
-            }
-        }
+fn format_argument_line(argument: &crate::tools::ToolArgumentDefinition) -> String {
+    let mut flags = Vec::new();
+    if argument.required {
+        flags.push("required");
     }
-
-    if !current.trim().is_empty() {
-        args.push(current.trim().to_string());
+    if argument.sensitive {
+        flags.push("sensitive");
     }
-
-    args
+    let flags = if flags.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", flags.join(", "))
+    };
+    format!("  - {}{}: {}\n", argument.name, flags, argument.description)
 }
 
 pub fn build_system_prompt(context: &AiContext) -> String {
@@ -288,23 +199,15 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("Use structured browser tool calls when an action is needed:\n");
     prompt.push_str("ToolCall: {\"name\":\"tool_name\",\"arguments\":{\"key\":\"value\"}}\n\n");
     prompt.push_str("Available tools:\n");
-    prompt.push_str("- navigate(url): Navigate to an HTTP(S) URL\n");
-    prompt.push_str("- wait(): Wait for page readiness\n");
-    prompt.push_str("- query_dom(selector): Query DOM elements by CSS selector\n");
-    prompt.push_str("- get_text(selector): Get text content of element\n");
-    prompt.push_str("- click(selector): Click an element\n");
-    prompt.push_str("- type(selector, text): Type text into input\n");
-    prompt.push_str("- keypress(key): Send a keypress to the focused element\n");
-    prompt.push_str("- scroll_to(selector): Scroll element into view\n");
-    prompt.push_str("- scroll_by(x, y): Scroll by pixels\n");
-    prompt.push_str("- submit_form(selector): Submit a form\n");
-    prompt.push_str("- screenshot(): Capture the current page if supported\n");
-    prompt.push_str("- back(): Browser history back\n");
-    prompt.push_str("- forward(): Browser history forward\n");
-    prompt.push_str("- reload(): Reload page\n");
-    prompt.push_str("- get_links(): Get all links on page\n");
-    prompt.push_str("- get_prices(): Extract price information\n");
-    prompt.push_str("- get_tables(): Extract table data\n");
+    for definition in crate::browser::default_tool_registry().definitions() {
+        prompt.push_str(&format!(
+            "- {}: {}\n",
+            definition.name, definition.description
+        ));
+        for argument in &definition.arguments {
+            prompt.push_str(&format_argument_line(argument));
+        }
+    }
 
     prompt
 }
@@ -347,7 +250,80 @@ pub fn create_provider(config: &ProviderConfig) -> Arc<dyn AiProvider> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_endpoint;
+    use super::{
+        build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, ScrollPosition,
+    };
+
+    fn empty_context() -> AiContext {
+        AiContext {
+            current_url: "https://example.com".to_string(),
+            page_title: "Example".to_string(),
+            dom_snapshot: String::new(),
+            accessibility_tree: None,
+            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
+            tool_results: Vec::new(),
+            conversation_history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn system_prompt_is_driven_by_the_tool_registry() {
+        let prompt = build_system_prompt(&empty_context());
+        assert!(prompt.contains("ToolCall:"));
+        assert!(!prompt.contains("Action:"));
+        assert!(!prompt.contains("Capture the current page if supported"));
+        assert!(!prompt.contains("Navigate to an HTTP(S) URL"));
+        for definition in crate::browser::default_tool_registry().definitions() {
+            assert!(
+                prompt.contains(&format!(
+                    "- {}: {}",
+                    definition.name, definition.description
+                )),
+                "missing registry tool {}",
+                definition.name
+            );
+            for argument in definition.arguments {
+                assert!(
+                    prompt.contains(&argument.description),
+                    "missing argument description for {}",
+                    argument.name
+                );
+                if argument.required {
+                    assert!(
+                        prompt.contains(&format!("{} (required", argument.name)),
+                        "required flag missing for {}",
+                        argument.name
+                    );
+                }
+                if argument.sensitive {
+                    assert!(
+                        prompt.contains(&format!("{} (required, sensitive)", argument.name)),
+                        "sensitive flag missing for {}",
+                        argument.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_tool_calls_rejects_missing_required_arguments() {
+        let calls = parse_tool_calls(r#"ToolCall: {"name":"navigate","arguments":{}}"#);
+        assert!(calls.is_empty());
+
+        let calls = parse_tool_calls(r#"ToolCall: {"name":"navigate","arguments":{"url":"   "}}"#);
+        assert!(calls.is_empty());
+
+        let calls = parse_tool_calls(r#"ToolCall: {"name":"wait","arguments":{}}"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "wait");
+    }
+
+    #[test]
+    fn parse_tool_calls_ignores_legacy_action_syntax() {
+        let calls = parse_tool_calls("Action: click(selector=\"#go\")");
+        assert!(calls.is_empty());
+    }
 
     #[test]
     fn resolve_endpoint_uses_default_origin_when_unset() {
