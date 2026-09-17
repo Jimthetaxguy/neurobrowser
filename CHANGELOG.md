@@ -23,7 +23,8 @@ remain 0.1.0 until an actual version bump and release tag.
   React `createPage`, and leaves Cmd+T/W to the native File menu. Native menu
   IDs cannot collide with React IDs; tab changes synchronize to both controls.
   Snapshots remain associated with their source page, and stale page IDs cannot
-  navigate or run history commands on another tab.
+  navigate or run history commands on another tab. Background tab updates preserve
+  URL edits, and native selection/snapshot bursts use the new active page.
 - Frontend dependency lockfile updated within the existing package constraints;
   the moderate-severity npm audit gate is retained in the spec and story.
 
