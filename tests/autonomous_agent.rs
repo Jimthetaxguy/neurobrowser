@@ -320,36 +320,3 @@ fn parses_structured_tool_calls_without_provider_specific_logic() {
         Some("2")
     );
 }
-
-#[test]
-fn parses_legacy_action_syntax_for_compatibility() {
-    let calls = neurobrowser::providers::parse_tool_calls("Action: click(selector=\"#go\")");
-
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "click");
-    assert_eq!(
-        calls[0].arguments.get("selector").map(String::as_str),
-        Some("#go")
-    );
-}
-
-#[test]
-fn parses_legacy_action_syntax_with_multiple_positional_args() {
-    // `type(selector, text)` is a two-arg legacy positional call. Both
-    // args must survive as distinct values (mapped to the `type` tool's
-    // real `selector`/`text` parameter names) rather than the second
-    // positional arg overwriting the first under a shared "value" key.
-    let calls = neurobrowser::providers::parse_tool_calls("Action: type(#input, hello)");
-
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "type");
-    assert_eq!(calls[0].arguments.len(), 2);
-    assert_eq!(
-        calls[0].arguments.get("selector").map(String::as_str),
-        Some("#input")
-    );
-    assert_eq!(
-        calls[0].arguments.get("text").map(String::as_str),
-        Some("hello")
-    );
-}

@@ -92,6 +92,8 @@ async fn summarize_page(
 Registered by `default_tool_registry()`. Arguments are CSS selectors (or
 pixels / a key), not element refs.
 
+Call format is `ToolCall: {"name":"tool_name","arguments":{"key":"value"}}`.
+
 | Tool | Args | Purpose |
 |---|---|---|
 | `navigate` | `url` | Fetch / open a URL |
