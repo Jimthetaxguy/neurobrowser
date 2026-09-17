@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { nativePageUpdates } from "./nativePageEvents.js";
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -286,6 +287,11 @@ export default function App({ adapter, lane }) {
   const nextMessageId = useRef(0);
   const [sessionId, setSessionId] = useState(null);
   const [currentPageId, setCurrentPageId] = useState(null);
+  const currentPageIdRef = useRef(null);
+  const setActivePageId = useCallback((pageId) => {
+    currentPageIdRef.current = pageId;
+    setCurrentPageId(pageId);
+  }, []);
   const [tabs, setTabs] = useState([]);
   const [url, setUrl] = useState("");
   const [provider, setProviderValue] = useState("openai");
@@ -361,7 +367,7 @@ export default function App({ adapter, lane }) {
   const activatePage = useCallback(
     async (pageId) => {
       if (pageId == null || !sessionId) return;
-      setCurrentPageId(pageId);
+      setActivePageId(pageId);
       await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
       try {
@@ -371,7 +377,7 @@ export default function App({ adapter, lane }) {
         console.warn("snapshot refresh failed", messageText(error));
       }
     },
-    [adapter, sessionId, syncBrowserViewportForPage, updateSnapshot]
+    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
   );
 
   const createNewTab = useCallback(async () => {
@@ -379,14 +385,14 @@ export default function App({ adapter, lane }) {
     try {
       const pageId = await adapter.createPage(sessionId);
       setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}` }]);
-      setCurrentPageId(pageId);
+      setActivePageId(pageId);
       await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
       setStatus("New tab ready");
     } catch (error) {
       setStatus(`New tab failed: ${messageText(error)}`);
     }
-  }, [adapter, sessionId, syncBrowserViewportForPage]);
+  }, [adapter, sessionId, setActivePageId, syncBrowserViewportForPage]);
 
   const closeTab = useCallback(
     async (pageId) => {
@@ -398,7 +404,7 @@ export default function App({ adapter, lane }) {
         setTabs(nextTabs);
         const nextTab = nextTabs[closingIndex] || nextTabs[closingIndex - 1] || nextTabs[0];
         if (nextTab) {
-          setCurrentPageId(nextTab.id);
+          setActivePageId(nextTab.id);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
         }
@@ -406,7 +412,7 @@ export default function App({ adapter, lane }) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, sessionId, syncBrowserViewportForPage, tabs]
+    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs]
   );
 
   const navigateCurrentPage = useCallback(async () => {
@@ -561,7 +567,7 @@ export default function App({ adapter, lane }) {
         const pageId = await adapter.createPage(nextSessionId);
         if (disposed) return;
         setTabs([{ id: pageId, title: "Tab 1" }]);
-        setCurrentPageId(pageId);
+        setActivePageId(pageId);
         await adapter.setActivePage(nextSessionId, pageId);
         try {
           const policy = await adapter.getActionPolicy();
@@ -581,20 +587,28 @@ export default function App({ adapter, lane }) {
     return () => {
       disposed = true;
     };
-  }, [adapter]);
+  }, [adapter, setActivePageId]);
 
   useEffect(() => {
     const unsubscribe = adapter.onHostEvent((event) => {
       if (!event) return;
-      if (event.type === "snapshot") {
-        updateSnapshot(event.pageId ?? currentPageId, event.snapshot);
+      if (compact) {
+        const updates = nativePageUpdates(event, currentPageIdRef.current);
+        if (updates.tabs) {
+          setTabs(updates.tabs);
+          setActivePageId(updates.activePageId);
+          if ("url" in updates) setUrl(updates.url);
+        }
+        if (updates.snapshot) updateSnapshot(event.pageId, updates.snapshot);
+      } else if (event.type === "snapshot" && event.pageId === currentPageIdRef.current) {
+        updateSnapshot(event.pageId, event.snapshot);
       }
       if (event.type === "status") {
         setStatus(event.message);
       }
     });
     return unsubscribe;
-  }, [adapter, currentPageId, updateSnapshot]);
+  }, [adapter, compact, setActivePageId, updateSnapshot]);
 
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
@@ -626,6 +640,7 @@ export default function App({ adapter, lane }) {
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
       if (event.key.toLowerCase() === "t") {
+        if (compact) return;
         event.preventDefault();
         createNewTab();
       }
@@ -634,13 +649,14 @@ export default function App({ adapter, lane }) {
         document.querySelector(".url-input")?.focus();
       }
       if (event.key.toLowerCase() === "w" && currentPageId != null) {
+        if (compact) return;
         event.preventDefault();
         closeTab(currentPageId);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [closeTab, createNewTab, currentPageId]);
+  }, [closeTab, compact, createNewTab, currentPageId]);
 
   const stageText = useMemo(() => {
     if (lane === "appkit") return "Real pages render in the AppKit WKWebView content pane.";

@@ -89,12 +89,18 @@ export function createTauriHostAdapter() {
 
 export function createAppKitHostAdapter() {
   let nextPageId = 0;
-  let latestSnapshot = null;
+  const snapshotsByPageId = new Map();
   const sessionId = `appkit-${crypto.randomUUID?.() ?? Date.now()}`;
 
   window.neurobrowserNativeDispatch = (event) => {
-    if (event?.type === "snapshot") {
-      latestSnapshot = event.snapshot;
+    if (event?.type === "snapshot" && Number.isInteger(event.pageId)) {
+      snapshotsByPageId.set(event.pageId, event.snapshot);
+    }
+    if (event?.type === "tabs") {
+      const pageIds = new Set(event.tabs.map((tab) => tab.id));
+      for (const pageId of snapshotsByPageId.keys()) {
+        if (!pageIds.has(pageId)) snapshotsByPageId.delete(pageId);
+      }
     }
     window.dispatchEvent(new CustomEvent("neurobrowser:native", { detail: event }));
   };
@@ -154,8 +160,7 @@ export function createAppKitHostAdapter() {
     },
     async waitForPageReady() {},
     async getPageSnapshot(activeSessionId, pageId) {
-      await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
-      return latestSnapshot;
+      return snapshotsByPageId.get(pageId) ?? null;
     },
     async startAgentRun() {
       return {
@@ -207,7 +212,6 @@ export function createAppKitHostAdapter() {
       await send(command, { sessionId: activeSessionId, pageId });
     },
     async setProvider(provider) {
-      await send("set_provider", { provider });
       return { provider, model: "native-host", configured: true };
     },
     onHostEvent(callback) {
