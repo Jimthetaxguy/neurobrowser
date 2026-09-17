@@ -8,6 +8,9 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Fixed
 
+- Removed the unused `futures` dependency from both library and desktop
+  lockfiles so locked Tauri builds remain reproducible.
+
 - Policy canonicalizes supported tool aliases before deny and approval checks.
   Navigation domains are checked case-insensitively; unsafe URL schemes are
   rejected without DNS lookups. ReadOnly blocks navigation.
