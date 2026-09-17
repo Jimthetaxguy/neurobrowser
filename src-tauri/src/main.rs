@@ -1,10 +1,8 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 mod runtime;
 
 use neurobrowser::{
     ActionPolicy, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus, BrowserInterface,
-    PageConfig, PageSnapshot, ProviderConfig, ProviderType, SessionManager, ToolCall,
+    PageSnapshot, ProviderConfig, ProviderType, SessionManager, ToolCall,
 };
 use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
@@ -32,26 +30,14 @@ struct PendingApproval {
 }
 
 #[derive(Serialize)]
-struct AskResult {
-    response: String,
-    tools_used: Vec<String>,
-    iterations: usize,
-}
-
-#[derive(Serialize)]
 struct SnapshotResponse {
     url: String,
     title: String,
-    html: String,
-    text: String,
     link_count: usize,
     image_count: usize,
     form_count: usize,
     price_count: usize,
     table_count: usize,
-    viewport_width: u32,
-    viewport_height: u32,
-    interactive_ready: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -147,16 +133,11 @@ fn snapshot_response(snapshot: PageSnapshot) -> SnapshotResponse {
     SnapshotResponse {
         url: snapshot.url,
         title: snapshot.title,
-        html: snapshot.html.unwrap_or_default(),
-        text: snapshot.text.unwrap_or_default(),
         link_count: snapshot.links.len(),
         image_count: snapshot.images.len(),
         form_count: snapshot.forms.len(),
         price_count: snapshot.prices.len(),
         table_count: snapshot.tables.len(),
-        viewport_width: snapshot.viewport_width,
-        viewport_height: snapshot.viewport_height,
-        interactive_ready: snapshot.interactive_ready,
     }
 }
 
@@ -325,38 +306,6 @@ async fn execute_agent_run(
         .await?;
     remember_pending_approval(state, session_id, page_id, &result)?;
     Ok(result)
-}
-
-#[tauri::command]
-async fn ask(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    prompt: String,
-) -> Result<AskResult, String> {
-    let result = execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await?;
-    let tools_used = result
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            AgentRunEvent::ToolCallResult { tool, .. } => Some(tool.clone()),
-            _ => None,
-        })
-        .collect();
-    let response = result.final_response.clone().unwrap_or_else(|| match result.status {
-        AgentRunStatus::AwaitingApproval => {
-            "This action needs your approval before it can run.".to_string()
-        }
-        AgentRunStatus::Blocked => "This action was blocked by the active policy.".to_string(),
-        _ => String::new(),
-    });
-
-    Ok(AskResult {
-        response,
-        tools_used,
-        iterations: result.iterations,
-    })
 }
 
 #[tauri::command]
@@ -554,13 +503,12 @@ fn main() {
         )
         .init();
 
-    let browser_config = PageConfig::default();
     let agent_config = AgentConfig {
         max_iterations: 5,
         provider_config: provider_config_for(ProviderType::Openai),
     };
 
-    let session_manager = SessionManager::new(browser_config, agent_config);
+    let session_manager = SessionManager::new(agent_config);
     let runtimes = Arc::new(BrowserRuntimeRegistry::default());
 
     tauri::Builder::default()
@@ -571,7 +519,6 @@ fn main() {
             pending_approvals: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
-            ask,
             browser_back,
             browser_forward,
             browser_reload,

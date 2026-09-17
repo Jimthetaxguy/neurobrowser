@@ -8,7 +8,9 @@ How to build, run, and test NeuroBrowser locally.
 - **Node.js** + **npm** (Vite frontend under `src-tauri/`).
 - **macOS** for the desktop app (icon set + CSP are macOS-flavored).
   Windows/Linux desktop builds are not shipped. The library crate and
-  headless daemon build on Unix without a display.
+  headless daemon build on Unix without a display. Full `./verify.sh` is
+  not a portable one-shot green on bare Ubuntu: the Tauri `cargo check`
+  steps need macOS or GTK/WebKit on Linux.
 
 ## One-shot green build
 
@@ -27,7 +29,8 @@ This is the verification chain in `verify.sh`:
 4. `cd src-tauri && npm ci && npm run build`
 5. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
 6. Locked headless check and binary tests with `--features headless`
-7. `cargo build --release` (library crate)
+7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
+8. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
@@ -73,7 +76,7 @@ Integration tests live in `tests/`:
 
 ## Tauri IPC
 
-The desktop app exposes 20 commands (see `src-tauri/src/main.rs`). From
+The desktop app exposes 19 commands (see `src-tauri/src/main.rs`). From
 the React frontend:
 
 ```javascript
@@ -93,10 +96,17 @@ Adding a command:
 1. Define it in `src-tauri/src/main.rs`.
 2. Add it to `tauri::generate_handler!`.
 3. Add the command name to the app manifest in `src-tauri/build.rs`.
-4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json`.
+4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json` (control webview only). Do not grant host commands to `page-runtime.json`.
 5. Add a wrapper in `src-tauri/src/hostAdapters.js`.
 
 Do not add a wildcard capability permission.
+
+Page webviews receive only `browser_runtime_report`, including the initial
+`about:blank` document. URLPattern requires its colon to be escaped: the JSON
+entry is `"about\\:blank"`. The capability tests exercise Tauri's compiled ACL
+without launching the app: blank/HTTP/HTTPS reports succeed, other document
+schemes and webview labels are denied, and page webviews cannot invoke control
+commands (including provider changes and approval submission).
 
 ## verify.sh failures
 
@@ -106,7 +116,8 @@ Do not add a wildcard capability permission.
 | `cargo clippy` | warnings-as-errors | fix the warning, re-run |
 | `cargo test` | failed assertions | fix the test or the code |
 | `npm ci && npm run build` | Vite error | check `src-tauri/src/*.{jsx,js}` |
-| `cargo check --manifest-path src-tauri/Cargo.toml` | Tauri compile error | missing icon or capability |
+| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Tauri compile error | missing icon or capability |
+| locked headless `cargo check` / `cargo test --bin neurobrowser-headless` | headless compile or binary test failure | fix the headless feature path |
 | `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
 
 ## Environment variables

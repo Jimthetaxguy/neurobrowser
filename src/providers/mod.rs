@@ -11,8 +11,6 @@ pub enum ProviderError {
     RequestFailed(String),
     #[error("Parse error: {0}")]
     ParseError(String),
-    #[error("Authentication error: {0}")]
-    AuthError(String),
     #[error("Rate limited")]
     RateLimited,
     #[error("Provider not configured: {0}")]
@@ -24,7 +22,6 @@ pub type ProviderResult<T> = Result<T, ProviderError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiResponse {
     pub content: String,
-    pub reasoning: Option<String>,
     pub tool_calls: Vec<ToolCall>,
     pub finish_reason: String,
 }
@@ -39,23 +36,7 @@ pub struct ToolCall {
 pub struct AiContext {
     pub current_url: String,
     pub page_title: String,
-    pub dom_snapshot: String,
-    pub accessibility_tree: Option<String>,
-    pub scroll_position: ScrollPosition,
     pub tool_results: Vec<ToolResult>,
-    pub conversation_history: Vec<Message>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScrollPosition {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: String,
-    pub content: String,
 }
 
 #[async_trait]
@@ -208,7 +189,9 @@ fn parse_arguments(tool_name: &str, args_str: &str) -> HashMap<String, String> {
 /// unknown tool names, in which case positional args get distinct
 /// `value1`, `value2`, ... keys rather than overwriting each other.
 fn positional_argument_names(tool_name: &str) -> Vec<String> {
-    crate::browser::default_tool_registry()
+    static REGISTRY: std::sync::OnceLock<crate::tools::ToolRegistry> = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(crate::browser::default_tool_registry)
         .get(tool_name)
         .map(|tool| {
             tool.definition()
@@ -298,13 +281,13 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("- scroll_to(selector): Scroll element into view\n");
     prompt.push_str("- scroll_by(x, y): Scroll by pixels\n");
     prompt.push_str("- submit_form(selector): Submit a form\n");
-    prompt.push_str("- screenshot(): Capture the current page if supported\n");
+    prompt.push_str("- screenshot(): registered; this runtime errors\n");
     prompt.push_str("- back(): Browser history back\n");
     prompt.push_str("- forward(): Browser history forward\n");
     prompt.push_str("- reload(): Reload page\n");
     prompt.push_str("- get_links(): Get all links on page\n");
     prompt.push_str("- get_prices(): Extract price information\n");
-    prompt.push_str("- get_tables(): Extract table data\n");
+    prompt.push_str("- get_tables(): Table N: H headers, R rows per table\n");
 
     prompt
 }

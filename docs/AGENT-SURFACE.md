@@ -34,6 +34,12 @@ No element-ref map. No ARIA tree field.
 Arguments are `HashMap<String, String>`. Results are `ToolResult`
 (`tool_name`, `arguments`, `result`, `success`).
 
+`ToolDefinition` exposes `name`, `description`, `arguments`, and `risk`.
+`ToolRisk` contains the action category plus the `sensitive` and
+`externally_visible` flags; both flags default to `false`. There is no
+risk-level or tool-version field. The catalog below names each action and
+identifies the two tools that set a flag.
+
 On `BrowserEngine`, click / type / submit / scroll / keypress fail with an
 honest static-engine error (no live DOM). `back` / `forward` / `reload` /
 `screenshot` use the `BrowserInterface` defaults (error) unless a runtime
@@ -41,77 +47,77 @@ overrides them. The Tauri runtime does not override `screenshot`.
 
 ### 1. `navigate` — `url`
 
-Navigate / fetch. Risk: `Navigate`, medium.
+Navigate / fetch. Action: `Navigate`.
 
 ### 2. `wait`
 
-Wait for navigation to settle. No args. Risk: `Wait`, low.
+Wait for navigation to settle. No args. Action: `Wait`.
 
 ### 3. `query_dom` — `selector`
 
 Query by CSS selector. Returns a text dump of matches, or
-`No elements found`. Risk: `Read`, low.
+`No elements found`. Action: `Read`.
 
 ### 4. `get_text` — `selector`
 
-Concatenated text of matches. Risk: `Read`, low.
+Concatenated text of matches. Action: `Read`.
 
 ### 5. `get_links`
 
-All links (`text - href`). Risk: `Read`, low.
+All links (`text - href`). Action: `Read`.
 
 ### 6. `get_prices`
 
-Price-like strings from the snapshot. Risk: `Read`, low.
+Price-like strings from the snapshot. Action: `Read`.
 
 ### 7. `get_tables`
 
-`Table N: H headers, R rows` per table. Risk: `Read`, low.
+`Table N: H headers, R rows` per table. Action: `Read`.
 
 ### 8. `click` — `selector`
 
-Click. Risk: `Click`, medium.
+Click. Action: `Click`.
 
 ### 9. `type` — `selector`, `text`
 
-Type into an input. Tool metadata is sensitive, so policy requires approval.
-Risk: `Type`, high. Redaction is based on argument keys; do not assume the
+Type into an input. Tool metadata sets `sensitive: true`, so policy requires approval.
+Action: `Type`. Redaction is based on argument keys; do not assume the
 plain `text` key is redacted from every tool or event payload.
 
 ### 10. `scroll_to` — `selector`
 
-Scroll an element into view. Risk: `Scroll`, low.
+Scroll an element into view. Action: `Scroll`.
 
 ### 11. `scroll_by` — `x`, `y`
 
-Pixel deltas. Risk: `Scroll`, low.
+Pixel deltas. Action: `Scroll`.
 
 ### 12. `submit_form` — `selector`
 
-Submit a form (or an element inside one). Risk: `Submit`, high,
-externally visible.
+Submit a form (or an element inside one). Action: `Submit`,
+with `externally_visible: true`.
 
 ### 13. `keypress` — `key`
 
-Send a key (`Enter`, `Escape`, …). Risk: `Keypress`, medium.
+Send a key (`Enter`, `Escape`, …). Action: `Keypress`.
 
 ### 14. `screenshot`
 
 Registered. `BrowserInterface::screenshot` defaults to
 `Err("screenshot is not supported by this browser")`. No PNG path is
-wired. Risk: `Screenshot`, low.
+wired. Action: `Screenshot`.
 
 ### 15. `back`
 
-History back. Default: not supported. Risk: `Back`, low.
+History back. Default: not supported. Action: `Back`.
 
 ### 16. `forward`
 
-History forward. Default: not supported. Risk: `Forward`, low.
+History forward. Default: not supported. Action: `Forward`.
 
 ### 17. `reload`
 
-Reload. Default: not supported. Risk: `Reload`, low.
+Reload. Default: not supported. Action: `Reload`.
 
 ## Headless JSON-RPC
 
@@ -169,7 +175,7 @@ Daemon errors:
 { "ok": false, "error": { "code": "INTERNAL", "message": "..." } }
 ```
 
-Codes the daemon emits include `INTERNAL`, `VALIDATION`, and `UNKNOWN_METHOD`.
+Codes the daemon emits include `BAD_REQUEST`, `INTERNAL`, `VALIDATION`, and `UNKNOWN_METHOD`.
 A successful `policy.evaluate` request returns `ok: true` with its policy decision
 in `result`; approval and blocking are decision outcomes, not transport errors:
 
@@ -179,8 +185,7 @@ in `result`; approval and blocking are decision outcomes, not transport errors:
 
 The daemon outcomes are `Allow`, `RequireApproval`, and `Block` (the Rust
 serde representation uses snake_case, but this dispatcher formats enum names).
-This method
-only evaluates a proposed call; it does not execute it.
+This method only evaluates a proposed call; it does not execute it.
 
 ## See also
 

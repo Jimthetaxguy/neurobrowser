@@ -1,7 +1,7 @@
 use crate::tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageSnapshot, PriceInfo, RiskLevel, TableInfo, ToolAction, ToolArgumentDefinition,
-    ToolDefinition, ToolRegistry, ToolRisk,
+    PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition, ToolDefinition,
+    ToolRegistry, ToolRisk,
 };
 use async_trait::async_trait;
 use regex_lite::Regex;
@@ -116,32 +116,6 @@ impl BrowserEngine {
             config,
         }
     }
-
-    pub fn load_html(&self, html: &str) -> Result<(), String> {
-        let snapshot = snapshot_from_html(
-            "about:blank",
-            html,
-            self.config.viewport_width,
-            self.config.viewport_height,
-            false,
-        );
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.url = snapshot.url.clone();
-        state.title = snapshot.title.clone();
-        state.html = snapshot.html.clone().unwrap_or_default();
-        state.text = snapshot.text.clone().unwrap_or_default();
-        state.scroll_x = snapshot.scroll_x;
-        state.scroll_y = snapshot.scroll_y;
-        state.viewport_width = snapshot.viewport_width;
-        state.viewport_height = snapshot.viewport_height;
-        state.interactive_ready = snapshot.interactive_ready;
-        Ok(())
-    }
-
-    pub fn get_state(&self) -> Result<PageState, String> {
-        let state = self.state.lock().map_err(|e| e.to_string())?;
-        Ok(state.clone())
-    }
 }
 
 #[async_trait]
@@ -206,23 +180,6 @@ impl BrowserInterface for BrowserEngine {
             .map(|element| element.text.clone())
             .collect::<Vec<_>>()
             .join("\n"))
-    }
-
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String> {
-        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
-        let doc = Html::parse_document(&html);
-        let selector = Selector::parse(selector).map_err(|e| e.to_string())?;
-        Ok(doc
-            .select(&selector)
-            .next()
-            .map(|element| {
-                element
-                    .value()
-                    .attrs()
-                    .map(|(key, value)| (key.to_string(), value.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default())
     }
 
     async fn click(&self, selector: &str) -> Result<(), String> {
@@ -506,7 +463,7 @@ impl BrowserTool for NavigateTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Navigate),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "url",
@@ -546,7 +503,7 @@ impl BrowserTool for WaitTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Wait, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Wait),
         )
     }
 
@@ -578,7 +535,7 @@ impl BrowserTool for QueryDomTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -637,7 +594,7 @@ impl BrowserTool for GetTextTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -674,7 +631,7 @@ impl BrowserTool for GetLinksTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
@@ -721,7 +678,7 @@ impl BrowserTool for GetPricesTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
@@ -761,14 +718,14 @@ impl BrowserTool for GetTablesTool {
     }
 
     fn description(&self) -> &str {
-        "Extract table data from the current page"
+        "Table N: H headers, R rows per table"
     }
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
@@ -823,7 +780,7 @@ impl BrowserTool for ClickTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Click, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Click),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -862,7 +819,7 @@ impl BrowserTool for TypeTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Type, RiskLevel::High).sensitive(true),
+            ToolRisk::new(ToolAction::Type).sensitive(true),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required("selector", "CSS selector to type into"),
@@ -909,7 +866,7 @@ impl BrowserTool for ScrollToTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Scroll),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -950,7 +907,7 @@ impl BrowserTool for ScrollByTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Scroll),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required("x", "Horizontal scroll delta in pixels"),
@@ -998,7 +955,7 @@ impl BrowserTool for SubmitFormTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Submit, RiskLevel::High).externally_visible(true),
+            ToolRisk::new(ToolAction::Submit).externally_visible(true),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -1039,7 +996,7 @@ impl BrowserTool for KeypressTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Keypress, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Keypress),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "key",
@@ -1076,7 +1033,7 @@ impl BrowserTool for ScreenshotTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Screenshot, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Screenshot),
         )
     }
 
@@ -1108,7 +1065,7 @@ impl BrowserTool for BackTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Back, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Back),
         )
     }
 
@@ -1140,7 +1097,7 @@ impl BrowserTool for ForwardTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Forward, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Forward),
         )
     }
 
@@ -1174,7 +1131,7 @@ impl BrowserTool for ReloadTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Reload, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Reload),
         )
     }
 
@@ -1195,24 +1152,6 @@ impl BrowserTool for ReloadTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The canonical SSRF vectors live in `crate::netguard::tests` (IPv4-mapped,
-    /// unique-local, fail-closed, redirect). This test's job is narrower and still
-    /// worth keeping: prove the engine path is wired to that shared boundary at all,
-    /// so a later refactor cannot quietly unhook it.
-    #[test]
-    fn ssrf_guard_blocks_internal_hosts_via_shared_boundary() {
-        use crate::netguard::blocked_reason;
-        assert!(blocked_reason("http://169.254.169.254/latest/meta-data/").is_some());
-        assert!(blocked_reason("http://127.0.0.1:8080/").is_some());
-        assert!(blocked_reason("http://10.0.0.5/").is_some());
-        assert!(blocked_reason("http://192.168.1.1/").is_some());
-        assert!(blocked_reason("http://[::1]/").is_some());
-        // The spelling that used to get through.
-        assert!(blocked_reason("http://[::ffff:169.254.169.254]/").is_some());
-        // a normal public IP literal is allowed through
-        assert!(blocked_reason("http://93.184.216.34/").is_none());
-    }
 
     #[test]
     fn enrich_snapshot_extracts_prices_from_text() {
@@ -1257,9 +1196,6 @@ mod tests {
         }
         async fn get_text(&self, _selector: &str) -> Result<String, String> {
             Ok(String::new())
-        }
-        async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-            Ok(HashMap::new())
         }
         async fn click(&self, _selector: &str) -> Result<(), String> {
             Ok(())

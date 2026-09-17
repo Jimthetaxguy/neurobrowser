@@ -15,14 +15,13 @@ function postToAppKit(command, payload = {}) {
 
 export function createTauriHostAdapter() {
   const invoke = (command, payload = {}) => {
-    if (!window.__TAURI_INTERNALS__ && !window.__TAURI__) {
+    if (!window.__TAURI_INTERNALS__) {
       throw new Error("Tauri IPC bridge is unavailable. Run this app through the Tauri desktop runtime.");
     }
     return tauriInvoke(command, payload);
   };
 
   return {
-    lane: "tauri",
     rendersPageInHost: true,
     async createSession() {
       return invoke("create_session");
@@ -57,9 +56,6 @@ export function createTauriHostAdapter() {
     async getPageSnapshot(sessionId, pageId) {
       return invoke("get_page_snapshot", { sessionId, pageId });
     },
-    async ask(sessionId, pageId, prompt) {
-      return invoke("ask", { sessionId, pageId, prompt });
-    },
     async startAgentRun(sessionId, pageId, prompt) {
       return invoke("start_agent_run", { sessionId, pageId, prompt });
     },
@@ -89,12 +85,18 @@ export function createTauriHostAdapter() {
 
 export function createAppKitHostAdapter() {
   let nextPageId = 0;
-  let latestSnapshot = null;
+  const snapshotsByPageId = new Map();
   const sessionId = `appkit-${crypto.randomUUID?.() ?? Date.now()}`;
 
   window.neurobrowserNativeDispatch = (event) => {
-    if (event?.type === "snapshot") {
-      latestSnapshot = event.snapshot;
+    if (event?.type === "snapshot" && Number.isInteger(event.pageId)) {
+      snapshotsByPageId.set(event.pageId, event.snapshot);
+    }
+    if (event?.type === "tabs") {
+      const pageIds = new Set(event.tabs.map((tab) => tab.id));
+      for (const pageId of snapshotsByPageId.keys()) {
+        if (!pageIds.has(pageId)) snapshotsByPageId.delete(pageId);
+      }
     }
     window.dispatchEvent(new CustomEvent("neurobrowser:native", { detail: event }));
   };
@@ -104,7 +106,6 @@ export function createAppKitHostAdapter() {
   };
 
   return {
-    lane: "appkit",
     rendersPageInHost: false,
     async createSession() {
       await send("create_session", { sessionId });
@@ -154,61 +155,10 @@ export function createAppKitHostAdapter() {
     },
     async waitForPageReady() {},
     async getPageSnapshot(activeSessionId, pageId) {
-      await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
-      return latestSnapshot;
-    },
-    async startAgentRun() {
-      return {
-        run_id: `appkit-run-${Date.now()}`,
-        status: "completed",
-        final_response: "Native AppKit lane received the run request. Rust approval-loop parity remains deferred.",
-        iterations: 1,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async submitApproval(runId, approved) {
-      return {
-        run_id: runId,
-        status: approved ? "completed" : "cancelled",
-        final_response: approved ? "Approved in native host lane." : "Approval denied.",
-        iterations: 0,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async cancelAgentRun(runId) {
-      return {
-        run_id: runId,
-        status: "cancelled",
-        final_response: "Run cancelled.",
-        iterations: 0,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async getActionPolicy() {
-      return {
-        autonomy_level: "assisted",
-        allowed_domains: [],
-        denied_domains: [],
-        denied_tools: [],
-        approval_required_tools: [],
-        block_prompt_injection: true,
-      };
-    },
-    async setActionPolicy(policy) {
-      return policy;
+      return snapshotsByPageId.get(pageId) ?? null;
     },
     async browserAction(command, activeSessionId, pageId) {
       await send(command, { sessionId: activeSessionId, pageId });
-    },
-    async setProvider(provider) {
-      await send("set_provider", { provider });
-      return { provider, model: "native-host", configured: true };
     },
     onHostEvent(callback) {
       const handler = (event) => {

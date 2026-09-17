@@ -26,10 +26,6 @@ The run-oriented API is the stable control surface:
 | `get_action_policy()` | Reads the active autonomy and risk policy. |
 | `set_action_policy(policy)` | Updates the active autonomy and risk policy. |
 
-`ask(sessionId, pageId, prompt)` remains a compatibility command. New autonomous
-work should use the run-oriented API so approvals, blocks, and results are visible
-as structured events.
-
 ## Tool Contract
 
 Browser tools must expose:
@@ -62,17 +58,12 @@ Policy behavior:
 
 ## Audit Trail
 
-Each proposed, blocked, approval-requested, approved, rejected, executed, cancelled,
-and completed action must record:
-
-- run id,
-- page id,
-- tool name,
-- redacted arguments,
-- policy decision,
-- risk flags,
-- timestamp,
-- structured result or rejection.
+Events are the `AgentRunEvent` enum: `ToolCallStarted` (`run_id`, `tool`,
+`arguments`), `ToolCallResult` (`run_id`, `tool`, `result`, `success`),
+`ToolCallBlocked` (`run_id`, `tool`, `decision`), `ApprovalRequested`
+(`run_id`, `approval_id`, `tool`, `decision`), `ApprovalResolved`
+(`run_id`, `approval_id`, `approved`, `message`), `RunCancelled`
+(`run_id`, `reason`), and `RunDone` (`run_id`, `final_response`, `iterations`).
 
 ## Frontend Requirements
 
@@ -94,6 +85,9 @@ Required checks before promoting changes against this spec:
 ./verify.sh
 (cd src-tauri && npm audit --audit-level=moderate)
 ```
+
+The dependency audit is a separate required check; it is not currently a step
+in `verify.sh` or CI.
 
 AppKit parity remains deferred unless the Tauri child-webview path fails a real
 browser smoke test.

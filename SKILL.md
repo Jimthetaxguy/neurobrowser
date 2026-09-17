@@ -131,14 +131,16 @@ checks run first and return `Block`.
 
 ## Policy gates
 
-1. `denied_domains` — `Block`.
+1. `denied_tools` / `denied_domains` — `Block`.
 2. `allowed_domains` — if non-empty, URLs not on the list are `Block`.
-3. Sensitive keys (`password`, `token`, `secret`, `api_key`, `authorization`,
+3. Unsafe schemes (`javascript:` / `data:` / `file:`) — `Block`.
+4. Sensitive keys (`password`, `token`, `secret`, `api_key`, `authorization`,
    and related credential tokens) become `[REDACTED]` in the decision payload.
    Sensitive keys or sensitive tool metadata require approval. `type` is marked
    sensitive; metadata alone does not redact every argument value.
-4. Prompt-injection substrings (`ignore previous instructions`,
+5. Prompt-injection substrings (`ignore previous instructions`,
    `reveal your instructions`) → `Block`.
+6. `approval_required_tools` — `RequireApproval`.
 
 ## See also
 

@@ -1,6 +1,6 @@
 ---
 created: 2026-07-10
-updated: 2026-09-14
+updated: 2026-09-17
 status: active
 type: project-glossary
 scope: NeuroBrowser library and desktop shells
@@ -17,12 +17,15 @@ shell, and a separate AppKit shell. This glossary records shared vocabulary;
 | BrowserInterface | Rust interface implemented by the HTTP scraper and Tauri webview runtime. Unsupported capabilities return errors. |
 | BrowserEngine | reqwest + scraper implementation; it does not run JavaScript or provide a live interactive DOM. |
 | TauriBrowserRuntime | Desktop runtime that routes browser operations to real child webviews. |
+| Webview capability | The local main control webview owns host commands. Page webviews can only report runtime results from blank/HTTP/HTTPS documents; they cannot submit approvals or change providers. |
 | ActionPolicy | Evaluates proposed tool calls and returns Allow, RequireApproval, or Block with redacted arguments. |
+| ToolRisk | Action category plus sensitive and externally_visible flags; the schema has no risk-level or tool-version field. |
 | ReadOnly / Assisted / HighAutonomy | Policy modes; domain/tool denials, sensitive input, and high-impact actions retain explicit gates. |
 | Agent run | ReAct loop using a real configured provider and BrowserInterface; pending actions require a caller-managed approval. |
 | Tool registry | CSS-selector browser tools in default_tool_registry; see the canonical [agent surface](docs/AGENT-SURFACE.md). |
 | Headless daemon | Unix-socket policy protocol stub with loopback TCP fallback; snapshot is hardcoded about:blank and tools are not executed. |
 | AppKit shell | Separate native Swift window/browser implementation; agent execution is not connected to the Rust runtime. |
+| AppKit page ID | Stable tab identity: React uses nonnegative IDs; native menu tabs use decreasing negative IDs. Native tab events synchronize both controls. |
 
 | Boundary | Source |
 |---|---|

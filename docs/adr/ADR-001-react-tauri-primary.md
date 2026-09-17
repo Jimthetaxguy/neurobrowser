@@ -23,7 +23,8 @@ the authority while React owns the control surface.
 
 The AppKit lane has a higher native browser ceiling through `WKWebView`, AppKit
 menus, responder-chain behavior, and native accessibility, but it still lacks
-parity with the Rust agent/backend bridge and has a documented page-id/index gap.
+parity with the Rust agent/backend bridge. AppKit maps stable page IDs to native
+webviews and synchronizes native tab changes with its React controls.
 
 ## Consequences
 

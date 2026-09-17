@@ -13,15 +13,13 @@ AI agent can load to drive the browser.
 **What NeuroBrowser takes:**
 - The **SKILL.md / agent-facing interface** model — a single canonical doc
   that any agent loads to invoke the browser.
-- The **ref-based interaction model** — agents pass `[@e1, @e2, ...]` refs
-  instead of CSS selectors.
 
 **What NeuroBrowser does NOT take:**
 - A separate Playwright daemon as the runtime. NeuroBrowser is in-process
   with Tauri; the headless daemon only evaluates policy and returns a
   hardcoded snapshot. It does not execute browser tools.
 - iOS Simulator support.
-- `npm install -g` packaging. NeuroBrowser ships via Tauri bundling.
+- `npm install -g` packaging.
 
 **Repo:** https://github.com/vercel-labs/agent-browser
 
@@ -43,10 +41,6 @@ ancestor.
 
 **Role observed:** showcase of thin Next.js apps that funnel into a hosted
 `@hyperbrowser/sdk` cloud-browser API.
-
-**What NeuroBrowser takes:**
-- The **benchmark harness over an agent** framing
-  (`tests/autonomous_agent.rs`).
 
 **What NeuroBrowser does NOT take:**
 - The hosted-only model. NeuroBrowser is a local desktop app with an
