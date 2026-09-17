@@ -1,6 +1,6 @@
 ---
 created: 2026-07-10
-updated: 2026-09-14
+updated: 2026-09-17
 status: active
 type: project-glossary
 scope: NeuroBrowser library and desktop shells
@@ -18,6 +18,7 @@ shell, and a separate AppKit shell. This glossary records shared vocabulary;
 | BrowserEngine | reqwest + scraper implementation; it does not run JavaScript or provide a live interactive DOM. |
 | TauriBrowserRuntime | Desktop runtime that routes browser operations to real child webviews. |
 | ActionPolicy | Evaluates proposed tool calls and returns Allow, RequireApproval, or Block with redacted arguments. |
+| ToolRisk | Action category plus sensitive and externally_visible flags; the schema has no risk-level or tool-version field. |
 | ReadOnly / Assisted / HighAutonomy | Policy modes; domain/tool denials, sensitive input, and high-impact actions retain explicit gates. |
 | Agent run | ReAct loop using a real configured provider and BrowserInterface; pending actions require a caller-managed approval. |
 | Tool registry | CSS-selector browser tools in default_tool_registry; see the canonical [agent surface](docs/AGENT-SURFACE.md). |

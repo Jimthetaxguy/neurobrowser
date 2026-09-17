@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 use neurobrowser::agent::policy::ActionPolicy;
 use neurobrowser::browser::default_tool_registry;
-use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, ToolRisk};
+use neurobrowser::tools::{PageSnapshot, ToolAction, ToolRegistry, ToolRisk};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -143,7 +143,7 @@ impl SessionState {
             .tool_registry
             .get(name)
             .map(|tool| tool.definition().risk)
-            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive, RiskLevel::Critical));
+            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive));
 
         let policy = self.policy.lock().await;
         let decision = policy.evaluate(name, &tool_risk, args, &snapshot);
@@ -546,10 +546,9 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_high_risk_tool() {
-        // `type` is High risk + sensitive in the real registry. Under the
-        // old `ToolRisk::new(ToolAction::Read, RiskLevel::Low)` bug this
-        // would have been silently `Allow`ed in Assisted mode (the default
-        // policy autonomy level) because Read is in the Assisted allow-list.
+        // `type` is sensitive in the real registry. Under the old hardcoded
+        // Read fallback this would have been silently `Allow`ed in Assisted
+        // mode because Read is in the Assisted allow-list.
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#input".to_string());

@@ -1,6 +1,5 @@
 use neurobrowser::{
-    ActionPolicy, AutonomyLevel, PageSnapshot, PolicyOutcome, RiskFlag, RiskLevel, ToolAction,
-    ToolRisk,
+    ActionPolicy, AutonomyLevel, PageSnapshot, PolicyOutcome, RiskFlag, ToolAction, ToolRisk,
 };
 use std::collections::HashMap;
 
@@ -31,7 +30,7 @@ fn denylist_beats_allowlist() {
 
     let decision = policy.evaluate(
         "navigate",
-        &ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        &ToolRisk::new(ToolAction::Navigate),
         &args,
         &snapshot,
     );
@@ -48,7 +47,7 @@ fn assisted_mode_requires_approval_for_clicks() {
 
     let decision = ActionPolicy::default().evaluate(
         "click",
-        &ToolRisk::new(ToolAction::Click, RiskLevel::Medium),
+        &ToolRisk::new(ToolAction::Click),
         &args,
         &snapshot,
     );
@@ -68,12 +67,7 @@ fn sensitive_arguments_are_redacted_and_require_approval() {
         autonomy_level: AutonomyLevel::HighAutonomy,
         ..ActionPolicy::default()
     }
-    .evaluate(
-        "type",
-        &ToolRisk::new(ToolAction::Type, RiskLevel::High),
-        &args,
-        &snapshot,
-    );
+    .evaluate("type", &ToolRisk::new(ToolAction::Type), &args, &snapshot);
 
     assert_eq!(decision.outcome, PolicyOutcome::RequireApproval);
     assert_eq!(
@@ -99,12 +93,7 @@ fn sensitive_key_match_is_token_bounded() {
         autonomy_level: AutonomyLevel::HighAutonomy,
         ..ActionPolicy::default()
     }
-    .evaluate(
-        "type",
-        &ToolRisk::new(ToolAction::Type, RiskLevel::High),
-        &args,
-        &snapshot,
-    );
+    .evaluate("type", &ToolRisk::new(ToolAction::Type), &args, &snapshot);
 
     assert_eq!(decision.outcome, PolicyOutcome::RequireApproval);
     assert_eq!(
@@ -146,7 +135,7 @@ fn prompt_injection_content_blocks_tool_calls() {
 
     let decision = ActionPolicy::default().evaluate(
         "get_text",
-        &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        &ToolRisk::new(ToolAction::Read),
         &HashMap::new(),
         &snapshot,
     );
@@ -170,7 +159,7 @@ fn injection_hidden_in_html_attribute_is_detected() {
 
     let decision = ActionPolicy::default().evaluate(
         "get_text",
-        &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        &ToolRisk::new(ToolAction::Read),
         &HashMap::new(),
         &snapshot,
     );
@@ -192,7 +181,7 @@ fn readonly_mode_blocks_navigate() {
 
     let decision = policy.evaluate(
         "navigate",
-        &ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        &ToolRisk::new(ToolAction::Navigate),
         &args,
         &snapshot,
     );
@@ -215,7 +204,7 @@ fn navigation_to_javascript_scheme_is_blocked() {
 
     let decision = policy.evaluate(
         "navigate",
-        &ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        &ToolRisk::new(ToolAction::Navigate),
         &args,
         &snapshot,
     );
@@ -240,7 +229,7 @@ fn navigate_domain_check_is_case_insensitive() {
 
     let decision = policy.evaluate(
         "NAVIGATE",
-        &ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+        &ToolRisk::new(ToolAction::Navigate),
         &args,
         &snapshot,
     );
@@ -282,7 +271,7 @@ fn credential_keys_individually_require_approval_and_redaction() {
         let args = HashMap::from([(key.to_string(), "credential-value".to_string())]);
         let decision = policy.evaluate(
             "get_text",
-            &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            &ToolRisk::new(ToolAction::Read),
             &args,
             &snapshot,
         );
@@ -317,7 +306,7 @@ fn harmless_key_substrings_do_not_require_sensitive_approval() {
         let args = HashMap::from([(key.to_string(), "ordinary-value".to_string())]);
         let decision = policy.evaluate(
             "get_text",
-            &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            &ToolRisk::new(ToolAction::Read),
             &args,
             &snapshot,
         );
@@ -340,7 +329,7 @@ fn alias_is_subject_to_canonical_deny_list() {
 
     let decision = policy.evaluate(
         "query_selector",
-        &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        &ToolRisk::new(ToolAction::Read),
         &HashMap::new(),
         &snapshot,
     );
@@ -359,7 +348,7 @@ fn alias_is_subject_to_canonical_approval_list() {
     };
     let decision = policy.evaluate(
         "query_selector",
-        &ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+        &ToolRisk::new(ToolAction::Read),
         &HashMap::new(),
         &snapshot,
     );
