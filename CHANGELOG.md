@@ -20,7 +20,10 @@ remain 0.1.0 until an actual version bump and release tag.
 - The native AppKit app bundles its generated React controls, and its address
   field describes URL/domain entry after removal of native agent/search controls.
 - AppKit maps React `pageId` to a WKWebView, boots a single first tab from
-  React `createPage`, and leaves Cmd+T/W to the native File menu.
+  React `createPage`, and leaves Cmd+T/W to the native File menu. Native menu
+  IDs cannot collide with React IDs; tab changes synchronize to both controls.
+  Snapshots remain associated with their source page, and stale page IDs cannot
+  navigate or run history commands on another tab.
 - Frontend dependency lockfile updated within the existing package constraints;
   the moderate-severity npm audit gate is retained in the spec and story.
 

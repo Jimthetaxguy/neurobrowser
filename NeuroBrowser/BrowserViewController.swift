@@ -88,10 +88,13 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
                 contentViewController.navigate(pageId: Self.payloadPageId(payload), to: url)
             }
         case "browser_back":
+            if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
             contentViewController.goBack()
         case "browser_forward":
+            if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
             contentViewController.goForward()
         case "browser_reload":
+            if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
             contentViewController.reloadCurrentPage()
         default:
             sidebarViewController.dispatchToReact([

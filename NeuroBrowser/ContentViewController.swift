@@ -14,6 +14,8 @@ class ContentViewController: NSViewController {
     var pageUpdateHandler: (([String: Any]) -> Void)?
     private var webViewContainer: NSView!
     private var pageIds: [Int] = []
+    // React allocates nonnegative IDs; native menu tabs use a disjoint sequence.
+    private var nextNativePageId = -1
     
     // MARK: - State
     
@@ -133,7 +135,12 @@ class ContentViewController: NSViewController {
         webView.navigationDelegate = self
         
         webViews.append(webView)
-        pageIds.append(pageId ?? (pageIds.max() ?? -1) + 1)
+        if let pageId {
+            pageIds.append(pageId)
+        } else {
+            pageIds.append(nextNativePageId)
+            nextNativePageId -= 1
+        }
         
         let newIndex = webViews.count - 1
         tabBar.segmentCount = webViews.count + 1
@@ -185,17 +192,17 @@ class ContentViewController: NSViewController {
         updateNavigationButtons()
     }
 
-    func selectTab(pageId: Int) {
-        guard let index = pageIds.firstIndex(of: pageId) else { return }
+    @discardableResult
+    func selectTab(pageId: Int) -> Bool {
+        guard let index = pageIds.firstIndex(of: pageId) else { return false }
         currentTabIndex = index
         tabBar.selectedSegment = index
         showCurrentTab()
+        return true
     }
 
     func navigate(pageId: Int?, to input: String) {
-        if let pageId {
-            selectTab(pageId: pageId)
-        }
+        if let pageId, !selectTab(pageId: pageId) { return }
         navigateCurrentTab(to: input)
     }
     
@@ -225,7 +232,18 @@ class ContentViewController: NSViewController {
             }
             
             updateNavigationButtons()
+            emitTabs()
+            emitSnapshot()
         }
+    }
+
+    private func emitTabs() {
+        guard let pageId = currentPageId else { return }
+        let tabs = zip(pageIds, webViews).map { id, webView in
+            ["id": id, "title": webView.title ?? "New Tab",
+             "url": webView.url?.absoluteString ?? ""] as [String: Any]
+        }
+        pageUpdateHandler?(["type": "tabs", "tabs": tabs, "activePageId": pageId])
     }
     
     // MARK: - Navigation
@@ -327,11 +345,13 @@ class ContentViewController: NSViewController {
     }
 
     private func emitSnapshot() {
+        guard let pageId = currentPageId else { return }
         snapshotCurrentPage { [weak self] snapshot in
-            guard let self else { return }
+            guard let self, self.currentPageId == pageId,
+                  self.pageIds.contains(pageId) else { return }
             self.pageUpdateHandler?([
                 "type": "snapshot",
-                "pageId": self.currentPageId ?? 0,
+                "pageId": pageId,
                 "snapshot": snapshot
             ])
         }
@@ -350,10 +370,13 @@ class ContentViewController: NSViewController {
 extension ContentViewController: WKNavigationDelegate {
     
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "◌"
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        emitTabs()
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         if let url = webView.url {
             urlBar.stringValue = url.absoluteString
         }

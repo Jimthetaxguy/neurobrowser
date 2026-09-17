@@ -586,15 +586,21 @@ export default function App({ adapter, lane }) {
   useEffect(() => {
     const unsubscribe = adapter.onHostEvent((event) => {
       if (!event) return;
-      if (event.type === "snapshot") {
-        updateSnapshot(event.pageId ?? currentPageId, event.snapshot);
+      if (event.type === "tabs" && compact) {
+        setTabs(event.tabs);
+        setCurrentPageId(event.activePageId);
+        const activeTab = event.tabs.find((tab) => tab.id === event.activePageId);
+        setUrl(activeTab?.url || "");
+      }
+      if (event.type === "snapshot" && event.pageId === currentPageId) {
+        updateSnapshot(event.pageId, event.snapshot);
       }
       if (event.type === "status") {
         setStatus(event.message);
       }
     });
     return unsubscribe;
-  }, [adapter, currentPageId, updateSnapshot]);
+  }, [adapter, compact, currentPageId, updateSnapshot]);
 
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
