@@ -1,5 +1,4 @@
 import AppKit
-import WebKit
 
 class MainWindowController: NSWindowController {
     
@@ -24,10 +23,6 @@ class MainWindowController: NSWindowController {
         
         browserViewController = BrowserViewController()
         window.contentViewController = browserViewController
-    }
-    
-    override func windowDidLoad() {
-        super.windowDidLoad()
     }
     
     // MARK: - Menu Actions
