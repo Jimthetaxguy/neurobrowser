@@ -139,11 +139,6 @@ class ContentViewController: NSViewController {
         webView.autoresizingMask = [.width, .height]
         webViewContainer.addSubview(webView)
         showCurrentTab()
-        
-        if let url = URL(string: "https://www.example.com") {
-            webView.load(URLRequest(url: url))
-        }
-        
         updateNavigationButtons()
     }
     
@@ -228,6 +223,13 @@ class ContentViewController: NSViewController {
         webViews[currentTabIndex].load(URLRequest(url: url))
     }
 
+    /// First-stage http(s) allowlist shared by the URL bar and page WKWebViews.
+    /// Scheme-only: does not port Rust netguard DNS/SSRF checks.
+    private static func allowsHttpNavigation(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
     private static func validatedNavigationURL(from input: String) -> URL? {
         let normalized: String
         if input.hasPrefix("http://") || input.hasPrefix("https://") {
@@ -238,8 +240,7 @@ class ContentViewController: NSViewController {
             return nil
         }
         guard let url = URL(string: normalized),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
+              allowsHttpNavigation(url) else {
             return nil
         }
         return url
@@ -318,6 +319,15 @@ class ContentViewController: NSViewController {
 // MARK: - WKNavigationDelegate
 
 extension ContentViewController: WKNavigationDelegate {
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url,
+              Self.allowsHttpNavigation(url) else {
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
     
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         reloadButton.title = "◌"

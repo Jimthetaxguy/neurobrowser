@@ -30,7 +30,7 @@
     <string>Copyright © 2026. All rights reserved.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>
 </dict>
