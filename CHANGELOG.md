@@ -8,6 +8,8 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Fixed
 
+- Removed the unused `futures` dependency from both library and desktop
+  lockfiles so locked Tauri builds remain reproducible.
 - Navigation domains are checked case-insensitively; unsafe URL schemes are
   rejected without DNS lookups. ReadOnly blocks navigation.
 - Credential keys are recognized across case, camelCase, and separators, require
