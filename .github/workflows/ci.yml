@@ -101,7 +101,7 @@ jobs:
           set +e
           grep -R -n -I -E '<<<<<<<|>>>>>>>' --exclude='*.lock' \
             src src-tauri tests NeuroBrowser docs \
-            README.md SKILL.md CHANGELOG.md CONTEXT.md PROJECT.md
+            README.md SKILL.md CHANGELOG.md
           rc=$?
           set -e
           if [ "$rc" -eq 0 ]; then
@@ -117,7 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           dupes=$(find src src-tauri tests NeuroBrowser docs \
-            README.md SKILL.md CHANGELOG.md CONTEXT.md PROJECT.md \
+            README.md SKILL.md CHANGELOG.md \
             \( -name '* 2.*' -o -name '* 3.*' -o -name '* 4.*' \))
           if [ -n "$dupes" ]; then
             echo "$dupes"
