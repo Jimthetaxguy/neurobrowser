@@ -150,10 +150,20 @@ mod tests {
             .send()
             .await
             .expect_err("a hop onto cloud metadata must not be followed");
-        let msg = err.to_string();
         assert!(
-            msg.contains("internal") || msg.contains("169.254") || msg.contains("Refusing"),
-            "error must mention the blocked hop, got: {msg}"
+            err.is_redirect(),
+            "must fail as a redirect error, not by connecting: {err}"
+        );
+        let mut chain = err.to_string();
+        let mut source = std::error::Error::source(&err);
+        while let Some(inner) = source {
+            chain.push_str(" | ");
+            chain.push_str(&inner.to_string());
+            source = inner.source();
+        }
+        assert!(
+            chain.contains("internal") || chain.contains("169.254") || chain.contains("Refusing"),
+            "error must mention the blocked hop, got: {chain}"
         );
         let _ = server.join();
     }
