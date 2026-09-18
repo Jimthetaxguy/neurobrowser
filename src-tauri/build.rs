@@ -20,7 +20,6 @@ fn main() {
             "submit_approval",
             "sync_browser_viewport",
             "validate_url",
-            "wait_for_page_ready",
         ])),
     )
     .expect("failed to run tauri build script")

@@ -8,8 +8,7 @@ use neurobrowser::{
 };
 use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
-    wait_for_runtime_page, BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload,
-    TauriBrowserRuntime,
+    BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -240,7 +239,7 @@ async fn navigate(
     page_id: usize,
     url: String,
 ) -> Result<(), String> {
-    // Server-side check so invoke cannot skip the frontend guard.
+    // Host-side scheme/format + netguard check. UI does not preflight.
     let validation = validate_url(url.clone());
     if !validation.valid {
         return Err(validation
@@ -249,20 +248,6 @@ async fn navigate(
     }
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
     browser.navigate(&validation.normalized_url).await
-}
-
-#[tauri::command]
-async fn wait_for_page_ready(
-    state: State<'_, AppState>,
-    page_id: usize,
-    timeout_ms: Option<u64>,
-) -> Result<(), String> {
-    wait_for_runtime_page(
-        state.runtimes.as_ref(),
-        page_id,
-        timeout_ms.unwrap_or(8_000),
-    )
-    .await
 }
 
 #[tauri::command]
@@ -590,7 +575,6 @@ fn main() {
             submit_approval,
             sync_browser_viewport,
             validate_url,
-            wait_for_page_ready,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
