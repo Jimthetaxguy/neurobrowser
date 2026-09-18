@@ -695,21 +695,3 @@ pub fn sync_runtime_viewport(
     }
     Ok(())
 }
-
-pub async fn wait_for_runtime_page(
-    registry: &BrowserRuntimeRegistry,
-    page_id: usize,
-    timeout_ms: u64,
-) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    while Instant::now() <= deadline {
-        if !registry.is_loading(page_id)? {
-            return Ok(());
-        }
-        sleep(Duration::from_millis(40)).await;
-    }
-    Err(format!(
-        "Timed out waiting for page {} to finish loading",
-        page_id
-    ))
-}

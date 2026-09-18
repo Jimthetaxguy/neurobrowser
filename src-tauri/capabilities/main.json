@@ -22,7 +22,6 @@
     "allow-start-agent-run",
     "allow-submit-approval",
     "allow-sync-browser-viewport",
-    "allow-validate-url",
-    "allow-wait-for-page-ready"
+    "allow-validate-url"
   ]
 }

@@ -45,14 +45,8 @@ export function createTauriHostAdapter() {
         height: rect.height,
       });
     },
-    async validateUrl(url) {
-      return invoke("validate_url", { url });
-    },
     async navigate(sessionId, pageId, url) {
       return invoke("navigate", { sessionId, pageId, url });
-    },
-    async waitForPageReady(pageId, timeoutMs = 10000) {
-      return invoke("wait_for_page_ready", { pageId, timeoutMs });
     },
     async getPageSnapshot(sessionId, pageId) {
       return invoke("get_page_snapshot", { sessionId, pageId });
@@ -123,36 +117,9 @@ export function createAppKitHostAdapter() {
       await send("set_active_page", { sessionId: activeSessionId, pageId });
     },
     async syncBrowserViewport() {},
-    async validateUrl(url) {
-      // Same first-stage rules as Tauri `validate_url`: only http(s), no substring scheme checks.
-      const trimmed = url.trim();
-      let normalized;
-      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-        normalized = trimmed;
-      } else if (trimmed.includes(".") && !trimmed.includes(" ")) {
-        normalized = `https://${trimmed}`;
-      } else {
-        return { valid: false, normalized_url: "", error: "Invalid URL format" };
-      }
-      let parsed;
-      try {
-        parsed = new URL(normalized);
-      } catch {
-        return { valid: false, normalized_url: normalized, error: "Invalid URL format" };
-      }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return {
-          valid: false,
-          normalized_url: normalized,
-          error: `Refusing to navigate to disallowed scheme '${parsed.protocol}'`,
-        };
-      }
-      return { valid: true, normalized_url: normalized, error: null };
-    },
     async navigate(activeSessionId, pageId, url) {
       await send("navigate", { sessionId: activeSessionId, pageId, url });
     },
-    async waitForPageReady() {},
     async getPageSnapshot(activeSessionId, pageId) {
       await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
       return latestSnapshot;
