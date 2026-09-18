@@ -3,7 +3,6 @@
   "description": "Main application capabilities",
   "windows": ["main"],
   "permissions": [
-    "core:default",
     "allow-ask",
     "allow-browser-back",
     "allow-browser-forward",
