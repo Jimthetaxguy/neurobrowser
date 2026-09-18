@@ -55,7 +55,6 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
-    use std::time::Duration;
 
     fn empty_ctx() -> AiContext {
         AiContext {
@@ -75,9 +74,6 @@ mod tests {
         body: &[u8],
     ) -> (u16, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-        listener
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("accept timeout");
         let port = listener.local_addr().expect("local addr").port();
         let status_line = status_line.to_string();
         let headers: Vec<(String, String)> = headers
