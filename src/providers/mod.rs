@@ -327,8 +327,11 @@ pub(crate) fn resolve_endpoint(base_url: Option<&str>, default_origin: &str, pat
 }
 
 pub mod anthropic;
+mod http;
 pub mod ollama;
 pub mod openai;
+
+pub(crate) use http::client_for_origin;
 
 pub use anthropic::AnthropicProvider;
 pub use ollama::OllamaProvider;
