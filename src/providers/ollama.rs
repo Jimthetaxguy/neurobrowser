@@ -1,10 +1,9 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig,
-    ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, AiContext, AiProvider, AiResponse,
+    ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct OllamaProvider {
     config: ProviderConfig,
@@ -18,11 +17,7 @@ impl OllamaProvider {
             .base_url
             .clone()
             .unwrap_or_else(|| "http://localhost:11434".to_string());
-
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let client = client_for_origin(&base_url);
 
         Self {
             config,
