@@ -380,7 +380,6 @@ export default function App({ adapter, lane }) {
       const pageId = await adapter.createPage(sessionId);
       setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}` }]);
       setCurrentPageId(pageId);
-      await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
       setStatus("New tab ready");
     } catch (error) {
@@ -562,7 +561,6 @@ export default function App({ adapter, lane }) {
         if (disposed) return;
         setTabs([{ id: pageId, title: "Tab 1" }]);
         setCurrentPageId(pageId);
-        await adapter.setActivePage(nextSessionId, pageId);
         try {
           const policy = await adapter.getActionPolicy();
           if (!disposed && policy) {
