@@ -173,7 +173,7 @@ impl ReActAgent {
                 timestamp: AgentEvent::now("LlmCall"),
             })?;
 
-            if response.finish_reason == "stop" || response.tool_calls.is_empty() {
+            if response.tool_calls.is_empty() {
                 let answer = self.extract_final_answer(&response.content);
                 events.push(AgentRunEvent::RunDone {
                     run_id: run_id.clone(),

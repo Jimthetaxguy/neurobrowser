@@ -98,18 +98,12 @@ impl AiProvider for OpenAiProvider {
             .unwrap_or("")
             .to_string();
 
-        let finish_reason = choices[0]["finish_reason"]
-            .as_str()
-            .unwrap_or("stop")
-            .to_string();
-
         let tool_calls = parse_tool_calls(&content);
 
         Ok(AiResponse {
             content,
             reasoning: None,
             tool_calls,
-            finish_reason,
         })
     }
 
