@@ -131,14 +131,19 @@ checks run first and return `Block`.
 
 ## Policy gates
 
-1. `denied_domains` — `Block`.
-2. `allowed_domains` — if non-empty, URLs not on the list are `Block`.
-3. Sensitive keys (`password`, `token`, `secret`, `api_key`, `authorization`,
-   and related credential tokens) become `[REDACTED]` in the decision payload.
-   Sensitive keys or sensitive tool metadata require approval. `type` is marked
-   sensitive; metadata alone does not redact every argument value.
-4. Prompt-injection substrings (`ignore previous instructions`,
-   `reveal your instructions`) → `Block`.
+Same order as `ActionPolicy::evaluate`; first match wins:
+
+1. `denied_tools` → `Block`.
+2. Prompt-injection on the page → `Block`.
+3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
+4. `denied_domains` / non-empty `allowed_domains` → `Block`.
+5. Sensitive keys or sensitive tool metadata → `RequireApproval`.
+6. `approval_required_tools` → `RequireApproval`.
+7. Mode table.
+
+Credential tokens (`password`, `token`, `secret`, `api_key`, `authorization`,
+and related) are `[REDACTED]` in the decision. `type` is marked sensitive;
+metadata alone does not redact every argument value.
 
 ## See also
 
