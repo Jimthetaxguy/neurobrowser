@@ -160,7 +160,6 @@ impl ActionPolicy {
         arguments: &HashMap<String, String>,
         snapshot: &PageSnapshot,
     ) -> PolicyDecision {
-        let tool_name = crate::tools::canonical_tool_name(tool_name);
         let redacted_arguments = redact_arguments(arguments);
         let mut reasons = Vec::new();
         let mut flags = Vec::new();
