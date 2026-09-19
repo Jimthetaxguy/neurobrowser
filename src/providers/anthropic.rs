@@ -53,18 +53,6 @@ impl AnthropicProvider {
         })
     }
 
-    /// Normalize Anthropic's `stop_reason` into the provider-agnostic vocabulary
-    /// the agent loop expects. The loop terminates on `finish_reason == "stop"`,
-    /// which Anthropic never emits verbatim (it uses `end_turn`/`stop_sequence`).
-    fn normalize_finish_reason(stop_reason: &str) -> String {
-        match stop_reason {
-            "end_turn" | "stop_sequence" => "stop",
-            "max_tokens" => "length",
-            other => other,
-        }
-        .to_string()
-    }
-
     /// Concatenate the text of every `text`-typed content block in a Messages API
     /// response. A response may carry multiple blocks (e.g. `thinking` + `text`),
     /// so indexing `content[0]` alone can silently drop the real answer.
@@ -132,15 +120,12 @@ impl AiProvider for AnthropicProvider {
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         let content = Self::extract_text(&json);
-        let finish_reason =
-            Self::normalize_finish_reason(json["stop_reason"].as_str().unwrap_or("end_turn"));
         let tool_calls = parse_tool_calls(&content);
 
         Ok(AiResponse {
             content,
             reasoning: None,
             tool_calls,
-            finish_reason,
         })
     }
 
@@ -190,27 +175,6 @@ mod tests {
         assert!(
             messages.iter().all(|m| m["role"] != "system"),
             "no message may carry the system role (the Messages API rejects it)"
-        );
-    }
-
-    #[test]
-    fn finish_reason_is_normalized_to_shared_vocabulary() {
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("end_turn"),
-            "stop"
-        );
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("stop_sequence"),
-            "stop"
-        );
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("max_tokens"),
-            "length"
-        );
-        // an unknown/other reason (e.g. tool_use) passes through unchanged
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("tool_use"),
-            "tool_use"
         );
     }
 

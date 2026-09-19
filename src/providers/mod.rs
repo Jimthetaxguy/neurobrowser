@@ -26,7 +26,6 @@ pub struct AiResponse {
     pub content: String,
     pub reasoning: Option<String>,
     pub tool_calls: Vec<ToolCall>,
-    pub finish_reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

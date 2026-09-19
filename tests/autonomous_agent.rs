@@ -106,12 +106,24 @@ impl AiProvider for FakeProvider {
     }
 }
 
-fn response(content: &str, tool_calls: Vec<ToolCall>, finish_reason: &str) -> AiResponse {
+fn response(content: &str, tool_calls: Vec<ToolCall>) -> AiResponse {
     AiResponse {
         content: content.to_string(),
         reasoning: None,
         tool_calls,
-        finish_reason: finish_reason.to_string(),
+    }
+}
+
+/// Build an `AiResponse` the way the three real providers do: parse
+/// `ToolCall: {json}` from ordinary completion text. Those providers all
+/// emit a terminal stop after that text (OpenAI `finish_reason`, Anthropic
+/// `end_turn` normalized to `"stop"`, Ollama `done` → `"stop"`). The loop
+/// must dispatch on the parsed `tool_calls`, not on that stop reason.
+fn real_shaped_response(content: &str) -> AiResponse {
+    AiResponse {
+        content: content.to_string(),
+        reasoning: None,
+        tool_calls: neurobrowser::providers::parse_tool_calls(content),
     }
 }
 
@@ -226,9 +238,8 @@ async fn post_navigation_url_reaches_model_next_iteration() {
             response(
                 "go",
                 vec![call("navigate", &[("url", "https://after.example")])],
-                "tool_calls",
             ),
-            response("Final Answer: done", vec![], "stop"),
+            response("Final Answer: done", vec![]),
         ],
         seen.clone(),
     ));
@@ -259,9 +270,8 @@ async fn deterministic_provider_runs_read_tool_loop() {
         response(
             "Need text.\nToolCall: {\"name\":\"get_text\",\"arguments\":{\"selector\":\"main\"}}",
             vec![call("get_text", &[("selector", "main")])],
-            "tool_calls",
         ),
-        response("Final Answer: Invoice total is $42.00", vec![], "stop"),
+        response("Final Answer: Invoice total is $42.00", vec![]),
     ]));
     let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
 
@@ -282,12 +292,48 @@ async fn deterministic_provider_runs_read_tool_loop() {
 }
 
 #[tokio::test]
+async fn real_shaped_toolcall_json_dispatches_despite_provider_stop() {
+    // OpenAI/Anthropic/Ollama all attach a terminal stop to ordinary text.
+    // Tool calls live in that text as `ToolCall: {json}`. Before this fix,
+    // `finish_reason == "stop"` short-circuited the loop so the 17-tool
+    // registry never ran on a real provider.
+    let tool_turn =
+        "Need text.\nToolCall: {\"name\":\"get_text\",\"arguments\":{\"selector\":\"main\"}}";
+    let parsed = neurobrowser::providers::parse_tool_calls(tool_turn);
+    assert_eq!(parsed.len(), 1, "fixture must parse like a real provider");
+    assert_eq!(parsed[0].name, "get_text");
+
+    let browser = TestBrowser::new("https://invoice.example", "Invoice total is $42.00");
+    let provider = Arc::new(FakeProvider::new(vec![
+        real_shaped_response(tool_turn),
+        real_shaped_response("Final Answer: Invoice total is $42.00"),
+    ]));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+
+    let run = agent
+        .execute_with_policy("Find the invoice total", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(
+        run.final_response.as_deref(),
+        Some("Invoice total is $42.00")
+    );
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, AgentRunEvent::ToolCallResult { tool, success: true, .. } if tool == "get_text")
+        ),
+        "parsed ToolCall JSON must dispatch even when the provider would have said stop"
+    );
+}
+
+#[tokio::test]
 async fn approval_required_run_stops_before_click() {
     let browser = TestBrowser::new("https://form.example", "Submit");
     let provider = Arc::new(FakeProvider::new(vec![response(
         "ToolCall: {\"name\":\"click\",\"arguments\":{\"selector\":\"#submit\"}}",
         vec![call("click", &[("selector", "#submit")])],
-        "tool_calls",
     )]));
     let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
 
