@@ -32,7 +32,7 @@ No element-ref map. No ARIA tree field.
 ## Tools (17)
 
 Arguments are `HashMap<String, String>`. Results are `ToolResult`
-(`tool_name`, `arguments`, `result`, `success`).
+(`tool_name`, `result`, `success`).
 
 On `BrowserEngine`, click / type / submit / scroll / keypress fail with an
 honest static-engine error (no live DOM). `back` / `forward` / `reload` /
@@ -50,7 +50,7 @@ Wait for navigation to settle. No args. Risk: `Wait`, low.
 ### 3. `query_dom` — `selector`
 
 Query by CSS selector. Returns a text dump of matches, or
-`No elements found`. Risk: `Read`, low.
+`No elements found`. Invalid CSS returns an error. Risk: `Read`, low.
 
 ### 4. `get_text` — `selector`
 
