@@ -79,19 +79,12 @@ impl AiProvider for OllamaProvider {
 
         let content = json["response"].as_str().unwrap_or("").to_string();
 
-        let finish_reason = if json["done"].as_bool().unwrap_or(true) {
-            "stop".to_string()
-        } else {
-            "length".to_string()
-        };
-
         let tool_calls = parse_tool_calls(&content);
 
         Ok(AiResponse {
             content,
             reasoning: None,
             tool_calls,
-            finish_reason,
         })
     }
 
