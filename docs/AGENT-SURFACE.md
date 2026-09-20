@@ -151,11 +151,15 @@ Sensitive tool metadata does not redact unrelated keys such as plain `text`.
 
 ## Policy gates
 
-1. `denied_tools` / `denied_domains` → `Block`.
-2. Non-empty `allowed_domains` → off-list `Block`.
-3. `javascript:` / `data:` / `file:` / … navigate → `Block`.
-4. Prompt-injection on the page → `Block`.
-5. `approval_required_tools` → `RequireApproval`.
+`ActionPolicy::evaluate` returns on the first matching gate:
+
+1. `denied_tools` → `Block`.
+2. Prompt-injection on the page → `Block`.
+3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
+4. `denied_domains` / non-empty `allowed_domains` → `Block`.
+5. Sensitive argument keys or sensitive tool metadata → `RequireApproval`.
+6. `approval_required_tools` → `RequireApproval`.
+7. Mode table.
 
 Tauri: `get_action_policy` / `set_action_policy`. Daemon: `policy.get` /
 `policy.set`.
