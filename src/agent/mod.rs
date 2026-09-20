@@ -58,7 +58,7 @@ pub struct AgentMessage {
 pub struct ReActAgent {
     config: Mutex<AgentConfig>,
     provider: Mutex<Arc<dyn AiProvider + Send + Sync>>,
-    tool_registry: Mutex<ToolRegistry>,
+    tool_registry: ToolRegistry,
     state: Mutex<AgentState>,
     memory: Mutex<AgentMemory>,
 }
@@ -68,7 +68,7 @@ impl ReActAgent {
         Self {
             config: Mutex::new(config.clone()),
             provider: Mutex::new(provider),
-            tool_registry: Mutex::new(crate::browser::default_tool_registry()),
+            tool_registry: crate::browser::default_tool_registry(),
             state: Mutex::new(AgentState {
                 current_url: String::new(),
                 page_title: String::new(),
@@ -193,7 +193,7 @@ impl ReActAgent {
 
             for tool_call in &response.tool_calls {
                 let snapshot = browser.snapshot().await?;
-                let Some(tool) = self.get_tool(&tool_call.name)? else {
+                let Some(tool) = self.get_tool(&tool_call.name) else {
                     let decision = crate::agent::policy::PolicyDecision {
                         outcome: PolicyOutcome::Block,
                         reasons: vec![format!("Unknown tool '{}'", tool_call.name)],
@@ -392,7 +392,7 @@ impl ReActAgent {
             });
         }
 
-        let Some(tool) = self.get_tool(&tool_call.name)? else {
+        let Some(tool) = self.get_tool(&tool_call.name) else {
             events.push(AgentRunEvent::ToolCallBlocked {
                 run_id: run_id.clone(),
                 tool: tool_call.name.clone(),
@@ -482,9 +482,8 @@ impl ReActAgent {
         })
     }
 
-    fn get_tool(&self, name: &str) -> Result<Option<Arc<dyn BrowserTool>>, String> {
-        let registry = self.tool_registry.lock().map_err(|e| e.to_string())?;
-        Ok(registry.get(name))
+    fn get_tool(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
+        self.tool_registry.get(name)
     }
 
     async fn execute_tool_with_handle(
