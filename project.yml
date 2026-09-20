@@ -44,7 +44,6 @@ targets:
       path: NeuroBrowser/NeuroBrowser.entitlements
       properties:
         com.apple.security.app-sandbox: false
-        com.apple.security.network.client: true
 
 schemes:
   NeuroBrowser:

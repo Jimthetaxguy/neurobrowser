@@ -9,9 +9,12 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
     weak var delegate: ReactControlSurfaceDelegate?
 
     private var webView: WKWebView!
+    private var allowedControlDirectory: URL?
 
     override func loadView() {
         let configuration = WKWebViewConfiguration()
+        configuration.processPool = WKProcessPool()
+        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         let userContentController = WKUserContentController()
         userContentController.add(self, name: "neurobrowser")
         configuration.userContentController = userContentController
@@ -46,7 +49,9 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
             ?? Bundle.main.url(forResource: "appkit", withExtension: "html")
 
         if let bundledURL {
-            webView.loadFileURL(bundledURL, allowingReadAccessTo: bundledURL.deletingLastPathComponent())
+            let controlDirectory = bundledURL.deletingLastPathComponent()
+            allowedControlDirectory = controlDirectory
+            webView.loadFileURL(bundledURL, allowingReadAccessTo: controlDirectory)
             return
         }
 
@@ -71,5 +76,17 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
 
         let payload = body["payload"] as? [String: Any] ?? [:]
         delegate?.controlSurface(self, didReceiveCommand: command, payload: payload)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(Self.allowsControlFileNavigation(navigationAction.request.url, under: allowedControlDirectory) ? .allow : .cancel)
+    }
+
+    /// Bundled control `file://` only. Page http(s) and other schemes stay out of this privileged webview.
+    private static func allowsControlFileNavigation(_ url: URL?, under allowedDirectory: URL?) -> Bool {
+        guard let url, url.isFileURL, let allowedDirectory else { return false }
+        let filePath = url.resolvingSymlinksInPath().path
+        let directoryPath = allowedDirectory.resolvingSymlinksInPath().path
+        return filePath == directoryPath || filePath.hasPrefix(directoryPath + "/")
     }
 }
