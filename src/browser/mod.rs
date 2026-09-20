@@ -1069,7 +1069,7 @@ impl BrowserTool for ScreenshotTool {
     }
 
     fn description(&self) -> &str {
-        "Capture a screenshot of the current page"
+        "Registered; returns an error on both shipped backends"
     }
 
     fn definition(&self) -> ToolDefinition {
