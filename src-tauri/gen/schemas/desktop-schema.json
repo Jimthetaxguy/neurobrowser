@@ -291,12 +291,6 @@
           "markdownDescription": "Enables the validate_url command without any pre-configured scope."
         },
         {
-          "description": "Enables the wait_for_page_ready command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-wait-for-page-ready",
-          "markdownDescription": "Enables the wait_for_page_ready command without any pre-configured scope."
-        },
-        {
           "description": "Denies the ask command without any pre-configured scope.",
           "type": "string",
           "const": "deny-ask",
@@ -409,12 +403,6 @@
           "type": "string",
           "const": "deny-validate-url",
           "markdownDescription": "Denies the validate_url command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the wait_for_page_ready command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-wait-for-page-ready",
-          "markdownDescription": "Denies the wait_for_page_ready command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

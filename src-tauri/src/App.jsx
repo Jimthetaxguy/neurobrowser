@@ -341,22 +341,12 @@ export default function App({ adapter, lane }) {
     [adapter]
   );
 
-  const refreshSnapshot = useCallback(
-    async ({ waitForReady = true } = {}) => {
-      if (currentPageId == null || !sessionId) return null;
-      if (waitForReady) {
-        try {
-          await adapter.waitForPageReady(currentPageId, 10000);
-        } catch (error) {
-          console.warn("page readiness wait failed", messageText(error));
-        }
-      }
-      const nextSnapshot = await adapter.getPageSnapshot(sessionId, currentPageId);
-      updateSnapshot(currentPageId, nextSnapshot);
-      return nextSnapshot;
-    },
-    [adapter, currentPageId, sessionId, updateSnapshot]
-  );
+  const refreshSnapshot = useCallback(async () => {
+    if (currentPageId == null || !sessionId) return null;
+    const nextSnapshot = await adapter.getPageSnapshot(sessionId, currentPageId);
+    updateSnapshot(currentPageId, nextSnapshot);
+    return nextSnapshot;
+  }, [adapter, currentPageId, sessionId, updateSnapshot]);
 
   const activatePage = useCallback(
     async (pageId) => {
@@ -413,16 +403,11 @@ export default function App({ adapter, lane }) {
     const rawUrl = url.trim();
     if (!rawUrl) return;
 
-    setLoading("Validating destination...");
-    setStatus("Validating URL...");
+    setStatus(`Navigating to ${rawUrl}`);
+    setLoading(`Opening ${rawUrl}...`);
 
     try {
-      const validation = await adapter.validateUrl(rawUrl);
-      if (!validation.valid) throw new Error(validation.error || "Invalid URL");
-      setUrl(validation.normalized_url);
-      setStatus(`Navigating to ${validation.normalized_url}`);
-      setLoading(`Opening ${validation.normalized_url}...`);
-      await adapter.navigate(sessionId, currentPageId, validation.normalized_url);
+      await adapter.navigate(sessionId, currentPageId, rawUrl);
       await refreshSnapshot();
     } catch (error) {
       setStatus(`Navigation failed: ${messageText(error)}`);
@@ -469,7 +454,7 @@ export default function App({ adapter, lane }) {
         appendMessage("assistant", result.final_response ?? result.response ?? "", result.tools_used || []);
         setStatus("Ready");
       }
-      await refreshSnapshot({ waitForReady: false });
+      await refreshSnapshot();
     } catch (error) {
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
       setStatus("Agent request failed");
@@ -487,7 +472,7 @@ export default function App({ adapter, lane }) {
         setActionEvents((items) => [...items, ...(result.events || [])]);
         setPendingApproval(null);
         appendMessage("assistant", result.final_response || (approved ? "Approved action ran." : "Approval denied."));
-        await refreshSnapshot({ waitForReady: false });
+        await refreshSnapshot();
         setStatus(result.status === "completed" ? "Ready" : "Run cancelled");
       } catch (error) {
         appendMessage("assistant", `Approval failed: ${messageText(error)}`);
