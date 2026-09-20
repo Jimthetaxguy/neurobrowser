@@ -19,7 +19,6 @@ fn main() {
             "start_agent_run",
             "submit_approval",
             "sync_browser_viewport",
-            "validate_url",
         ])),
     )
     .expect("failed to run tauri build script")

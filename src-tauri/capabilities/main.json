@@ -21,7 +21,6 @@
     "allow-set-provider",
     "allow-start-agent-run",
     "allow-submit-approval",
-    "allow-sync-browser-viewport",
-    "allow-validate-url"
+    "allow-sync-browser-viewport"
   ]
 }
