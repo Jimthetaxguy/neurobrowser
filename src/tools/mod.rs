@@ -171,6 +171,10 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Empty map. No `Default` impl: that constructor silently evaluated as
+    /// “no tools.” Callers must `register` after `new()`, or use
+    /// `default_tool_registry()`.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
