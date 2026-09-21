@@ -37,15 +37,9 @@ impl ToolResult {
 
 #[async_trait]
 pub trait BrowserTool: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
-        )
-    }
+    /// Required: a new tool that forgets this is a compile error, not a
+    /// silent Read + Low allow under Assisted.
+    fn definition(&self) -> ToolDefinition;
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -184,16 +178,10 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, tool: Arc<dyn BrowserTool>) {
-        self.tools.insert(tool.name().to_string(), tool);
+        self.tools.insert(tool.definition().name, tool);
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
         self.tools.get(name).cloned()
-    }
-}
-
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }

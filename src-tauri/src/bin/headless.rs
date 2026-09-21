@@ -93,7 +93,7 @@ struct SessionState {
     /// Per-session policy. Defaults to `Assisted` + no allow/deny lists.
     policy: Arc<Mutex<ActionPolicy>>,
     /// Browser tool registry used to resolve each tool's real `ToolRisk`.
-    /// `ToolRegistry::default()` is empty and would silently defeat that lookup.
+    /// Must be populated (`default_tool_registry()`); `ToolRegistry::new()` is empty.
     tool_registry: Arc<ToolRegistry>,
 }
 

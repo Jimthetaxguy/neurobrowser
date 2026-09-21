@@ -494,18 +494,10 @@ struct NavigateTool;
 
 #[async_trait]
 impl BrowserTool for NavigateTool {
-    fn name(&self) -> &str {
-        "navigate"
-    }
-
-    fn description(&self) -> &str {
-        "Navigate the current page to a URL"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "navigate",
+            "Navigate the current page to a URL",
             ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -534,18 +526,10 @@ struct WaitTool;
 
 #[async_trait]
 impl BrowserTool for WaitTool {
-    fn name(&self) -> &str {
-        "wait"
-    }
-
-    fn description(&self) -> &str {
-        "Wait for page navigation or dynamic page work to settle"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "wait",
+            "Wait for page navigation or dynamic page work to settle",
             ToolRisk::new(ToolAction::Wait, RiskLevel::Low),
         )
     }
@@ -566,18 +550,10 @@ struct QueryDomTool;
 
 #[async_trait]
 impl BrowserTool for QueryDomTool {
-    fn name(&self) -> &str {
-        "query_dom"
-    }
-
-    fn description(&self) -> &str {
-        "Query DOM elements by CSS selector"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "query_dom",
+            "Query DOM elements by CSS selector",
             ToolRisk::new(ToolAction::Read, RiskLevel::Low),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -625,18 +601,10 @@ struct GetTextTool;
 
 #[async_trait]
 impl BrowserTool for GetTextTool {
-    fn name(&self) -> &str {
-        "get_text"
-    }
-
-    fn description(&self) -> &str {
-        "Get text content of elements that match a selector"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "get_text",
+            "Get text content of elements that match a selector",
             ToolRisk::new(ToolAction::Read, RiskLevel::Low),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -662,18 +630,10 @@ struct GetLinksTool;
 
 #[async_trait]
 impl BrowserTool for GetLinksTool {
-    fn name(&self) -> &str {
-        "get_links"
-    }
-
-    fn description(&self) -> &str {
-        "Get all links on the current page"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "get_links",
+            "Get all links on the current page",
             ToolRisk::new(ToolAction::Read, RiskLevel::Low),
         )
     }
@@ -709,18 +669,10 @@ struct GetPricesTool;
 
 #[async_trait]
 impl BrowserTool for GetPricesTool {
-    fn name(&self) -> &str {
-        "get_prices"
-    }
-
-    fn description(&self) -> &str {
-        "Extract price information from the current page"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "get_prices",
+            "Extract price information from the current page",
             ToolRisk::new(ToolAction::Read, RiskLevel::Low),
         )
     }
@@ -756,18 +708,10 @@ struct GetTablesTool;
 
 #[async_trait]
 impl BrowserTool for GetTablesTool {
-    fn name(&self) -> &str {
-        "get_tables"
-    }
-
-    fn description(&self) -> &str {
-        "Extract table data from the current page"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "get_tables",
+            "Extract table data from the current page",
             ToolRisk::new(ToolAction::Read, RiskLevel::Low),
         )
     }
@@ -811,18 +755,10 @@ struct ClickTool;
 
 #[async_trait]
 impl BrowserTool for ClickTool {
-    fn name(&self) -> &str {
-        "click"
-    }
-
-    fn description(&self) -> &str {
-        "Click an element on the current page"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "click",
+            "Click an element on the current page",
             ToolRisk::new(ToolAction::Click, RiskLevel::Medium),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -850,18 +786,10 @@ struct TypeTool;
 
 #[async_trait]
 impl BrowserTool for TypeTool {
-    fn name(&self) -> &str {
-        "type"
-    }
-
-    fn description(&self) -> &str {
-        "Type text into an input element"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "type",
+            "Type text into an input element",
             ToolRisk::new(ToolAction::Type, RiskLevel::High).sensitive(true),
         )
         .with_arguments(vec![
@@ -897,18 +825,10 @@ struct ScrollToTool;
 
 #[async_trait]
 impl BrowserTool for ScrollToTool {
-    fn name(&self) -> &str {
-        "scroll_to"
-    }
-
-    fn description(&self) -> &str {
-        "Scroll an element into view"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "scroll_to",
+            "Scroll an element into view",
             ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -938,18 +858,10 @@ struct ScrollByTool;
 
 #[async_trait]
 impl BrowserTool for ScrollByTool {
-    fn name(&self) -> &str {
-        "scroll_by"
-    }
-
-    fn description(&self) -> &str {
-        "Scroll by pixel offset"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "scroll_by",
+            "Scroll by pixel offset",
             ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
         )
         .with_arguments(vec![
@@ -986,18 +898,10 @@ struct SubmitFormTool;
 
 #[async_trait]
 impl BrowserTool for SubmitFormTool {
-    fn name(&self) -> &str {
-        "submit_form"
-    }
-
-    fn description(&self) -> &str {
-        "Submit a form on the current page"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "submit_form",
+            "Submit a form on the current page",
             ToolRisk::new(ToolAction::Submit, RiskLevel::High).externally_visible(true),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -1027,18 +931,10 @@ struct KeypressTool;
 
 #[async_trait]
 impl BrowserTool for KeypressTool {
-    fn name(&self) -> &str {
-        "keypress"
-    }
-
-    fn description(&self) -> &str {
-        "Send a keypress to the active page element"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "keypress",
+            "Send a keypress to the active page element",
             ToolRisk::new(ToolAction::Keypress, RiskLevel::Medium),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
@@ -1064,18 +960,10 @@ struct ScreenshotTool;
 
 #[async_trait]
 impl BrowserTool for ScreenshotTool {
-    fn name(&self) -> &str {
-        "screenshot"
-    }
-
-    fn description(&self) -> &str {
-        "Registered; returns an error on both shipped backends"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "screenshot",
+            "Registered; returns an error on both shipped backends",
             ToolRisk::new(ToolAction::Screenshot, RiskLevel::Low),
         )
     }
@@ -1096,18 +984,10 @@ struct BackTool;
 
 #[async_trait]
 impl BrowserTool for BackTool {
-    fn name(&self) -> &str {
-        "back"
-    }
-
-    fn description(&self) -> &str {
-        "Navigate back in browser history"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "back",
+            "Navigate back in browser history",
             ToolRisk::new(ToolAction::Back, RiskLevel::Low),
         )
     }
@@ -1128,18 +1008,10 @@ struct ForwardTool;
 
 #[async_trait]
 impl BrowserTool for ForwardTool {
-    fn name(&self) -> &str {
-        "forward"
-    }
-
-    fn description(&self) -> &str {
-        "Navigate forward in browser history"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "forward",
+            "Navigate forward in browser history",
             ToolRisk::new(ToolAction::Forward, RiskLevel::Low),
         )
     }
@@ -1162,18 +1034,10 @@ struct ReloadTool;
 
 #[async_trait]
 impl BrowserTool for ReloadTool {
-    fn name(&self) -> &str {
-        "reload"
-    }
-
-    fn description(&self) -> &str {
-        "Reload the current page"
-    }
-
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            self.name(),
-            self.description(),
+            "reload",
+            "Reload the current page",
             ToolRisk::new(ToolAction::Reload, RiskLevel::Low),
         )
     }
@@ -1242,6 +1106,74 @@ mod tests {
         assert_eq!(snapshot.forms.len(), 1);
         assert_eq!(snapshot.tables.len(), 1);
         assert!(snapshot.interactive_ready);
+    }
+
+    #[test]
+    fn default_registry_registers_seventeen_explicit_definitions() {
+        let registry = default_tool_registry();
+        let expected = [
+            (
+                "navigate",
+                ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+            ),
+            ("wait", ToolRisk::new(ToolAction::Wait, RiskLevel::Low)),
+            ("query_dom", ToolRisk::new(ToolAction::Read, RiskLevel::Low)),
+            ("get_text", ToolRisk::new(ToolAction::Read, RiskLevel::Low)),
+            ("get_links", ToolRisk::new(ToolAction::Read, RiskLevel::Low)),
+            (
+                "get_prices",
+                ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ),
+            (
+                "get_tables",
+                ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ),
+            ("click", ToolRisk::new(ToolAction::Click, RiskLevel::Medium)),
+            (
+                "type",
+                ToolRisk::new(ToolAction::Type, RiskLevel::High).sensitive(true),
+            ),
+            (
+                "scroll_to",
+                ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ),
+            (
+                "scroll_by",
+                ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ),
+            (
+                "submit_form",
+                ToolRisk::new(ToolAction::Submit, RiskLevel::High).externally_visible(true),
+            ),
+            (
+                "keypress",
+                ToolRisk::new(ToolAction::Keypress, RiskLevel::Medium),
+            ),
+            (
+                "screenshot",
+                ToolRisk::new(ToolAction::Screenshot, RiskLevel::Low),
+            ),
+            ("back", ToolRisk::new(ToolAction::Back, RiskLevel::Low)),
+            (
+                "forward",
+                ToolRisk::new(ToolAction::Forward, RiskLevel::Low),
+            ),
+            ("reload", ToolRisk::new(ToolAction::Reload, RiskLevel::Low)),
+        ];
+        assert_eq!(expected.len(), 17);
+
+        for (name, risk) in expected {
+            let tool = registry
+                .get(name)
+                .unwrap_or_else(|| panic!("{name} must be registered"));
+            let definition = tool.definition();
+            assert_eq!(definition.name, name);
+            assert!(
+                !definition.description.is_empty(),
+                "{name} must declare an explicit description"
+            );
+            assert_eq!(definition.risk, risk);
+        }
     }
 
     /// Minimal `BrowserInterface` stub for tool-level unit tests.
