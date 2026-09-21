@@ -32,7 +32,11 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     if (!element || !element.attributes) {
       return attrs;
     }
+    const type = ((element.getAttribute && element.getAttribute('type')) || '').toLowerCase();
     for (const attr of Array.from(element.attributes)) {
+      if ((type === 'password' || type === 'hidden') && attr.name.toLowerCase() === 'value') {
+        continue;
+      }
       attrs[attr.name] = attr.value;
     }
     return attrs;
@@ -86,12 +90,17 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       selector: 'form',
       inputs: Array.from(form.querySelectorAll('input, textarea, select, button'))
         .slice(0, 80)
-        .map((input) => ({
-          name: input.getAttribute('name') || '',
-          input_type: input.getAttribute('type') || input.tagName.toLowerCase(),
-          selector: input.tagName.toLowerCase(),
-          value: typeof input.value === 'string' ? limitText(input.value, 200) : null
-        }))
+        .map((input) => {
+          const inputType = (input.getAttribute('type') || input.tagName.toLowerCase()).toLowerCase();
+          return {
+            name: input.getAttribute('name') || '',
+            input_type: input.getAttribute('type') || input.tagName.toLowerCase(),
+            selector: input.tagName.toLowerCase(),
+            value: (inputType === 'password' || inputType === 'hidden')
+              ? null
+              : (typeof input.value === 'string' ? limitText(input.value, 200) : null)
+          };
+        })
     }));
 
   const collectTables = () =>
