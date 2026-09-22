@@ -4,18 +4,19 @@
 //! memory (`neurobrowser::agent::memory::AgentMemory`).
 //!
 //! M1.1 scaffolded the types and service stubs. M1.2 adds [`CapturePolicy`].
-//! M1.3 adds [`extract_blocks`]. Capture, search, explain, and forget stay
-//! stubs until their milestones. This crate is not a Cargo workspace member.
-//! The root and `src-tauri` crates take a path dependency in M1.7.
+//! M1.3 adds [`extract_blocks`]. M1.4 adds the content-addressed [`PageStore`].
+//! Capture, search, explain, and forget stay stubs until their milestones.
+//! This crate is not a Cargo workspace member. The root and `src-tauri` crates
+//! take a path dependency in M1.7.
 //!
 //! Time is Unix epoch milliseconds (`u64`) via [`now_millis`].
 
 pub mod capture;
 pub mod model;
 pub mod policy;
+pub mod store;
 
 // Later milestones declare these modules next to `model`:
-// M1.4 pub mod store;
 // M1.5 pub mod index;
 // M1.6 pub mod query;
 
@@ -25,6 +26,7 @@ pub use model::{
     SearchResult, SemanticBlock,
 };
 pub use policy::{CaptureDecision, CapturePolicy};
+pub use store::{PageStore, StoreError, content_hash};
 
 use std::path::{Path, PathBuf};
 use url::Url;
