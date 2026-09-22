@@ -21,7 +21,7 @@ The run-oriented API is the stable control surface:
 | Command | Purpose |
 | --- | --- |
 | `start_agent_run(sessionId, pageId, prompt)` | Starts a policy-evaluated agent run. |
-| `submit_approval(runId, approved, message)` | Resolves an approval-gated tool call. |
+| `submit_approval(runId, approved)` | Resolves an approval-gated tool call. |
 | `cancel_agent_run(runId)` | Cancels a pending run. |
 | `get_action_policy()` | Reads the active autonomy and risk policy. |
 | `set_action_policy(policy)` | Updates the active autonomy and risk policy. |
@@ -29,6 +29,12 @@ The run-oriented API is the stable control surface:
 `ask(sessionId, pageId, prompt)` remains a compatibility command. New autonomous
 work should use the run-oriented API so approvals, blocks, and results are visible
 as structured events.
+
+`start_agent_run` and `submit_approval` return a shell projection: `run_id`,
+`status`, `final_response`, and events limited to `type`, `tool`, `success`,
+`approved`, `decision.reasons`, and `decision.redacted_arguments`. The host
+keeps the pending tool call for `submit_approval`. In-process `AgentRunResult`
+and `AgentRunEvent` remain the full audit record described below.
 
 ## Tool Contract
 

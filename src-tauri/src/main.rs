@@ -2,7 +2,8 @@ mod runtime;
 
 use neurobrowser::{
     ActionPolicy, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus, BrowserInterface,
-    PageConfig, PageSnapshot, ProviderConfig, ProviderType, SessionManager, ToolCall,
+    PageConfig, PageSnapshot, PolicyDecision, ProviderConfig, ProviderType, SessionManager,
+    ToolCall,
 };
 use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
@@ -44,6 +45,45 @@ struct SnapshotResponse {
     form_count: usize,
     price_count: usize,
     table_count: usize,
+}
+
+#[derive(Serialize)]
+struct AgentRunResponse {
+    run_id: String,
+    status: AgentRunStatus,
+    final_response: Option<String>,
+    events: Vec<AgentRunEventResponse>,
+}
+
+#[derive(Serialize)]
+struct PolicyDecisionResponse {
+    reasons: Vec<String>,
+    redacted_arguments: HashMap<String, String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum AgentRunEventResponse {
+    ToolCallStarted {
+        tool: String,
+    },
+    ToolCallResult {
+        tool: String,
+        success: bool,
+    },
+    ToolCallBlocked {
+        tool: String,
+        decision: PolicyDecisionResponse,
+    },
+    ApprovalRequested {
+        tool: String,
+        decision: PolicyDecisionResponse,
+    },
+    ApprovalResolved {
+        approved: bool,
+    },
+    RunCancelled,
+    RunDone,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -144,6 +184,54 @@ fn snapshot_response(snapshot: PageSnapshot) -> SnapshotResponse {
         form_count: snapshot.forms.len(),
         price_count: snapshot.prices.len(),
         table_count: snapshot.tables.len(),
+    }
+}
+
+fn policy_decision_response(decision: PolicyDecision) -> PolicyDecisionResponse {
+    PolicyDecisionResponse {
+        reasons: decision.reasons,
+        redacted_arguments: decision.redacted_arguments,
+    }
+}
+
+fn agent_run_event_response(event: AgentRunEvent) -> AgentRunEventResponse {
+    match event {
+        AgentRunEvent::ToolCallStarted { tool, .. } => {
+            AgentRunEventResponse::ToolCallStarted { tool }
+        }
+        AgentRunEvent::ToolCallResult { tool, success, .. } => {
+            AgentRunEventResponse::ToolCallResult { tool, success }
+        }
+        AgentRunEvent::ToolCallBlocked { tool, decision, .. } => {
+            AgentRunEventResponse::ToolCallBlocked {
+                tool,
+                decision: policy_decision_response(decision),
+            }
+        }
+        AgentRunEvent::ApprovalRequested { tool, decision, .. } => {
+            AgentRunEventResponse::ApprovalRequested {
+                tool,
+                decision: policy_decision_response(decision),
+            }
+        }
+        AgentRunEvent::ApprovalResolved { approved, .. } => {
+            AgentRunEventResponse::ApprovalResolved { approved }
+        }
+        AgentRunEvent::RunCancelled { .. } => AgentRunEventResponse::RunCancelled,
+        AgentRunEvent::RunDone { .. } => AgentRunEventResponse::RunDone,
+    }
+}
+
+fn agent_run_response(result: AgentRunResult) -> AgentRunResponse {
+    AgentRunResponse {
+        run_id: result.run_id,
+        status: result.status,
+        final_response: result.final_response,
+        events: result
+            .events
+            .into_iter()
+            .map(agent_run_event_response)
+            .collect(),
     }
 }
 
@@ -358,8 +446,10 @@ async fn start_agent_run(
     session_id: String,
     page_id: usize,
     prompt: String,
-) -> Result<AgentRunResult, String> {
-    execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await
+) -> Result<AgentRunResponse, String> {
+    execute_agent_run(app, state.inner(), session_id, page_id, &prompt)
+        .await
+        .map(agent_run_response)
 }
 
 #[tauri::command]
@@ -368,8 +458,7 @@ async fn submit_approval(
     state: State<'_, AppState>,
     run_id: String,
     approved: bool,
-    message: Option<String>,
-) -> Result<AgentRunResult, String> {
+) -> Result<AgentRunResponse, String> {
     let pending = state
         .pending_approvals
         .lock()
@@ -385,9 +474,10 @@ async fn submit_approval(
             pending.tool_call,
             &browser,
             approved,
-            message,
+            None,
         )
         .await
+        .map(agent_run_response)
 }
 
 #[tauri::command]
@@ -566,4 +656,120 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{agent_run_response, AgentRunEvent, AgentRunResult, AgentRunStatus, ToolCall};
+    use neurobrowser::{PolicyDecision, PolicyOutcome, RiskFlag};
+    use std::collections::HashMap;
+
+    #[test]
+    fn agent_run_response_drops_unread_bodies() {
+        let mut raw_arguments = HashMap::new();
+        raw_arguments.insert("password".into(), "secret".into());
+        raw_arguments.insert("selector".into(), "#pw".into());
+        let mut redacted = HashMap::new();
+        redacted.insert("password".into(), "[REDACTED]".into());
+        redacted.insert("selector".into(), "#pw".into());
+        let decision = PolicyDecision {
+            outcome: PolicyOutcome::RequireApproval,
+            reasons: vec!["Tool call contains sensitive input".into()],
+            risk_flags: vec![RiskFlag::SensitiveArgument],
+            redacted_arguments: redacted,
+        };
+        let result = AgentRunResult {
+            run_id: "run-1".into(),
+            status: AgentRunStatus::AwaitingApproval,
+            final_response: Some("Approval required".into()),
+            iterations: 3,
+            events: vec![
+                AgentRunEvent::ToolCallStarted {
+                    run_id: "run-1".into(),
+                    tool: "type_text".into(),
+                    arguments: raw_arguments.clone(),
+                },
+                AgentRunEvent::ToolCallResult {
+                    run_id: "run-1".into(),
+                    tool: "get_text".into(),
+                    result: "page body".into(),
+                    success: true,
+                },
+                AgentRunEvent::ApprovalRequested {
+                    run_id: "run-1".into(),
+                    approval_id: "appr-1".into(),
+                    tool: "type_text".into(),
+                    decision,
+                },
+                AgentRunEvent::ApprovalResolved {
+                    run_id: "run-1".into(),
+                    approval_id: "appr-1".into(),
+                    approved: false,
+                    message: "unused".into(),
+                },
+                AgentRunEvent::RunDone {
+                    run_id: "run-1".into(),
+                    final_response: "done body".into(),
+                    iterations: 3,
+                },
+                AgentRunEvent::RunCancelled {
+                    run_id: "run-1".into(),
+                    reason: "Approval denied".into(),
+                },
+            ],
+            pending_tool_call: Some(ToolCall {
+                name: "type_text".into(),
+                arguments: raw_arguments,
+            }),
+            approval_id: Some("appr-1".into()),
+        };
+
+        let json = serde_json::to_value(agent_run_response(result)).expect("serialize");
+        assert_eq!(json["run_id"], "run-1");
+        assert_eq!(json["status"], "awaiting_approval");
+        assert_eq!(json["final_response"], "Approval required");
+        assert!(json.get("pending_tool_call").is_none());
+        assert!(json.get("approval_id").is_none());
+        assert!(json.get("iterations").is_none());
+        assert!(!json.to_string().contains("secret"));
+        assert!(!json.to_string().contains("page body"));
+        assert!(!json.to_string().contains("done body"));
+
+        let events = json["events"].as_array().expect("events");
+        assert_eq!(events[0]["type"], "ToolCallStarted");
+        assert_eq!(events[0]["tool"], "type_text");
+        assert!(events[0].get("arguments").is_none());
+        assert!(events[0].get("run_id").is_none());
+
+        assert_eq!(events[1]["type"], "ToolCallResult");
+        assert_eq!(events[1]["tool"], "get_text");
+        assert_eq!(events[1]["success"], true);
+        assert!(events[1].get("result").is_none());
+
+        assert_eq!(events[2]["type"], "ApprovalRequested");
+        assert_eq!(events[2]["tool"], "type_text");
+        assert_eq!(
+            events[2]["decision"]["reasons"][0],
+            "Tool call contains sensitive input"
+        );
+        assert_eq!(
+            events[2]["decision"]["redacted_arguments"]["password"],
+            "[REDACTED]"
+        );
+        assert_eq!(
+            events[2]["decision"]["redacted_arguments"]["selector"],
+            "#pw"
+        );
+        assert!(events[2]["decision"].get("outcome").is_none());
+        assert!(events[2]["decision"].get("risk_flags").is_none());
+        assert!(events[2].get("approval_id").is_none());
+
+        assert_eq!(events[3]["type"], "ApprovalResolved");
+        assert_eq!(events[3]["approved"], false);
+        assert!(events[3].get("message").is_none());
+        assert!(events[3].get("approval_id").is_none());
+
+        assert_eq!(events[4], serde_json::json!({ "type": "RunDone" }));
+        assert_eq!(events[5], serde_json::json!({ "type": "RunCancelled" }));
+    }
 }

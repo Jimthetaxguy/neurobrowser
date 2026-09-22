@@ -56,8 +56,8 @@ export function createTauriHostAdapter() {
     async startAgentRun(sessionId, pageId, prompt) {
       return invoke("start_agent_run", { sessionId, pageId, prompt });
     },
-    async submitApproval(runId, approved, message = null) {
-      return invoke("submit_approval", { runId, approved, message });
+    async submitApproval(runId, approved) {
+      return invoke("submit_approval", { runId, approved });
     },
     async cancelAgentRun(runId) {
       return invoke("cancel_agent_run", { runId });
