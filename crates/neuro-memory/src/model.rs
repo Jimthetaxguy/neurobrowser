@@ -23,6 +23,22 @@ pub enum MemoryError {
     /// Scaffold stub. `task` names the milestone that replaces it.
     #[error("{task} is not implemented")]
     NotImplemented { task: &'static str },
+
+    /// [`crate::CapturePolicy`] refused this page. The store and index are unchanged.
+    #[error("capture denied: {reason}")]
+    Denied { reason: String },
+
+    /// The page store could not read or write a page.
+    #[error("page store: {message}")]
+    Store { message: String },
+
+    /// The block index could not open, update, or commit.
+    #[error("block index: {message}")]
+    Index { message: String },
+
+    /// Search or explain failed.
+    #[error("query: {message}")]
+    Query { message: String },
 }
 
 /// One captured page, before block extraction.

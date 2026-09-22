@@ -14,8 +14,8 @@ const UNGOVERNABLE_SCHEMES: [&str; 5] = ["javascript", "data", "vbscript", "file
 
 /// Gate for [`crate::MemoryService::capture`].
 ///
-/// Fields are public so a later `forget` can tombstone a host by pushing it
-/// onto [`Self::denied_domains`]. This crate does not perform that write.
+/// Fields are public so [`crate::MemoryService::forget`] can tombstone a host
+/// by pushing it onto [`Self::denied_domains`]. The caller owns this value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapturePolicy {
     /// Master switch. When `false`, every URL is denied.

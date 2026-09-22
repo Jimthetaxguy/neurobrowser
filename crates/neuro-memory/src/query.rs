@@ -5,7 +5,8 @@
 //! [`explain`] returns the per-field score breakdown and the matched snippets
 //! from [`SnippetGenerator`](tantivy::snippet::SnippetGenerator).
 //!
-//! [`crate::MemoryService`] stays a stub until M1.7 wires these functions.
+//! [`crate::MemoryService::search`] and [`crate::MemoryService::explain`] call
+//! [`search`] and [`explain`].
 
 use crate::index::{BlockIndex, IndexError};
 use crate::model::{ScoreComponent, SearchExplain, SearchRequest, SearchResult};

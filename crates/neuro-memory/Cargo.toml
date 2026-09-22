@@ -5,7 +5,7 @@ edition = "2021"
 description = "Persistent page memory for NeuroBrowser"
 
 # Independent crate. Not a Cargo workspace member.
-# Root and src-tauri path dependencies land in M1.7.
+# The root and src-tauri crates depend on this path. There is no [workspace].
 
 # scraper extracts blocks (M1.3). sha2, serde_json, and tokio `fs` back the
 # page store (M1.4). tantivy backs the block index (M1.5) and search (M1.6).
