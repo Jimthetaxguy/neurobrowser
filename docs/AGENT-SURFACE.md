@@ -183,8 +183,7 @@ in `result`; approval and blocking are decision outcomes, not transport errors:
 
 The daemon outcomes are `Allow`, `RequireApproval`, and `Block` (the Rust
 serde representation uses snake_case, but this dispatcher formats enum names).
-This method
-only evaluates a proposed call; it does not execute it.
+This method only evaluates a proposed call; it does not execute it.
 
 ## See also
 
