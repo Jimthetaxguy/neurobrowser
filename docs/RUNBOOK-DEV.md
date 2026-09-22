@@ -66,7 +66,6 @@ Integration tests live in `tests/`:
 - `action_policy.rs` — deny-wins-over-allow, assisted-mode click approval,
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
-- `streaming.rs` — `StreamEvent` serialization.
 - `agent_memory_metrics.rs` — memory + metrics.
 - Headless argument and policy tests live in `src-tauri/src/bin/headless.rs`
   and run explicitly with the `headless` feature.
@@ -121,7 +120,7 @@ Do not add a wildcard capability permission.
 | `OLLAMA_BASE_URL` | `set_provider("ollama")` | `http://localhost:11434` |
 | `OLLAMA_MODEL` | `set_provider("ollama")` | `llama3.2` |
 | `CUSTOM_PROVIDER_API_KEY` | `set_provider("custom")` | falls back to `OPENAI_API_KEY` |
-| `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | (none — required for custom) |
+| `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | `https://api.openai.com` (via `resolve_endpoint`) |
 | `CUSTOM_PROVIDER_MODEL` | `set_provider("custom")` | `gpt-4o` |
 | `NEUROBROWSER_SOCKET` | headless daemon | temp dir `neurobrowser-<pid>.sock` |
 | `RUST_LOG` | tracing | `neurobrowser=info,headless=info` |

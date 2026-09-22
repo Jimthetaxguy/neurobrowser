@@ -24,9 +24,9 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Removed
 
-- Unused agent scaffolding, worker spawn/inbox plumbing, and unused exports/tests.
-  Worker summary types and empty compatibility readers remain; worker execution
-  is not shipped.
+- Unused agent scaffolding, worker spawn/inbox plumbing, Worker summary types,
+  empty compatibility readers, and unused exports/tests. Worker execution was
+  never shipped.
 - The unused Tauri shell plugin and four unused IPC commands (`get_page_info`,
   `list_sessions`, `list_workers`, `get_worker`). The command manifest and
   generated permissions now cover the 20 actual commands.
