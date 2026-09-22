@@ -83,7 +83,6 @@ impl AiProvider for OllamaProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
         })
     }

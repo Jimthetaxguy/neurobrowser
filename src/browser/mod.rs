@@ -116,32 +116,6 @@ impl BrowserEngine {
             config,
         }
     }
-
-    pub fn load_html(&self, html: &str) -> Result<(), String> {
-        let snapshot = snapshot_from_html(
-            "about:blank",
-            html,
-            self.config.viewport_width,
-            self.config.viewport_height,
-            false,
-        );
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.url = snapshot.url.clone();
-        state.title = snapshot.title.clone();
-        state.html = snapshot.html.clone().unwrap_or_default();
-        state.text = snapshot.text.clone().unwrap_or_default();
-        state.scroll_x = snapshot.scroll_x;
-        state.scroll_y = snapshot.scroll_y;
-        state.viewport_width = snapshot.viewport_width;
-        state.viewport_height = snapshot.viewport_height;
-        state.interactive_ready = snapshot.interactive_ready;
-        Ok(())
-    }
-
-    pub fn get_state(&self) -> Result<PageState, String> {
-        let state = self.state.lock().map_err(|e| e.to_string())?;
-        Ok(state.clone())
-    }
 }
 
 #[async_trait]
@@ -206,23 +180,6 @@ impl BrowserInterface for BrowserEngine {
             .map(|element| element.text.clone())
             .collect::<Vec<_>>()
             .join("\n"))
-    }
-
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String> {
-        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
-        let doc = Html::parse_document(&html);
-        let selector = Selector::parse(selector).map_err(|e| e.to_string())?;
-        Ok(doc
-            .select(&selector)
-            .next()
-            .map(|element| {
-                element
-                    .value()
-                    .attrs()
-                    .map(|(key, value)| (key.to_string(), value.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default())
     }
 
     async fn click(&self, selector: &str) -> Result<(), String> {
@@ -1257,9 +1214,6 @@ mod tests {
         }
         async fn get_text(&self, _selector: &str) -> Result<String, String> {
             Ok(String::new())
-        }
-        async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-            Ok(HashMap::new())
         }
         async fn click(&self, _selector: &str) -> Result<(), String> {
             Ok(())

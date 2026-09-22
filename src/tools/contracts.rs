@@ -15,8 +15,6 @@ pub enum ToolAction {
     Back,
     Forward,
     Reload,
-    ClosePage,
-    Download,
     Upload,
     Message,
     Auth,
@@ -75,15 +73,6 @@ impl ToolArgumentDefinition {
         Self {
             name: name.to_string(),
             required: true,
-            description: description.to_string(),
-            sensitive: false,
-        }
-    }
-
-    pub fn optional(name: &str, description: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            required: false,
             description: description.to_string(),
             sensitive: false,
         }

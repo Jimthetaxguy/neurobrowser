@@ -49,10 +49,6 @@ impl BrowserInterface for TestBrowser {
         Ok(self.snapshot.text.clone().unwrap_or_default())
     }
 
-    async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-        Ok(HashMap::new())
-    }
-
     async fn click(&self, _selector: &str) -> Result<(), String> {
         Ok(())
     }
@@ -109,7 +105,6 @@ impl AiProvider for FakeProvider {
 fn response(content: &str, tool_calls: Vec<ToolCall>) -> AiResponse {
     AiResponse {
         content: content.to_string(),
-        reasoning: None,
         tool_calls,
     }
 }
@@ -171,9 +166,6 @@ impl BrowserInterface for MutBrowser {
     }
     async fn get_text(&self, _selector: &str) -> Result<String, String> {
         Ok("ready".to_string())
-    }
-    async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-        Ok(HashMap::new())
     }
     async fn click(&self, _selector: &str) -> Result<(), String> {
         Ok(())

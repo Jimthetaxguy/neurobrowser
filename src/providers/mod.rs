@@ -11,8 +11,6 @@ pub enum ProviderError {
     RequestFailed(String),
     #[error("Parse error: {0}")]
     ParseError(String),
-    #[error("Authentication error: {0}")]
-    AuthError(String),
     #[error("Rate limited")]
     RateLimited,
     #[error("Provider not configured: {0}")]
@@ -24,7 +22,6 @@ pub type ProviderResult<T> = Result<T, ProviderError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiResponse {
     pub content: String,
-    pub reasoning: Option<String>,
     pub tool_calls: Vec<ToolCall>,
 }
 

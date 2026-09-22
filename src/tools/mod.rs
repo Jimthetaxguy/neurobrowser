@@ -58,7 +58,6 @@ pub trait BrowserInterface: Send + Sync {
     async fn navigate(&self, url: &str) -> Result<(), String>;
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String>;
     async fn get_text(&self, selector: &str) -> Result<String, String>;
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String>;
     async fn click(&self, selector: &str) -> Result<(), String>;
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), String>;
     async fn submit_form(&self, selector: &str) -> Result<(), String>;
@@ -87,14 +86,6 @@ pub trait BrowserInterface: Send + Sync {
 
     async fn wait_for_navigation(&self) -> Result<(), String> {
         Ok(())
-    }
-
-    async fn accessibility_tree(&self) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    async fn get_page_info(&self) -> Result<PageSnapshot, String> {
-        self.snapshot().await
     }
 }
 
