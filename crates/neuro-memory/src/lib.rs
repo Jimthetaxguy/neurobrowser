@@ -3,7 +3,8 @@
 //! [`MemoryService`] is durable page memory. It is separate from in-run agent
 //! memory (`neurobrowser::agent::memory::AgentMemory`).
 //!
-//! M1.1 scaffolded the types and service stubs. M1.3 adds [`extract_blocks`].
+//! M1.1 scaffolded the types and service stubs. M1.2 adds [`CapturePolicy`].
+//! M1.3 adds [`extract_blocks`]. M1.4 adds the page store ([`store::PageStore`]).
 //! M1.5 adds the Tantivy block index ([`index::BlockIndex`]). M1.6 adds
 //! [`search`] and [`explain`]. [`MemoryService`] stays a stub until M1.7.
 //! This crate is not a Cargo workspace member. The root and `src-tauri` crates
@@ -16,9 +17,7 @@ pub mod index;
 pub mod model;
 pub mod policy;
 pub mod query;
-
-// Later milestones declare these modules next to `model`:
-// M1.4 pub mod store;
+pub mod store;
 
 pub use capture::{extract_blocks, MAX_BLOCK_CHARS};
 pub use model::{
