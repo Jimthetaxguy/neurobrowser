@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 17 CSS-selector tools, or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
+description: Drive NeuroBrowser from a Rust agent via the crate's 19 tools (17 CSS-selector browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -15,9 +15,16 @@ drive it in two ways:
    `policy.evaluate`, and `snapshot`. `snapshot` is a hardcoded
    `about:blank` stub. The daemon does not execute browser tools.
 
-The shipped agent surface is **17 CSS-selector tools**. There is no `ref_map`
-(`PageSnapshot` has no such field). Not shipped as named tools: `evaluate`,
-`get_attribute`, `wait_for`, `extract_text`.
+The shipped agent surface is **19 tools**. Seventeen are CSS-selector browser
+tools from `default_tool_registry()`. `search_personal_memory` and
+`inspect_active_page` are added by `default_tool_registry_with_memory()` and
+`ReActAgent::with_memory`. `ReActAgent::new` stays at the 17 browser tools.
+There is no `ref_map` (`PageSnapshot` has no such field). Not shipped as named
+tools: `evaluate`, `get_attribute`, `wait_for`, `extract_text`.
+
+`neuro_memory::MemoryService` is persistent page memory on disk. The two
+memory tools close over that service. `agent::memory::AgentMemory` is the
+in-run episodic log and is a different store.
 
 Full spec: `docs/AGENT-SURFACE.md`.
 
@@ -89,8 +96,10 @@ async fn summarize_page(
 
 ## Tools
 
-Registered by `default_tool_registry()`. Arguments are CSS selectors (or
-pixels / a key), not element refs.
+Browser tools are registered by `default_tool_registry()`. The two memory
+tools are registered by `default_tool_registry_with_memory()` /
+`ReActAgent::with_memory`. Browser arguments are CSS selectors (or pixels /
+a key), not element refs.
 
 | Tool | Args | Purpose |
 |---|---|---|
@@ -111,6 +120,8 @@ pixels / a key), not element refs.
 | `back` | — | History back |
 | `forward` | — | History forward |
 | `reload` | — | Reload |
+| `search_personal_memory` | `query`, optional `limit` | Search persistent `MemoryService` (not in-run `AgentMemory`). Ignores the browser. Registered when a `MemoryService` is attached. |
+| `inspect_active_page` | — | Captured content for the current URL, or a `capture denied` error. Registered when a `MemoryService` is attached. |
 
 `screenshot` is registered. `BrowserInterface::screenshot` defaults to
 `"screenshot is not supported by this browser"`. Neither `BrowserEngine` nor

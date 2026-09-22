@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod contracts;
+pub mod memory_tools;
 
 pub use contracts::{RiskLevel, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
 
@@ -180,6 +181,14 @@ impl ToolRegistry {
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
         self.tools.get(name).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
     }
 }
 
