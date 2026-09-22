@@ -3,21 +3,23 @@
 //! [`MemoryService`] is durable page memory. It is separate from in-run agent
 //! memory (`neurobrowser::agent::memory::AgentMemory`).
 //!
-//! M1.1 is the scaffold: types and compile-ready stubs. Later milestones add
-//! the modules named below. This crate is not a Cargo workspace member. The
-//! root and `src-tauri` crates take a path dependency in M1.7.
+//! M1.1 scaffolded the types and service stubs. M1.3 adds [`extract_blocks`].
+//! Capture, search, explain, and forget stay stubs until their milestones.
+//! This crate is not a Cargo workspace member. The root and `src-tauri` crates
+//! take a path dependency in M1.7.
 //!
 //! Time is Unix epoch milliseconds (`u64`) via [`now_millis`].
 
+pub mod capture;
 pub mod model;
 pub mod policy;
 
 // Later milestones declare these modules next to `model`:
-// M1.3 pub mod capture;
 // M1.4 pub mod store;
 // M1.5 pub mod index;
 // M1.6 pub mod query;
 
+pub use capture::{extract_blocks, MAX_BLOCK_CHARS};
 pub use model::{
     now_millis, CapturedPage, MemoryError, ScoreComponent, SearchExplain, SearchRequest,
     SearchResult, SemanticBlock,
