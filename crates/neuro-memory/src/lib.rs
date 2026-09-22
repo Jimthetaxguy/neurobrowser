@@ -14,10 +14,10 @@
 pub mod capture;
 pub mod index;
 pub mod model;
+pub mod policy;
 pub mod query;
 
 // Later milestones declare these modules next to `model`:
-// M1.2 pub mod policy;
 // M1.4 pub mod store;
 
 pub use capture::{extract_blocks, MAX_BLOCK_CHARS};
@@ -25,6 +25,7 @@ pub use model::{
     now_millis, CapturedPage, MemoryError, ScoreComponent, SearchExplain, SearchRequest,
     SearchResult, SemanticBlock,
 };
+pub use policy::{CaptureDecision, CapturePolicy};
 pub use query::{explain, search, QueryError};
 
 use std::path::{Path, PathBuf};
