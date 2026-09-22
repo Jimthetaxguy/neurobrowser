@@ -7,9 +7,10 @@ description = "Persistent page memory for NeuroBrowser"
 # Independent crate. Not a Cargo workspace member.
 # Root and src-tauri path dependencies land in M1.7.
 
-# scraper (M1.3), sha2 (M1.4), tantivy (M1.5), and async-trait (M1.7 trait
-# impls) are declared here and unused until those milestones. async-trait 0.1
-# only accepts trait impls, so MemoryService methods are inherent async fns.
+# sha2 (M1.4), tantivy (M1.5), and async-trait (M1.7 trait impls) are declared
+# here and unused until those milestones. scraper is used by extract_blocks
+# (M1.3). async-trait 0.1 only accepts trait impls, so MemoryService methods
+# are inherent async fns.
 [dependencies]
 async-trait = "0.1"
 scraper = "0.22"
