@@ -59,6 +59,7 @@ mod tests {
             current_url: String::new(),
             page_title: String::new(),
             tool_results: Vec::new(),
+            personal_memory: false,
         }
     }
 
