@@ -69,6 +69,13 @@ async fn capture_search_forget_removes_the_page_and_tombstones_the_domain() {
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0].page_url, remembered_url);
     assert!(hits[0].text.contains("zephyrquartz"), "{hits:?}");
+
+    let blocks = service
+        .blocks_for_url(&remembered_url)
+        .await
+        .expect("blocks for captured url");
+    assert_eq!(blocks.len(), 1, "{blocks:?}");
+    assert!(blocks[0].text.contains("zephyrquartz"), "{blocks:?}");
     assert!(hits[0].explain.is_none());
 
     let explained = service.explain(&query, &hits[0]).await.expect("explain");
@@ -98,6 +105,11 @@ async fn capture_search_forget_removes_the_page_and_tombstones_the_domain() {
         .await
         .expect("search after forget");
     assert!(gone.is_empty(), "{gone:?}");
+    assert!(service
+        .blocks_for_url(&remembered_url)
+        .await
+        .expect("blocks after forget")
+        .is_empty());
 
     let kept_hits = service
         .search(SearchRequest {

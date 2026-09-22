@@ -3,7 +3,11 @@
 Canonical agent-facing surface for the **shipped crate**. Update `SKILL.md`
 with this file.
 
-- **17 tools** from `default_tool_registry()` in `src/browser/mod.rs`.
+- **19 tools** on the agent surface. `default_tool_registry()` in
+  `src/browser/mod.rs` registers the 17 browser tools.
+  `default_tool_registry_with_memory()` adds `search_personal_memory` and
+  `inspect_active_page`. `ReActAgent::with_memory` uses that 19-tool registry.
+  `ReActAgent::new` keeps the 17 browser tools.
 - CSS selectors (or pixels / a key). There is no `ref_map`
   (`PageSnapshot` has no such field).
 - Autonomy: `ReadOnly` / `Assisted` / `HighAutonomy` via `ActionPolicy`.
@@ -29,7 +33,21 @@ interactive_ready, links, images, forms, prices, tables
 
 No element-ref map. No ARIA tree field.
 
-## Tools (17)
+## Personal memory vs agent run memory
+
+Two stores share the word "memory". They are not interchangeable.
+
+| Store | Type | What it holds |
+|---|---|---|
+| Persistent personal memory | `neuro_memory::MemoryService` | Captured pages on disk. `search_personal_memory` and `inspect_active_page` close over `Arc<MemoryService>`. |
+| Agent run memory | `agent::memory::AgentMemory` | Episodic log for the current `ReActAgent` run. It is not searched by the tools above and it is not written to the page index. |
+
+`inspect_active_page` reads the current URL from the browser snapshot. It
+returns that URL's captured blocks, or a `capture denied: ...` error when
+`CapturePolicy` refuses the URL. `search_personal_memory` ignores the browser
+argument and searches the index.
+
+## Tools (19)
 
 Arguments are `HashMap<String, String>`. Results are `ToolResult`
 (`tool_name`, `arguments`, `result`, `success`).
@@ -113,6 +131,20 @@ History forward. Default: not supported. Risk: `Forward`, low.
 
 Reload. Default: not supported. Risk: `Reload`, low.
 
+### 18. `search_personal_memory` — `query`, optional `limit`
+
+Search `MemoryService` (persistent personal memory, not `AgentMemory`).
+Ignores the browser argument. `limit` defaults to 5 and caps at 20. A miss
+is `No personal memory matches.` Risk: `Read`, low. Registered by
+`default_tool_registry_with_memory` / `ReActAgent::with_memory`.
+
+### 19. `inspect_active_page`
+
+Captured blocks for the browser's current URL, or `capture denied: ...` when
+`CapturePolicy` refuses that URL. A URL with no committed blocks is
+`No captured content for <url>`. An argument named `url` is not consulted.
+Risk: `Read`, low. Same registration as `search_personal_memory`.
+
 ## Headless JSON-RPC
 
 `src-tauri/src/bin/headless.rs` (`--features headless`). Newline-delimited
@@ -190,5 +222,6 @@ This method only evaluates a proposed call; it does not execute it.
 - `SKILL.md` — agent-loadable version.
 - `docs/RUNBOOK-DEV.md` — build + run.
 - `src/browser/mod.rs` — registry + `BrowserEngine`.
+- `src/tools/memory_tools.rs` — `search_personal_memory` and `inspect_active_page`.
 - `src/tools/mod.rs` — `BrowserInterface` / `PageSnapshot`.
 - `src/agent/policy.rs` — policy gates.
