@@ -1,8 +1,8 @@
 //! Tantivy index of [`SemanticBlock`]s.
 //!
 //! The writer sits behind a [`Mutex`]. Callers add or delete, then [`BlockIndex::commit`].
-//! Full-text search stays in M1.6. [`BlockIndex::blocks_for_url`] only reads blocks already
-//! committed for one exact page URL.
+//! Full-text search lives in [`crate::query`]. [`BlockIndex::blocks_for_url`] only reads blocks
+//! already committed for one exact page URL.
 //!
 //! `page_url` is a raw string (`STRING | STORED`), not tokenized text, so
 //! [`BlockIndex::remove_by_url`] deletes on the exact URL. `block_id` and `heading_path`
@@ -135,6 +135,29 @@ impl BlockIndex {
     /// Schema written by [`BlockIndex::open_or_create`].
     pub fn schema(&self) -> Schema {
         self.index.schema()
+    }
+
+    pub(crate) fn tantivy_index(&self) -> &Index {
+        &self.index
+    }
+
+    pub(crate) fn block_id_field(&self) -> Field {
+        self.fields.block_id
+    }
+
+    pub(crate) fn heading_path_field(&self) -> Field {
+        self.fields.heading_path
+    }
+
+    pub(crate) fn text_field(&self) -> Field {
+        self.fields.text
+    }
+
+    pub(crate) fn block_from_stored(
+        &self,
+        doc: &TantivyDocument,
+    ) -> Result<SemanticBlock, IndexError> {
+        self.block_from_doc(doc)
     }
 
     /// Queue `block`. It is not searchable until [`BlockIndex::commit`].
