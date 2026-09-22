@@ -7,17 +7,19 @@ description = "Persistent page memory for NeuroBrowser"
 # Independent crate. Not a Cargo workspace member.
 # Root and src-tauri path dependencies land in M1.7.
 
-# scraper (M1.3), sha2 (M1.4), tantivy (M1.5), and async-trait (M1.7 trait
-# impls) are declared here and unused until those milestones. async-trait 0.1
-# only accepts trait impls, so MemoryService methods are inherent async fns.
+# scraper (M1.3), tantivy (M1.5), and async-trait (M1.7 trait impls) are
+# declared here and unused until those milestones. async-trait 0.1 only
+# accepts trait impls, so MemoryService methods are inherent async fns.
+# sha2 and serde_json back the page store (M1.4). tokio `fs` is its filesystem.
 [dependencies]
 async-trait = "0.1"
 scraper = "0.22"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 tantivy = "0.22"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
 url = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
