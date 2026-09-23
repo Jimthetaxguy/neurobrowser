@@ -88,8 +88,11 @@ impl Default for ProviderConfig {
 /// A recognized call is kept even when it omits a required argument.
 /// `ReActAgent` checks it against the tool that would run it and reports the
 /// failure to the model. Dropping it here would leave `tool_calls` empty,
-/// which the agent treats as a final answer. A legacy call with no arguments,
-/// such as `wait()`, counts only when it names a known tool.
+/// which the agent treats as a final answer.
+///
+/// A legacy line must end with `)`. A truncated `back(` or
+/// `navigate(https://ex` is not a call. A legacy call with no arguments, such
+/// as `wait()`, counts only when it names a known tool.
 pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
 
@@ -106,7 +109,10 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
         if line.starts_with("Action:") {
             let action_part = line.strip_prefix("Action:").unwrap().trim();
 
-            if let Some((name, args_str)) = action_part.split_once('(') {
+            if let Some((name, args_str)) = action_part
+                .split_once('(')
+                .filter(|(_, args_str)| args_str.ends_with(')'))
+            {
                 let name = name.trim();
                 let args_str = args_str.trim_end_matches(')').trim();
 

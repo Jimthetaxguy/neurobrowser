@@ -551,6 +551,28 @@ fn parses_argument_less_legacy_calls_to_known_tools() {
 }
 
 #[test]
+fn drops_truncated_legacy_calls() {
+    // A legacy call must end with `)`. Without it the model output was cut
+    // off, so nothing runs, even for a tool that needs no arguments.
+    for truncated in [
+        "Action: back(",
+        "Action: reload(",
+        "Action: navigate(https://ex",
+        "Action: type(#q, hel",
+    ] {
+        assert!(
+            neurobrowser::providers::parse_tool_calls(truncated).is_empty(),
+            "{truncated}"
+        );
+    }
+
+    let calls = neurobrowser::providers::parse_tool_calls("Action: back()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "back");
+    assert!(calls[0].arguments.is_empty());
+}
+
+#[test]
 fn parses_legacy_action_syntax_with_multiple_positional_args() {
     // `type(selector, text)` is a two-arg legacy positional call. Both
     // args must survive as distinct values (mapped to the `type` tool's

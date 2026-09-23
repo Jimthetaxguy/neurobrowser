@@ -22,7 +22,9 @@ remain 0.1.0 until an actual version bump and release tag.
   to the model. That turn does not complete the run. A `ToolCall` with no
   `arguments` object is read as an empty one and checked the same way. So is
   a legacy `Action:` call to a known tool with empty parentheses: `navigate()`
-  is reported, and `wait()` now runs instead of being dropped.
+  is reported, and `wait()` now runs instead of being dropped. A legacy line
+  must end with `)`. A truncated `back(` or `navigate(https://ex` is dropped;
+  before, it ran.
 - The prompt shows each failed tool result with its message, not a bare
   `Error`.
 
