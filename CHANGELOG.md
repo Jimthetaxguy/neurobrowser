@@ -20,7 +20,9 @@ remain 0.1.0 until an actual version bump and release tag.
   Before this change they ran with empty defaults or reached the approval gate.
   The agent now records `Error: missing required argument(s): …` and returns it
   to the model. That turn does not complete the run. A `ToolCall` with no
-  `arguments` object is read as an empty one and checked the same way.
+  `arguments` object is read as an empty one and checked the same way. So is
+  a legacy `Action:` call to a known tool with empty parentheses: `navigate()`
+  is reported, and `wait()` now runs instead of being dropped.
 - The prompt shows each failed tool result with its message, not a bare
   `Error`.
 

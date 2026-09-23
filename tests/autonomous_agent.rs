@@ -240,12 +240,9 @@ impl AiProvider for ContextRecordingProvider {
     }
 }
 
-#[tokio::test]
-async fn invalid_tool_call_reports_error_to_model_instead_of_completing() {
-    // `navigate` is a real tool, but this call omits its required `url`.
-    // Before the fix the parser dropped it, `tool_calls` came back empty, and
-    // the run reported Completed with the raw tool-call text.
-    let invalid = r#"ToolCall: {"name":"navigate","arguments":{}}"#;
+/// Run two turns of `invalid`, a `navigate` call without its required `url`,
+/// and check that the run fails closed and the model is told why.
+async fn assert_missing_url_reaches_model(invalid: &str) {
     let contexts = Arc::new(Mutex::new(Vec::new()));
     let provider = Arc::new(ContextRecordingProvider {
         responses: Mutex::new(
@@ -322,6 +319,64 @@ async fn invalid_tool_call_reports_error_to_model_instead_of_completing() {
         prompt.contains("- navigate: Error: missing required argument(s): url\n"),
         "{prompt}"
     );
+}
+
+#[tokio::test]
+async fn invalid_tool_call_reports_error_to_model_instead_of_completing() {
+    // `navigate` is a real tool, but this call omits its required `url`.
+    // Before the fix the parser dropped it, `tool_calls` came back empty, and
+    // the run reported Completed with the raw tool-call text.
+    assert_missing_url_reaches_model(r#"ToolCall: {"name":"navigate","arguments":{}}"#).await;
+}
+
+#[tokio::test]
+async fn argument_less_legacy_call_reports_error_to_model_instead_of_completing() {
+    // Same guarantee for the legacy syntax: `navigate()` has no arguments.
+    assert_missing_url_reaches_model("Action: navigate()").await;
+}
+
+#[tokio::test]
+async fn argument_less_legacy_wait_passes_policy_and_runs() {
+    // `wait` has no required arguments, so `wait()` is a complete call.
+    assert!(neurobrowser::default_tool_registry()
+        .get("wait")
+        .expect("wait is registered")
+        .definition()
+        .arguments
+        .iter()
+        .all(|argument| !argument.required));
+    let browser = TestBrowser::new("https://form.example", "ready");
+    let provider = Arc::new(FakeProvider::new(vec![
+        real_shaped_response("Action: wait()"),
+        real_shaped_response("Final Answer: ready"),
+    ]));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+
+    let run = agent
+        .execute_with_policy("wait for the page", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    // `ToolCallStarted` is emitted only after the policy allows the call.
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, AgentRunEvent::ToolCallStarted { tool, .. } if tool == "wait")
+        ),
+        "{:?}",
+        run.events
+    );
+    assert!(
+        run.events.iter().any(|event| matches!(
+            event,
+            AgentRunEvent::ToolCallResult { tool, result, success: true, .. }
+                if tool == "wait" && result == "Page is ready"
+        )),
+        "{:?}",
+        run.events
+    );
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(run.final_response.as_deref(), Some("ready"));
+    assert_eq!(run.iterations, 2);
 }
 
 #[tokio::test]
@@ -471,6 +526,28 @@ fn parses_legacy_action_syntax_for_compatibility() {
         calls[0].arguments.get("selector").map(String::as_str),
         Some("#go")
     );
+}
+
+#[test]
+fn parses_argument_less_legacy_calls_to_known_tools() {
+    // Kept so the agent can run `wait()` and report `navigate()`.
+    let calls = neurobrowser::providers::parse_tool_calls("Action: navigate()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "navigate");
+    assert!(calls[0].arguments.is_empty());
+
+    let calls = neurobrowser::providers::parse_tool_calls("Action: wait()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "wait");
+    assert!(calls[0].arguments.is_empty());
+
+    // Memory tools are known names too; the agent decides if they are attached.
+    let calls = neurobrowser::providers::parse_tool_calls("Action: inspect_active_page()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "inspect_active_page");
+
+    // An unknown name still needs arguments to count as a call.
+    assert!(neurobrowser::providers::parse_tool_calls("Action: frobnicate()").is_empty());
 }
 
 #[test]

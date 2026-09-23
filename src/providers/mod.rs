@@ -88,7 +88,8 @@ impl Default for ProviderConfig {
 /// A recognized call is kept even when it omits a required argument.
 /// `ReActAgent` checks it against the tool that would run it and reports the
 /// failure to the model. Dropping it here would leave `tool_calls` empty,
-/// which the agent treats as a final answer.
+/// which the agent treats as a final answer. A legacy call with no arguments,
+/// such as `wait()`, counts only when it names a known tool.
 pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
 
@@ -111,7 +112,7 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
 
                 let arguments = parse_arguments(name, args_str);
 
-                if !arguments.is_empty() {
+                if !arguments.is_empty() || is_known_tool(name) {
                     calls.push(ToolCall {
                         name: name.to_string(),
                         arguments,
@@ -217,6 +218,12 @@ fn positional_argument_names(tool_name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// True for the 17 browser tools and the two memory tools.
+fn is_known_tool(tool_name: &str) -> bool {
+    crate::tools::memory_tools::positional_argument_names(tool_name).is_some()
+        || browser_tool_registry().get(tool_name).is_some()
 }
 
 fn split_arguments(args_str: &str) -> Vec<String> {
