@@ -12,7 +12,7 @@ use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
     BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -47,13 +47,6 @@ struct SnapshotResponse {
     form_count: usize,
     price_count: usize,
     table_count: usize,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ValidateUrlResult {
-    valid: bool,
-    normalized_url: String,
-    error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -231,14 +224,9 @@ async fn navigate(
     url: String,
 ) -> Result<(), String> {
     // Host-side scheme/format + netguard check. UI does not preflight.
-    let validation = validate_url(url.clone());
-    if !validation.valid {
-        return Err(validation
-            .error
-            .unwrap_or_else(|| "Invalid URL".to_string()));
-    }
+    let normalized_url = normalize_and_guard_url(url)?;
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.navigate(&validation.normalized_url).await?;
+    browser.navigate(&normalized_url).await?;
     // Server-driven capture. Policy deny and capture errors stay off the
     // navigation result; the page load already succeeded.
     capture_after_navigate(state.inner(), &browser).await;
@@ -444,33 +432,20 @@ fn browser_runtime_report(
         .resolve_request(&payload.request_id, payload.payload, payload.error)
 }
 
-#[tauri::command]
-fn validate_url(url: String) -> ValidateUrlResult {
+fn normalize_and_guard_url(url: String) -> Result<String, String> {
     let normalized = if url.starts_with("http://") || url.starts_with("https://") {
-        url.clone()
+        url
     } else if url.contains('.') && !url.contains(' ') {
-        format!("https://{}", url)
+        format!("https://{url}")
     } else {
-        return ValidateUrlResult {
-            valid: false,
-            normalized_url: String::new(),
-            error: Some("Invalid URL format".to_string()),
-        };
+        return Err("Invalid URL format".to_string());
     };
 
     if let Some(reason) = neurobrowser::netguard::blocked_reason(&normalized) {
-        return ValidateUrlResult {
-            valid: false,
-            normalized_url: normalized,
-            error: Some(reason.to_string()),
-        };
+        return Err(reason.to_string());
     }
 
-    ValidateUrlResult {
-        valid: true,
-        normalized_url: normalized,
-        error: None,
-    }
+    Ok(normalized)
 }
 
 const DEFAULT_MEMORY_SEARCH_LIMIT: usize = 8;
@@ -726,7 +701,6 @@ fn main() {
             start_agent_run,
             submit_approval,
             sync_browser_viewport,
-            validate_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
