@@ -1,12 +1,11 @@
 import AppKit
-import WebKit
 
 class BrowserViewController: NSViewController {
     
     // MARK: - UI Components
     
     var splitView: NSSplitViewController!
-    var sidebarViewController: SidebarViewController!
+    var controlSurfaceViewController: ReactControlSurfaceViewController!
     var contentViewController: ContentViewController!
     
     // MARK: - Lifecycle
@@ -25,9 +24,9 @@ class BrowserViewController: NSViewController {
     private func setupSplitView() {
         splitView = NSSplitViewController()
         
-        sidebarViewController = SidebarViewController()
-        sidebarViewController.controlSurfaceViewController.delegate = self
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
+        controlSurfaceViewController = ReactControlSurfaceViewController()
+        controlSurfaceViewController.delegate = self
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: controlSurfaceViewController)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = 300
         sidebarItem.maximumThickness = 440
@@ -35,7 +34,7 @@ class BrowserViewController: NSViewController {
         
         contentViewController = ContentViewController()
         contentViewController.pageUpdateHandler = { [weak self] event in
-            self?.sidebarViewController.dispatchToReact(event)
+            self?.controlSurfaceViewController.dispatchToReact(event)
         }
         let contentItem = NSSplitViewItem(viewController: contentViewController)
         contentItem.minimumThickness = 400
@@ -71,47 +70,42 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
     func controlSurface(_ controlSurface: ReactControlSurfaceViewController, didReceiveCommand command: String, payload: [String: Any]) {
         switch command {
         case "create_session":
-            sidebarViewController.dispatchToReact([
+            controlSurfaceViewController.dispatchToReact([
                 "type": "status",
                 "message": "Native AppKit session ready"
             ])
         case "create_page":
-            contentViewController.addNewTab()
+            contentViewController.addNewTab(pageId: Self.payloadPageId(payload))
         case "close_page":
-            contentViewController.closeCurrentTab()
+            contentViewController.closePage(pageId: Self.payloadPageId(payload))
         case "set_active_page":
-            if let pageId = payload["pageId"] as? Int {
+            if let pageId = Self.payloadPageId(payload) {
                 contentViewController.selectTab(pageId: pageId)
             }
         case "navigate":
             if let url = payload["url"] as? String {
-                contentViewController.navigateCurrentTab(to: url)
+                contentViewController.navigate(pageId: Self.payloadPageId(payload), to: url)
             }
         case "browser_back":
+            if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
             contentViewController.goBack()
         case "browser_forward":
+            if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
             contentViewController.goForward()
         case "browser_reload":
+            if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
             contentViewController.reloadCurrentPage()
-        case "get_page_snapshot":
-            contentViewController.snapshotCurrentPage { [weak self] snapshot in
-                self?.sidebarViewController.dispatchToReact([
-                    "type": "snapshot",
-                    "pageId": payload["pageId"] as? Int ?? self?.contentViewController.currentTabIndex ?? 0,
-                    "snapshot": snapshot
-                ])
-            }
-        case "set_provider":
-            let provider = payload["provider"] as? String ?? "unknown"
-            sidebarViewController.dispatchToReact([
-                "type": "status",
-                "message": "Provider selected in AppKit host: \(provider)"
-            ])
         default:
-            sidebarViewController.dispatchToReact([
+            controlSurfaceViewController.dispatchToReact([
                 "type": "status",
                 "message": "Unhandled native command: \(command)"
             ])
         }
+    }
+
+    private static func payloadPageId(_ payload: [String: Any]) -> Int? {
+        if let value = payload["pageId"] as? Int { return value }
+        if let value = payload["pageId"] as? NSNumber { return value.intValue }
+        return nil
     }
 }

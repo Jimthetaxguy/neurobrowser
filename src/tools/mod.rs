@@ -4,31 +4,29 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod contracts;
+pub mod memory_tools;
 
-pub use contracts::{RiskLevel, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
+pub use contracts::{ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
     pub tool_name: String,
-    pub arguments: HashMap<String, String>,
     pub result: String,
     pub success: bool,
 }
 
 impl ToolResult {
-    pub fn success(tool_name: &str, arguments: HashMap<String, String>, result: String) -> Self {
+    pub fn success(tool_name: &str, result: String) -> Self {
         Self {
             tool_name: tool_name.to_string(),
-            arguments,
             result,
             success: true,
         }
     }
 
-    pub fn error(tool_name: &str, arguments: HashMap<String, String>, error: String) -> Self {
+    pub fn error(tool_name: &str, error: String) -> Self {
         Self {
             tool_name: tool_name.to_string(),
-            arguments,
             result: error,
             success: false,
         }
@@ -38,7 +36,7 @@ impl ToolResult {
 #[async_trait]
 pub trait BrowserTool: Send + Sync {
     /// Required: a new tool that forgets this is a compile error, not a
-    /// silent Read + Low allow under Assisted.
+    /// silent Read-risk allow under Assisted.
     fn definition(&self) -> ToolDefinition;
     async fn execute(
         &self,
@@ -52,7 +50,6 @@ pub trait BrowserInterface: Send + Sync {
     async fn navigate(&self, url: &str) -> Result<(), String>;
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String>;
     async fn get_text(&self, selector: &str) -> Result<String, String>;
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String>;
     async fn click(&self, selector: &str) -> Result<(), String>;
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), String>;
     async fn submit_form(&self, selector: &str) -> Result<(), String>;
@@ -81,14 +78,6 @@ pub trait BrowserInterface: Send + Sync {
 
     async fn wait_for_navigation(&self) -> Result<(), String> {
         Ok(())
-    }
-
-    async fn accessibility_tree(&self) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    async fn get_page_info(&self) -> Result<PageSnapshot, String> {
-        self.snapshot().await
     }
 }
 
@@ -124,7 +113,6 @@ pub struct ElementInfo {
 pub struct LinkInfo {
     pub href: String,
     pub text: String,
-    pub selector: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,14 +128,12 @@ pub struct FormInfo {
     pub action: String,
     pub method: String,
     pub inputs: Vec<FormInputInfo>,
-    pub selector: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormInputInfo {
     pub name: String,
     pub input_type: String,
-    pub selector: String,
     pub value: Option<String>,
 }
 
@@ -155,7 +141,6 @@ pub struct FormInputInfo {
 pub struct PriceInfo {
     pub value: String,
     pub currency: String,
-    pub selector: String,
     pub context: String,
 }
 
@@ -163,7 +148,6 @@ pub struct PriceInfo {
 pub struct TableInfo {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
-    pub selector: String,
 }
 
 pub struct ToolRegistry {
@@ -187,5 +171,20 @@ impl ToolRegistry {
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
         self.tools.get(name).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+
+    /// Every registered tool's definition, sorted by name.
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions: Vec<_> = self.tools.values().map(|tool| tool.definition()).collect();
+        definitions.sort_by(|left, right| left.name.cmp(&right.name));
+        definitions
     }
 }

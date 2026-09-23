@@ -1,10 +1,9 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, AiProvider, AiResponse,
-    ProviderConfig, ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, resolve_endpoint, AiContext,
+    AiProvider, AiResponse, ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct OpenAiProvider {
     config: ProviderConfig,
@@ -13,10 +12,8 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let origin = resolve_endpoint(config.base_url.as_deref(), "https://api.openai.com", "");
+        let client = client_for_origin(&origin);
 
         Self { config, client }
     }
@@ -102,7 +99,6 @@ impl AiProvider for OpenAiProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
         })
     }

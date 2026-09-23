@@ -15,14 +15,13 @@ function postToAppKit(command, payload = {}) {
 
 export function createTauriHostAdapter() {
   const invoke = (command, payload = {}) => {
-    if (!window.__TAURI_INTERNALS__ && !window.__TAURI__) {
+    if (!window.__TAURI_INTERNALS__) {
       throw new Error("Tauri IPC bridge is unavailable. Run this app through the Tauri desktop runtime.");
     }
     return tauriInvoke(command, payload);
   };
 
   return {
-    lane: "tauri",
     rendersPageInHost: true,
     async createSession() {
       return invoke("create_session");
@@ -51,14 +50,11 @@ export function createTauriHostAdapter() {
     async getPageSnapshot(sessionId, pageId) {
       return invoke("get_page_snapshot", { sessionId, pageId });
     },
-    async ask(sessionId, pageId, prompt) {
-      return invoke("ask", { sessionId, pageId, prompt });
-    },
     async startAgentRun(sessionId, pageId, prompt) {
       return invoke("start_agent_run", { sessionId, pageId, prompt });
     },
-    async submitApproval(runId, approved, message = null) {
-      return invoke("submit_approval", { runId, approved, message });
+    async submitApproval(runId, approved) {
+      return invoke("submit_approval", { runId, approved });
     },
     async cancelAgentRun(runId) {
       return invoke("cancel_agent_run", { runId });
@@ -75,6 +71,21 @@ export function createTauriHostAdapter() {
     async setProvider(provider) {
       return invoke("set_provider", { provider });
     },
+    async capturePage(sessionId, pageId) {
+      return invoke("capture_page", { sessionId, pageId });
+    },
+    async searchLocalMemory(query, limit = 8) {
+      return invoke("search_local_memory", { query, limit });
+    },
+    async explainMemoryResult(query, result, limit = 8) {
+      return invoke("explain_memory_result", { query, result, limit });
+    },
+    async forgetMemory(pageUrl) {
+      return invoke("forget_memory", { pageUrl });
+    },
+    async getMemoryStats() {
+      return invoke("get_memory_stats");
+    },
     onHostEvent() {
       return () => {};
     },
@@ -83,12 +94,18 @@ export function createTauriHostAdapter() {
 
 export function createAppKitHostAdapter() {
   let nextPageId = 0;
-  let latestSnapshot = null;
+  const snapshotsByPageId = new Map();
   const sessionId = `appkit-${crypto.randomUUID?.() ?? Date.now()}`;
 
   window.neurobrowserNativeDispatch = (event) => {
-    if (event?.type === "snapshot") {
-      latestSnapshot = event.snapshot;
+    if (event?.type === "snapshot" && Number.isInteger(event.pageId)) {
+      snapshotsByPageId.set(event.pageId, event.snapshot);
+    }
+    if (event?.type === "tabs") {
+      const pageIds = new Set(event.tabs.map((tab) => tab.id));
+      for (const pageId of snapshotsByPageId.keys()) {
+        if (!pageIds.has(pageId)) snapshotsByPageId.delete(pageId);
+      }
     }
     window.dispatchEvent(new CustomEvent("neurobrowser:native", { detail: event }));
   };
@@ -98,7 +115,6 @@ export function createAppKitHostAdapter() {
   };
 
   return {
-    lane: "appkit",
     rendersPageInHost: false,
     async createSession() {
       await send("create_session", { sessionId });
@@ -120,62 +136,28 @@ export function createAppKitHostAdapter() {
     async navigate(activeSessionId, pageId, url) {
       await send("navigate", { sessionId: activeSessionId, pageId, url });
     },
-    async getPageSnapshot(activeSessionId, pageId) {
-      await send("get_page_snapshot", { sessionId: activeSessionId, pageId });
-      return latestSnapshot;
-    },
-    async startAgentRun() {
-      return {
-        run_id: `appkit-run-${Date.now()}`,
-        status: "completed",
-        final_response: "Native AppKit lane received the run request. Rust approval-loop parity remains deferred.",
-        iterations: 1,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async submitApproval(runId, approved) {
-      return {
-        run_id: runId,
-        status: approved ? "completed" : "cancelled",
-        final_response: approved ? "Approved in native host lane." : "Approval denied.",
-        iterations: 0,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async cancelAgentRun(runId) {
-      return {
-        run_id: runId,
-        status: "cancelled",
-        final_response: "Run cancelled.",
-        iterations: 0,
-        events: [],
-        pending_tool_call: null,
-        approval_id: null,
-      };
-    },
-    async getActionPolicy() {
-      return {
-        autonomy_level: "assisted",
-        allowed_domains: [],
-        denied_domains: [],
-        denied_tools: [],
-        approval_required_tools: [],
-        block_prompt_injection: true,
-      };
-    },
-    async setActionPolicy(policy) {
-      return policy;
+    async getPageSnapshot(_activeSessionId, pageId) {
+      return snapshotsByPageId.get(pageId) ?? null;
     },
     async browserAction(command, activeSessionId, pageId) {
       await send(command, { sessionId: activeSessionId, pageId });
     },
-    async setProvider(provider) {
-      await send("set_provider", { provider });
-      return { provider, model: "native-host", configured: true };
+    async capturePage() {},
+    async searchLocalMemory() {
+      return [];
+    },
+    async explainMemoryResult() {
+      return { breakdown: [], snippets: [] };
+    },
+    async forgetMemory() {},
+    async getMemoryStats() {
+      return {
+        page_count: 0,
+        data_dir: "",
+        capture_enabled: false,
+        allowed_domains: [],
+        denied_domains: [],
+      };
     },
     onHostEvent(callback) {
       const handler = (event) => {

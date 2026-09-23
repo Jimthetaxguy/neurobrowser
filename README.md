@@ -16,7 +16,7 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 - **Desktop (macOS only):** React + Vite shell, Tauri v2 commands, OS child webview per page
 - **Library:** Tokio, reqwest, `scraper` HTML parsing, serde, thiserror v2
 - **Headless protocol stub:** Tokio policy evaluation and a hardcoded snapshot
-- **Agent IPC:** `SKILL.md` / `docs/AGENT-SURFACE.md`; `neurobrowser-headless` JSON-RPC over UDS or TCP
+- **Agent IPC:** Tauri commands + daemon socket
 
 ## Quick Start
 
@@ -60,17 +60,8 @@ Shipped run/policy surface:
 
 React + Tauri is the primary frontend path
 ([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).
-
-Spec and acceptance trail:
-[SPEC-AUTONOMOUS-BROWSER-AGENT](docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md),
-[STORY-001](docs/stories/STORY-001-autonomous-browser-agent-core.md).
-
-## Documentation Workflow
-
-Shared specs, stories, and architecture decisions are committed under `docs/specs/`,
-`docs/stories/`, and `docs/adr/`. Local process notes stay under
-`docs/notes/local/` and are ignored. See [docs/notes/README.md](docs/notes/README.md)
-for the promotion rules and local worklog path.
+Agent contract: [docs/AGENT-SURFACE.md](docs/AGENT-SURFACE.md).
+Unimplemented work: [CHANGELOG.md](CHANGELOG.md#still-unimplemented).
 
 ## Real Systems
 

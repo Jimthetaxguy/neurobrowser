@@ -5,7 +5,7 @@ protocol ReactControlSurfaceDelegate: AnyObject {
     func controlSurface(_ controlSurface: ReactControlSurfaceViewController, didReceiveCommand command: String, payload: [String: Any])
 }
 
-final class ReactControlSurfaceViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
+final class ReactControlSurfaceViewController: NSViewController, WKScriptMessageHandler {
     weak var delegate: ReactControlSurfaceDelegate?
 
     private var webView: WKWebView!
@@ -20,7 +20,6 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
         configuration.userContentController = userContentController
 
         webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
         self.view = webView
     }

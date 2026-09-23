@@ -1,0 +1,26 @@
+[package]
+name = "neuro-memory"
+version = "0.1.0"
+edition = "2021"
+description = "Persistent page memory for NeuroBrowser"
+
+# Independent crate. Not a Cargo workspace member.
+# The root and src-tauri crates depend on this path. There is no [workspace].
+
+# scraper extracts blocks (M1.3). sha2, serde_json, and tokio `fs` back the
+# page store (M1.4). tantivy backs the block index (M1.5) and search (M1.6).
+# async-trait 0.1 only accepts trait impls, so MemoryService methods are
+# inherent async fns.
+[dependencies]
+async-trait = "0.1"
+scraper = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tantivy = "0.22"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
+url = { version = "2", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"

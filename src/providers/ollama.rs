@@ -1,34 +1,21 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, AiContext, AiProvider, AiResponse, ProviderConfig,
-    ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, resolve_endpoint, AiContext,
+    AiProvider, AiResponse, ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct OllamaProvider {
     config: ProviderConfig,
     client: Client,
-    base_url: String,
 }
 
 impl OllamaProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let base_url = config
-            .base_url
-            .clone()
-            .unwrap_or_else(|| "http://localhost:11434".to_string());
+        let origin = resolve_endpoint(config.base_url.as_deref(), "http://localhost:11434", "");
+        let client = client_for_origin(&origin);
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
-
-        Self {
-            config,
-            client,
-            base_url,
-        }
+        Self { config, client }
     }
 
     fn build_prompt(&self, prompt: &str, context: &AiContext) -> String {
@@ -51,9 +38,15 @@ impl AiProvider for OllamaProvider {
             }
         });
 
+        let endpoint = resolve_endpoint(
+            self.config.base_url.as_deref(),
+            "http://localhost:11434",
+            "/api/generate",
+        );
+
         let response = self
             .client
-            .post(format!("{}/api/generate", self.base_url))
+            .post(endpoint)
             .json(&body)
             .send()
             .await
@@ -83,7 +76,6 @@ impl AiProvider for OllamaProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
         })
     }

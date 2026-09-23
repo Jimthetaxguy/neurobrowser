@@ -1,10 +1,9 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, AiProvider, AiResponse,
-    ProviderConfig, ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, resolve_endpoint, AiContext,
+    AiProvider, AiResponse, ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct AnthropicProvider {
     config: ProviderConfig,
@@ -13,27 +12,10 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let origin = resolve_endpoint(config.base_url.as_deref(), "https://api.anthropic.com", "");
+        let client = client_for_origin(&origin);
 
         Self { config, client }
-    }
-
-    /// Build the single user-message content, folding in any tool results.
-    fn build_user_content(&self, prompt: &str, context: &AiContext) -> String {
-        if context.tool_results.is_empty() {
-            prompt.to_string()
-        } else {
-            let tool_results_str = context
-                .tool_results
-                .iter()
-                .map(|r| format!("{}: {}", r.tool_name, r.result))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("{prompt}\n\nTool results:\n{tool_results_str}")
-        }
     }
 
     /// Build the JSON body for the Messages API.
@@ -46,7 +28,7 @@ impl AnthropicProvider {
             "model": self.config.model,
             "system": build_system_prompt(context),
             "messages": [
-                { "role": "user", "content": self.build_user_content(prompt, context) }
+                { "role": "user", "content": prompt }
             ],
             "max_tokens": self.config.max_tokens.unwrap_or(4096),
             "temperature": self.config.temperature.unwrap_or(0.3),
@@ -124,7 +106,6 @@ impl AiProvider for AnthropicProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
         })
     }
@@ -137,17 +118,13 @@ impl AiProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::ScrollPosition;
 
     fn ctx() -> AiContext {
         AiContext {
             current_url: String::new(),
             page_title: String::new(),
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results: Vec::new(),
-            conversation_history: Vec::new(),
+            personal_memory: false,
         }
     }
 
@@ -176,6 +153,20 @@ mod tests {
             messages.iter().all(|m| m["role"] != "system"),
             "no message may carry the system role (the Messages API rejects it)"
         );
+    }
+
+    #[test]
+    fn user_turn_sends_prompt_only_when_tool_results_exist() {
+        let mut context = ctx();
+        context.tool_results.push(crate::tools::ToolResult::success(
+            "get_text",
+            "hello".to_string(),
+        ));
+        let body = provider().build_request_body("do the thing", &context);
+        // Tool results reach the model once, through the shared system prompt.
+        assert_eq!(body["messages"][0]["content"], "do the thing");
+        let system = body["system"].as_str().expect("system prompt");
+        assert!(system.contains("Recent tool results:\n- get_text: hello\n"));
     }
 
     #[test]

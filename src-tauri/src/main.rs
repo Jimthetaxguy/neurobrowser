@@ -1,16 +1,18 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 mod runtime;
 
+use neuro_memory::{
+    now_millis, CaptureDecision, CapturePolicy, CapturedPage, MemoryService, SearchExplain,
+    SearchRequest, SearchResult,
+};
 use neurobrowser::{
     ActionPolicy, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus, BrowserInterface,
-    PageConfig, PageSnapshot, ProviderConfig, ProviderType, SessionManager, ToolCall,
+    PageSnapshot, PolicyDecision, ProviderConfig, ProviderType, SessionManager, ToolCall,
 };
 use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
     BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -19,7 +21,13 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 struct AppState {
     session_manager: SessionManager,
     runtimes: Arc<BrowserRuntimeRegistry>,
+    /// Persistent page memory (`neuro_memory::MemoryService`), not in-run
+    /// `agent::memory::AgentMemory`. Opened at `app_data_dir()/memory/`.
+    memory: Arc<MemoryService>,
     action_policy: Mutex<ActionPolicy>,
+    /// Caller-owned capture rules. `MemoryService::forget` tombstones a host
+    /// here for this process. The service does not store the policy itself.
+    capture_policy: tokio::sync::Mutex<CapturePolicy>,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
 }
 
@@ -31,33 +39,53 @@ struct PendingApproval {
 }
 
 #[derive(Serialize)]
-struct AskResult {
-    response: String,
-    tools_used: Vec<String>,
-    iterations: usize,
-}
-
-#[derive(Serialize)]
 struct SnapshotResponse {
     url: String,
     title: String,
-    html: String,
-    text: String,
     link_count: usize,
     image_count: usize,
     form_count: usize,
     price_count: usize,
     table_count: usize,
-    viewport_width: u32,
-    viewport_height: u32,
-    interactive_ready: bool,
 }
 
-#[derive(Serialize, Deserialize)]
-struct ValidateUrlResult {
-    valid: bool,
-    normalized_url: String,
-    error: Option<String>,
+#[derive(Serialize)]
+struct AgentRunResponse {
+    run_id: String,
+    status: AgentRunStatus,
+    final_response: Option<String>,
+    events: Vec<AgentRunEventResponse>,
+}
+
+#[derive(Serialize)]
+struct PolicyDecisionResponse {
+    reasons: Vec<String>,
+    redacted_arguments: HashMap<String, String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum AgentRunEventResponse {
+    ToolCallStarted {
+        tool: String,
+    },
+    ToolCallResult {
+        tool: String,
+        success: bool,
+    },
+    ToolCallBlocked {
+        tool: String,
+        decision: PolicyDecisionResponse,
+    },
+    ApprovalRequested {
+        tool: String,
+        decision: PolicyDecisionResponse,
+    },
+    ApprovalResolved {
+        approved: bool,
+    },
+    RunCancelled,
+    RunDone,
 }
 
 #[derive(Serialize)]
@@ -146,16 +174,59 @@ fn snapshot_response(snapshot: PageSnapshot) -> SnapshotResponse {
     SnapshotResponse {
         url: snapshot.url,
         title: snapshot.title,
-        html: snapshot.html.unwrap_or_default(),
-        text: snapshot.text.unwrap_or_default(),
         link_count: snapshot.links.len(),
         image_count: snapshot.images.len(),
         form_count: snapshot.forms.len(),
         price_count: snapshot.prices.len(),
         table_count: snapshot.tables.len(),
-        viewport_width: snapshot.viewport_width,
-        viewport_height: snapshot.viewport_height,
-        interactive_ready: snapshot.interactive_ready,
+    }
+}
+
+fn policy_decision_response(decision: PolicyDecision) -> PolicyDecisionResponse {
+    PolicyDecisionResponse {
+        reasons: decision.reasons,
+        redacted_arguments: decision.redacted_arguments,
+    }
+}
+
+fn agent_run_event_response(event: AgentRunEvent) -> AgentRunEventResponse {
+    match event {
+        AgentRunEvent::ToolCallStarted { tool, .. } => {
+            AgentRunEventResponse::ToolCallStarted { tool }
+        }
+        AgentRunEvent::ToolCallResult { tool, success, .. } => {
+            AgentRunEventResponse::ToolCallResult { tool, success }
+        }
+        AgentRunEvent::ToolCallBlocked { tool, decision, .. } => {
+            AgentRunEventResponse::ToolCallBlocked {
+                tool,
+                decision: policy_decision_response(decision),
+            }
+        }
+        AgentRunEvent::ApprovalRequested { tool, decision, .. } => {
+            AgentRunEventResponse::ApprovalRequested {
+                tool,
+                decision: policy_decision_response(decision),
+            }
+        }
+        AgentRunEvent::ApprovalResolved { approved, .. } => {
+            AgentRunEventResponse::ApprovalResolved { approved }
+        }
+        AgentRunEvent::RunCancelled { .. } => AgentRunEventResponse::RunCancelled,
+        AgentRunEvent::RunDone { .. } => AgentRunEventResponse::RunDone,
+    }
+}
+
+fn agent_run_response(result: AgentRunResult) -> AgentRunResponse {
+    AgentRunResponse {
+        run_id: result.run_id,
+        status: result.status,
+        final_response: result.final_response,
+        events: result
+            .events
+            .into_iter()
+            .map(agent_run_event_response)
+            .collect(),
     }
 }
 
@@ -240,14 +311,13 @@ async fn navigate(
     url: String,
 ) -> Result<(), String> {
     // Host-side scheme/format + netguard check. UI does not preflight.
-    let validation = validate_url(url.clone());
-    if !validation.valid {
-        return Err(validation
-            .error
-            .unwrap_or_else(|| "Invalid URL".to_string()));
-    }
+    let normalized_url = normalize_and_guard_url(url)?;
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.navigate(&validation.normalized_url).await
+    browser.navigate(&normalized_url).await?;
+    // Server-driven capture. Policy deny and capture errors stay off the
+    // navigation result; the page load already succeeded.
+    capture_after_navigate(state.inner(), &browser).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -313,38 +383,6 @@ async fn execute_agent_run(
 }
 
 #[tauri::command]
-async fn ask(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-    prompt: String,
-) -> Result<AskResult, String> {
-    let result = execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await?;
-    let tools_used = result
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            AgentRunEvent::ToolCallResult { tool, .. } => Some(tool.clone()),
-            _ => None,
-        })
-        .collect();
-    let response = result.final_response.clone().unwrap_or_else(|| match result.status {
-        AgentRunStatus::AwaitingApproval => {
-            "This action needs your approval before it can run.".to_string()
-        }
-        AgentRunStatus::Blocked => "This action was blocked by the active policy.".to_string(),
-        _ => String::new(),
-    });
-
-    Ok(AskResult {
-        response,
-        tools_used,
-        iterations: result.iterations,
-    })
-}
-
-#[tauri::command]
 fn get_action_policy(state: State<'_, AppState>) -> Result<ActionPolicy, String> {
     state
         .action_policy
@@ -370,8 +408,10 @@ async fn start_agent_run(
     session_id: String,
     page_id: usize,
     prompt: String,
-) -> Result<AgentRunResult, String> {
-    execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await
+) -> Result<AgentRunResponse, String> {
+    execute_agent_run(app, state.inner(), session_id, page_id, &prompt)
+        .await
+        .map(agent_run_response)
 }
 
 #[tauri::command]
@@ -380,8 +420,7 @@ async fn submit_approval(
     state: State<'_, AppState>,
     run_id: String,
     approved: bool,
-    message: Option<String>,
-) -> Result<AgentRunResult, String> {
+) -> Result<AgentRunResponse, String> {
     let pending = state
         .pending_approvals
         .lock()
@@ -397,9 +436,10 @@ async fn submit_approval(
             pending.tool_call,
             &browser,
             approved,
-            message,
+            None,
         )
         .await
+        .map(agent_run_response)
 }
 
 #[tauri::command]
@@ -481,33 +521,197 @@ fn browser_runtime_report(
         .resolve_request(&payload.request_id, payload.payload, payload.error)
 }
 
-#[tauri::command]
-fn validate_url(url: String) -> ValidateUrlResult {
+fn normalize_and_guard_url(url: String) -> Result<String, String> {
     let normalized = if url.starts_with("http://") || url.starts_with("https://") {
-        url.clone()
+        url
     } else if url.contains('.') && !url.contains(' ') {
-        format!("https://{}", url)
+        format!("https://{url}")
     } else {
-        return ValidateUrlResult {
-            valid: false,
-            normalized_url: String::new(),
-            error: Some("Invalid URL format".to_string()),
-        };
+        return Err("Invalid URL format".to_string());
     };
 
     if let Some(reason) = neurobrowser::netguard::blocked_reason(&normalized) {
-        return ValidateUrlResult {
-            valid: false,
-            normalized_url: normalized,
-            error: Some(reason.to_string()),
-        };
+        return Err(reason.to_string());
     }
 
-    ValidateUrlResult {
-        valid: true,
-        normalized_url: normalized,
-        error: None,
+    Ok(normalized)
+}
+
+const DEFAULT_MEMORY_SEARCH_LIMIT: usize = 8;
+
+enum CaptureSkip {
+    Denied(String),
+    Failed(String),
+}
+
+impl std::fmt::Display for CaptureSkip {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Denied(reason) => write!(formatter, "capture denied: {reason}"),
+            Self::Failed(message) => formatter.write_str(message),
+        }
     }
+}
+
+fn captured_page_from_snapshot(snapshot: PageSnapshot) -> Result<CapturedPage, String> {
+    Ok(CapturedPage {
+        url: snapshot
+            .url
+            .parse()
+            .map_err(|err| format!("invalid page url: {err}"))?,
+        title: snapshot.title,
+        html: snapshot.html.unwrap_or_default(),
+        text: snapshot.text.unwrap_or_default(),
+        content_hash: String::new(),
+        captured_at: now_millis(),
+    })
+}
+
+fn stored_page_count(data_dir: &std::path::Path) -> Result<usize, String> {
+    let pages_dir = data_dir.join("pages");
+    let entries = match std::fs::read_dir(&pages_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(format!("{}: {err}", pages_dir.display())),
+    };
+    let mut count = 0usize;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("{}: {err}", pages_dir.display()))?;
+        if entry.path().extension().is_some_and(|ext| ext == "json") {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Store `snapshot` when [`CapturePolicy::evaluate`] allows its URL.
+///
+/// The policy lock is held across the write so a concurrent [`forget_memory`]
+/// cannot tombstone the host and then lose the race to this put.
+async fn capture_snapshot(state: &AppState, snapshot: PageSnapshot) -> Result<(), CaptureSkip> {
+    let policy = state.capture_policy.lock().await;
+    if let CaptureDecision::Deny { reason } = policy.evaluate(&snapshot.url) {
+        return Err(CaptureSkip::Denied(reason));
+    }
+    let page = captured_page_from_snapshot(snapshot).map_err(CaptureSkip::Failed)?;
+    state
+        .memory
+        .capture(page, &policy)
+        .await
+        .map_err(|err| CaptureSkip::Failed(err.to_string()))
+}
+
+async fn capture_after_navigate(state: &AppState, browser: &TauriBrowserRuntime) {
+    let snapshot = match browser.snapshot().await {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            tracing::warn!("memory capture skipped; snapshot failed: {err}");
+            return;
+        }
+    };
+    match capture_snapshot(state, snapshot).await {
+        Ok(()) => {}
+        Err(err @ CaptureSkip::Denied(_)) => {
+            tracing::info!("memory capture skipped: {err}");
+        }
+        Err(err) => {
+            tracing::warn!("memory capture after navigate failed: {err}");
+        }
+    }
+}
+
+fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("memory");
+    MemoryService::open(&data_dir)
+        .map(Arc::new)
+        .map_err(|err| err.to_string())
+}
+
+#[derive(Serialize)]
+struct MemoryStats {
+    page_count: usize,
+    data_dir: String,
+    capture_enabled: bool,
+    allowed_domains: Vec<String>,
+    denied_domains: Vec<String>,
+}
+
+#[tauri::command]
+async fn capture_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let snapshot = browser.snapshot().await?;
+    capture_snapshot(state.inner(), snapshot)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn search_local_memory(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<SearchResult>, String> {
+    let request = SearchRequest {
+        query,
+        limit: limit.unwrap_or(DEFAULT_MEMORY_SEARCH_LIMIT),
+    };
+    state
+        .memory
+        .search(request)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn explain_memory_result(
+    state: State<'_, AppState>,
+    query: String,
+    result: SearchResult,
+    limit: Option<usize>,
+) -> Result<SearchExplain, String> {
+    let request = SearchRequest {
+        query,
+        limit: limit.unwrap_or(DEFAULT_MEMORY_SEARCH_LIMIT),
+    };
+    state
+        .memory
+        .explain(&request, &result)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn forget_memory(state: State<'_, AppState>, page_url: String) -> Result<(), String> {
+    let page_url: tauri::Url = page_url
+        .parse()
+        .map_err(|err| format!("invalid page url: {err}"))?;
+    let mut policy = state.capture_policy.lock().await;
+    state
+        .memory
+        .forget(&page_url, &mut policy)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn get_memory_stats(state: State<'_, AppState>) -> Result<MemoryStats, String> {
+    let policy = state.capture_policy.lock().await.clone();
+    Ok(MemoryStats {
+        page_count: stored_page_count(state.memory.data_dir())?,
+        data_dir: state.memory.data_dir().display().to_string(),
+        capture_enabled: policy.enabled,
+        allowed_domains: policy.allowed_domains,
+        denied_domains: policy.denied_domains,
+    })
 }
 
 #[tauri::command]
@@ -539,43 +743,170 @@ fn main() {
         )
         .init();
 
-    let browser_config = PageConfig::default();
     let agent_config = AgentConfig {
         max_iterations: 5,
         provider_config: provider_config_for(ProviderType::Openai),
     };
 
-    let session_manager = SessionManager::new(browser_config, agent_config);
+    let session_manager = SessionManager::new(agent_config);
     let runtimes = Arc::new(BrowserRuntimeRegistry::default());
 
     tauri::Builder::default()
-        .manage(AppState {
-            session_manager,
-            runtimes,
-            action_policy: Mutex::new(ActionPolicy::default()),
-            pending_approvals: Mutex::new(HashMap::new()),
+        .setup(move |app| {
+            let memory = open_memory(app).map_err(|err| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::other(err))
+            })?;
+            tracing::info!("memory data dir: {}", memory.data_dir().display());
+            app.manage(AppState {
+                session_manager,
+                runtimes,
+                memory,
+                action_policy: Mutex::new(ActionPolicy::default()),
+                capture_policy: tokio::sync::Mutex::new(CapturePolicy::default()),
+                pending_approvals: Mutex::new(HashMap::new()),
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            ask,
             browser_back,
             browser_forward,
             browser_reload,
             browser_runtime_report,
             cancel_agent_run,
+            capture_page,
             close_page,
             create_page,
             create_session,
+            explain_memory_result,
+            forget_memory,
             get_action_policy,
+            get_memory_stats,
             get_page_snapshot,
             navigate,
+            search_local_memory,
             set_active_page,
             set_action_policy,
             set_provider,
             start_agent_run,
             submit_approval,
             sync_browser_viewport,
-            validate_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{agent_run_response, AgentRunEvent, AgentRunResult, AgentRunStatus, ToolCall};
+    use neurobrowser::{PolicyDecision, PolicyOutcome, RiskFlag};
+    use std::collections::HashMap;
+
+    #[test]
+    fn agent_run_response_drops_unread_bodies() {
+        let mut raw_arguments = HashMap::new();
+        raw_arguments.insert("password".into(), "secret".into());
+        raw_arguments.insert("selector".into(), "#pw".into());
+        let mut redacted = HashMap::new();
+        redacted.insert("password".into(), "[REDACTED]".into());
+        redacted.insert("selector".into(), "#pw".into());
+        let decision = PolicyDecision {
+            outcome: PolicyOutcome::RequireApproval,
+            reasons: vec!["Tool call contains sensitive input".into()],
+            risk_flags: vec![RiskFlag::SensitiveArgument],
+            redacted_arguments: redacted,
+        };
+        let result = AgentRunResult {
+            run_id: "run-1".into(),
+            status: AgentRunStatus::AwaitingApproval,
+            final_response: Some("Approval required".into()),
+            iterations: 3,
+            events: vec![
+                AgentRunEvent::ToolCallStarted {
+                    run_id: "run-1".into(),
+                    tool: "type_text".into(),
+                    arguments: raw_arguments.clone(),
+                },
+                AgentRunEvent::ToolCallResult {
+                    run_id: "run-1".into(),
+                    tool: "get_text".into(),
+                    result: "page body".into(),
+                    success: true,
+                },
+                AgentRunEvent::ApprovalRequested {
+                    run_id: "run-1".into(),
+                    approval_id: "appr-1".into(),
+                    tool: "type_text".into(),
+                    decision,
+                },
+                AgentRunEvent::ApprovalResolved {
+                    run_id: "run-1".into(),
+                    approval_id: "appr-1".into(),
+                    approved: false,
+                    message: "unused".into(),
+                },
+                AgentRunEvent::RunDone {
+                    run_id: "run-1".into(),
+                    final_response: "done body".into(),
+                    iterations: 3,
+                },
+                AgentRunEvent::RunCancelled {
+                    run_id: "run-1".into(),
+                    reason: "Approval denied".into(),
+                },
+            ],
+            pending_tool_call: Some(ToolCall {
+                name: "type_text".into(),
+                arguments: raw_arguments,
+            }),
+            approval_id: Some("appr-1".into()),
+        };
+
+        let json = serde_json::to_value(agent_run_response(result)).expect("serialize");
+        assert_eq!(json["run_id"], "run-1");
+        assert_eq!(json["status"], "awaiting_approval");
+        assert_eq!(json["final_response"], "Approval required");
+        assert!(json.get("pending_tool_call").is_none());
+        assert!(json.get("approval_id").is_none());
+        assert!(json.get("iterations").is_none());
+        assert!(!json.to_string().contains("secret"));
+        assert!(!json.to_string().contains("page body"));
+        assert!(!json.to_string().contains("done body"));
+
+        let events = json["events"].as_array().expect("events");
+        assert_eq!(events[0]["type"], "ToolCallStarted");
+        assert_eq!(events[0]["tool"], "type_text");
+        assert!(events[0].get("arguments").is_none());
+        assert!(events[0].get("run_id").is_none());
+
+        assert_eq!(events[1]["type"], "ToolCallResult");
+        assert_eq!(events[1]["tool"], "get_text");
+        assert_eq!(events[1]["success"], true);
+        assert!(events[1].get("result").is_none());
+
+        assert_eq!(events[2]["type"], "ApprovalRequested");
+        assert_eq!(events[2]["tool"], "type_text");
+        assert_eq!(
+            events[2]["decision"]["reasons"][0],
+            "Tool call contains sensitive input"
+        );
+        assert_eq!(
+            events[2]["decision"]["redacted_arguments"]["password"],
+            "[REDACTED]"
+        );
+        assert_eq!(
+            events[2]["decision"]["redacted_arguments"]["selector"],
+            "#pw"
+        );
+        assert!(events[2]["decision"].get("outcome").is_none());
+        assert!(events[2]["decision"].get("risk_flags").is_none());
+        assert!(events[2].get("approval_id").is_none());
+
+        assert_eq!(events[3]["type"], "ApprovalResolved");
+        assert_eq!(events[3]["approved"], false);
+        assert!(events[3].get("message").is_none());
+        assert!(events[3].get("approval_id").is_none());
+
+        assert_eq!(events[4], serde_json::json!({ "type": "RunDone" }));
+        assert_eq!(events[5], serde_json::json!({ "type": "RunCancelled" }));
+    }
 }
