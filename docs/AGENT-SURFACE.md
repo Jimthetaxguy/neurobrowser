@@ -50,7 +50,7 @@ argument and searches the index.
 ## Tools (19)
 
 Arguments are `HashMap<String, String>`. Results are `ToolResult`
-(`tool_name`, `arguments`, `result`, `success`).
+(`tool_name`, `result`, `success`).
 
 `ToolDefinition` exposes `name`, `description`, `arguments`, and `risk`.
 `ToolRisk` contains the action category plus the `sensitive` and
@@ -74,7 +74,7 @@ Wait for navigation to settle. No args. Action: `Wait`.
 ### 3. `query_dom` — `selector`
 
 Query by CSS selector. Returns a text dump of matches, or
-`No elements found`. Action: `Read`.
+`No elements found`. Invalid CSS returns an error. Action: `Read`.
 
 ### 4. `get_text` — `selector`
 
