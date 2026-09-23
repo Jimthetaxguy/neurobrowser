@@ -2,32 +2,28 @@
 name = "neurobrowser"
 version = "0.1.0"
 edition = "2021"
-description = "AI-native browser with custom Rust rendering engine and ReAct agent"
-license = "MIT"
+description = "HTTP scraper and policy-gated browser agent library"
 
 [dependencies]
+# Persistent page memory (neuro_memory::MemoryService), distinct from agent::memory::AgentMemory.
 neuro-memory = { path = "crates/neuro-memory" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-scraper = "0.22"
-url = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+reqwest = { version = "0.12", features = ["json"] }
 thiserror = "2"
-anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = "0.3"
 async-trait = "0.1"
-regex = "1"
-html5ever = "0.29"
-markup5ever_rcdom = "0.5"
-base64 = "0.22"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+url = "2"
+scraper = "0.22"
+regex-lite = "0.1"
+uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
 
 [profile.release]
+strip = true
 lto = true
 codegen-units = 1
+panic = "abort"
