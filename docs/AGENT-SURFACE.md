@@ -173,7 +173,7 @@ Daemon errors:
 { "ok": false, "error": { "code": "INTERNAL", "message": "..." } }
 ```
 
-Codes the daemon emits include `INTERNAL`, `VALIDATION`, and `UNKNOWN_METHOD`.
+Codes the daemon emits include `BAD_REQUEST`, `INTERNAL`, `VALIDATION`, and `UNKNOWN_METHOD`.
 A successful `policy.evaluate` request returns `ok: true` with its policy decision
 in `result`; approval and blocking are decision outcomes, not transport errors:
 
