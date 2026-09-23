@@ -3,7 +3,6 @@
   "description": "Host commands for the main control webview only",
   "webviews": ["main"],
   "permissions": [
-    "core:default",
     "allow-browser-back",
     "allow-browser-forward",
     "allow-browser-reload",
