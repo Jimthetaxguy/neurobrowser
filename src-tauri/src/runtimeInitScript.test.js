@@ -126,3 +126,81 @@ test("a page without a documentElement yields a null html snapshot", () => {
     dom.window.close();
   }
 });
+
+const FORM_WITH_TEMPLATE_SECRETS = `
+  <template id="outer-tpl">
+    <input type="password" name="tpl-pw" value="tpl-secret">
+    <input type="hidden" name="tpl-csrf" value="tpl-tok">
+    <template id="inner-tpl">
+      <input type="password" name="nested-pw" value="nested-secret">
+      <input type="hidden" name="nested-csrf" value="nested-tok">
+    </template>
+  </template>
+`;
+
+test("snapshot html redacts password/hidden values inside <template>, including nested templates", () => {
+  // <template> children live in a separate, inert `content` DocumentFragment
+  // that ordinary querySelectorAll never descends into, so this exercises a
+  // path distinct from the top-level-form test above.
+  const snapshot = snapshotOf(FORM_WITH_TEMPLATE_SECRETS);
+
+  assert.equal(snapshot.html.includes("tpl-secret"), false, "template password value leaked into snapshot html");
+  assert.equal(snapshot.html.includes("tpl-tok"), false, "template hidden value leaked into snapshot html");
+  assert.equal(snapshot.html.includes("nested-secret"), false, "nested-template password value leaked into snapshot html");
+  assert.equal(snapshot.html.includes("nested-tok"), false, "nested-template hidden value leaked into snapshot html");
+  // The inputs themselves (just not their secret values) must survive.
+  assert.ok(snapshot.html.includes('name="tpl-pw"'), "templated password input element was dropped, not just its value");
+  assert.ok(snapshot.html.includes('name="tpl-csrf"'), "templated hidden input element was dropped, not just its value");
+  assert.ok(snapshot.html.includes('name="nested-pw"'), "nested-templated password input element was dropped, not just its value");
+  assert.ok(snapshot.html.includes('name="nested-csrf"'), "nested-templated hidden input element was dropped, not just its value");
+});
+
+test("snapshot never reconstructs custom elements (no clone-triggered constructor side effects)", () => {
+  const dom = new JSDOM(
+    `<!doctype html><html><body><counting-element id="ce"></counting-element></body></html>`,
+    { url: "https://example.test/page", runScripts: "outside-only" },
+  );
+  try {
+    // A custom element that counts constructions and throws on the second
+    // one, so any code path that re-constructs the page's custom elements
+    // (e.g. cloning the live tree) is caught red-handed rather than merely
+    // suspected.
+    dom.window.eval(`
+      window.__constructCount = 0;
+      class CountingElement extends HTMLElement {
+        constructor() {
+          super();
+          window.__constructCount += 1;
+          if (window.__constructCount > 1) {
+            throw new Error('CountingElement constructed a second time');
+          }
+        }
+      }
+      customElements.define('counting-element', CountingElement);
+    `);
+    // customElements.define() upgrades the pre-existing <counting-element>
+    // synchronously: that is construction #1, expected before snapshot() is
+    // ever called.
+    assert.equal(dom.window.__constructCount, 1, "test setup: initial upgrade did not run as expected");
+
+    dom.window.eval(runtimeInitScript);
+    const runtime = dom.window.__NEUROBROWSER_RUNTIME__;
+
+    let snapshot;
+    assert.doesNotThrow(() => {
+      snapshot = runtime.snapshot();
+    }, "snapshot() must not trigger the page's custom element constructor again");
+
+    assert.equal(
+      dom.window.__constructCount,
+      1,
+      "snapshot() constructed the custom element again; it must only read the existing tree",
+    );
+    assert.ok(
+      snapshot.html.includes("counting-element"),
+      "custom element markup was dropped from the snapshot instead of just left un-upgraded",
+    );
+  } finally {
+    dom.window.close();
+  }
+});
