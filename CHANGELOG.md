@@ -6,6 +6,28 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ## Unreleased — maintenance through 2026-09-14
 
+### Changed
+
+- The system prompt's tool list is generated from each tool's
+  `ToolDefinition` (memory tools only when attached) instead of a
+  hand-maintained list.
+- Anthropic user turns carry only the prompt. Tool results reach the model
+  once, through the system prompt.
+- Ollama builds its endpoint with the shared `base_url` helper, like OpenAI and
+  Anthropic. A trailing slash is trimmed and a blank value falls back to the
+  default.
+- Tool calls that omit a required argument (absent or `""`) no longer run.
+  Before this change they ran with empty defaults or reached the approval gate.
+  The agent now records `Error: missing required argument(s): …` and returns it
+  to the model. That turn does not complete the run. A `ToolCall` with no
+  `arguments` object is read as an empty one and checked the same way. So is
+  a legacy `Action:` call to a known tool with empty parentheses: `navigate()`
+  is reported, and `wait()` now runs instead of being dropped. A legacy line
+  must end with `)`. A truncated `back(` or `navigate(https://ex` is dropped;
+  before, it ran.
+- The prompt shows each failed tool result with its message, not a bare
+  `Error`.
+
 ### Fixed
 
 - Removed the unused `futures` dependency from both library and desktop

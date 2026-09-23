@@ -17,7 +17,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 const SEARCH_PERSONAL_MEMORY: &str = "search_personal_memory";
+const SEARCH_PERSONAL_MEMORY_DESCRIPTION: &str =
+    "Search persistent personal page memory (MemoryService). This is not an in-run agent log.";
 const INSPECT_ACTIVE_PAGE: &str = "inspect_active_page";
+const INSPECT_ACTIVE_PAGE_DESCRIPTION: &str = "Return captured personal-memory content for the current page URL, or a policy-denied error. Uses MemoryService, not an in-run agent log.";
 
 /// Hits returned when `limit` is omitted.
 const DEFAULT_SEARCH_LIMIT: usize = 5;
@@ -39,16 +42,55 @@ pub fn register_memory_tools(
     registry.register(Arc::new(InspectActivePageTool { memory, policy }));
 }
 
+/// Definitions of both personal-memory tools.
+///
+/// They need no `MemoryService`, so the provider prompt lists them from here
+/// when `AiContext::personal_memory` is set.
+pub(crate) fn definitions() -> Vec<ToolDefinition> {
+    vec![search_definition(), inspect_definition()]
+}
+
 /// Argument names for positional `Action: tool(...)` calls.
 ///
 /// `default_tool_registry()` does not contain these tools, so the provider
-/// parser cannot learn the names from that registry.
+/// parser reads the names from [`definitions`].
 pub(crate) fn positional_argument_names(tool_name: &str) -> Option<Vec<String>> {
-    match tool_name {
-        SEARCH_PERSONAL_MEMORY => Some(vec!["query".to_string(), "limit".to_string()]),
-        INSPECT_ACTIVE_PAGE => Some(Vec::new()),
-        _ => None,
-    }
+    definitions()
+        .into_iter()
+        .find(|definition| definition.name == tool_name)
+        .map(|definition| {
+            definition
+                .arguments
+                .into_iter()
+                .map(|argument| argument.name)
+                .collect()
+        })
+}
+
+fn search_definition() -> ToolDefinition {
+    ToolDefinition::new(
+        SEARCH_PERSONAL_MEMORY,
+        SEARCH_PERSONAL_MEMORY_DESCRIPTION,
+        ToolRisk::new(ToolAction::Read),
+    )
+    .with_arguments(vec![
+        ToolArgumentDefinition::required("query", "Text to search in persistent personal memory"),
+        ToolArgumentDefinition {
+            name: "limit".to_string(),
+            required: false,
+            description: format!(
+                "Maximum hits to return (default {DEFAULT_SEARCH_LIMIT}, max {MAX_SEARCH_LIMIT})"
+            ),
+        },
+    ])
+}
+
+fn inspect_definition() -> ToolDefinition {
+    ToolDefinition::new(
+        INSPECT_ACTIVE_PAGE,
+        INSPECT_ACTIVE_PAGE_DESCRIPTION,
+        ToolRisk::new(ToolAction::Read),
+    )
 }
 
 /// Search [`MemoryService`] and ignore the live browser.
@@ -63,28 +105,11 @@ impl BrowserTool for SearchPersonalMemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Search persistent personal page memory (MemoryService). This is not an in-run agent log."
+        SEARCH_PERSONAL_MEMORY_DESCRIPTION
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            self.description(),
-            ToolRisk::new(ToolAction::Read),
-        )
-        .with_arguments(vec![
-            ToolArgumentDefinition::required(
-                "query",
-                "Text to search in persistent personal memory",
-            ),
-            ToolArgumentDefinition {
-                name: "limit".to_string(),
-                required: false,
-                description: format!(
-                    "Maximum hits to return (default {DEFAULT_SEARCH_LIMIT}, max {MAX_SEARCH_LIMIT})"
-                ),
-            },
-        ])
+        search_definition()
     }
 
     async fn execute(
@@ -133,15 +158,11 @@ impl BrowserTool for InspectActivePageTool {
     }
 
     fn description(&self) -> &str {
-        "Return captured personal-memory content for the current page URL, or a policy-denied error. Uses MemoryService, not an in-run agent log."
+        INSPECT_ACTIVE_PAGE_DESCRIPTION
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            self.description(),
-            ToolRisk::new(ToolAction::Read),
-        )
+        inspect_definition()
     }
 
     async fn execute(
