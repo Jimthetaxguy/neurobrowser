@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 17 CSS-selector tools, or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
+description: Drive NeuroBrowser from a Rust agent via the crate's 19 tools (17 CSS-selector browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -15,9 +15,16 @@ drive it in two ways:
    `policy.evaluate`, and `snapshot`. `snapshot` is a hardcoded
    `about:blank` stub. The daemon does not execute browser tools.
 
-The shipped agent surface is **17 CSS-selector tools**. There is no `ref_map`
-(`PageSnapshot` has no such field). Not shipped as named tools: `evaluate`,
-`get_attribute`, `wait_for`, `extract_text`.
+The shipped agent surface is **19 tools**. Seventeen are CSS-selector browser
+tools from `default_tool_registry()`. `search_personal_memory` and
+`inspect_active_page` are added by `default_tool_registry_with_memory()` and
+`ReActAgent::with_memory`. `ReActAgent::new` stays at the 17 browser tools.
+There is no `ref_map` (`PageSnapshot` has no such field). Not shipped as named
+tools: `evaluate`, `get_attribute`, `wait_for`, `extract_text`.
+
+`neuro_memory::MemoryService` is persistent page memory on disk. The two
+memory tools close over that service. They do not read an in-run agent log.
+The shipped crate has no `agent::memory` module.
 
 Full spec: `docs/AGENT-SURFACE.md`.
 
@@ -36,9 +43,11 @@ live DOM.
 ```bash
 git clone https://github.com/Jimthetaxguy/neurobrowser.git
 cd neurobrowser
-chmod +x verify.sh
 ./verify.sh
 ```
+
+Full `./verify.sh` type-checks the Tauri crate (macOS, or GTK/WebKit on
+Linux). Library-only: `cargo test`. See `docs/RUNBOOK-DEV.md`.
 
 Headless daemon:
 
@@ -89,10 +98,19 @@ async fn summarize_page(
 
 ## Tools
 
-Registered by `default_tool_registry()`. Arguments are CSS selectors (or
-pixels / a key), not element refs.
+Browser tools are registered by `default_tool_registry()`. The two memory
+tools are registered by `default_tool_registry_with_memory()` /
+`ReActAgent::with_memory`. Browser arguments are CSS selectors (or pixels /
+a key), not element refs.
 
 Call format is `ToolCall: {"name":"tool_name","arguments":{"key":"value"}}`.
+The model's tool list is built from each tool's `ToolDefinition`. The two
+memory tools appear only when memory is attached.
+
+A call to a registered tool that omits a required argument (or sets it to
+`""`) does not run. The agent records
+`Error: missing required argument(s): …` and shows it to the model on the
+next turn. That turn does not complete the run.
 
 | Tool | Args | Purpose |
 |---|---|---|
@@ -113,6 +131,8 @@ Call format is `ToolCall: {"name":"tool_name","arguments":{"key":"value"}}`.
 | `back` | — | History back |
 | `forward` | — | History forward |
 | `reload` | — | Reload |
+| `search_personal_memory` | `query`, optional `limit` | Search persistent `MemoryService` (not an in-run agent log). Ignores the browser. Registered when a `MemoryService` is attached. |
+| `inspect_active_page` | — | Captured content for the current URL, or a `capture denied` error. Registered when a `MemoryService` is attached. |
 
 `screenshot` is registered. `BrowserInterface::screenshot` defaults to
 `"screenshot is not supported by this browser"`. Neither `BrowserEngine` nor
@@ -133,14 +153,19 @@ checks run first and return `Block`.
 
 ## Policy gates
 
-1. `denied_domains` — `Block`.
-2. `allowed_domains` — if non-empty, URLs not on the list are `Block`.
-3. Sensitive keys (`password`, `token`, `secret`, `api_key`, `authorization`,
-   and related credential tokens) become `[REDACTED]` in the decision payload.
-   Sensitive keys or sensitive tool metadata require approval. `type` is marked
-   sensitive; metadata alone does not redact every argument value.
-4. Prompt-injection substrings (`ignore previous instructions`,
-   `reveal your instructions`) → `Block`.
+Same order as `ActionPolicy::evaluate`; first match wins:
+
+1. `denied_tools` → `Block`.
+2. Prompt-injection on the page → `Block`.
+3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
+4. `denied_domains` / non-empty `allowed_domains` → `Block`.
+5. Sensitive keys or sensitive tool metadata → `RequireApproval`.
+6. `approval_required_tools` → `RequireApproval`.
+7. Mode table.
+
+Credential tokens (`password`, `token`, `secret`, `api_key`, `authorization`,
+and related) are `[REDACTED]` in the decision. `type` is marked sensitive;
+metadata alone does not redact every argument value.
 
 ## See also
 

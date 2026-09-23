@@ -35,6 +35,8 @@ targets:
         INFOPLIST_FILE: NeuroBrowser/Info.plist
         PRODUCT_NAME: NeuroBrowser
         COMBINE_HIDPI_IMAGES: YES
+        # XcodeGen's application preset injects AppIcon; there is no Assets.xcassets.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
         LD_RUNPATH_SEARCH_PATHS:
           - $(inherited)
           - "@executable_path/../Frameworks"
@@ -44,7 +46,6 @@ targets:
       path: NeuroBrowser/NeuroBrowser.entitlements
       properties:
         com.apple.security.app-sandbox: false
-        com.apple.security.network.client: true
 
 schemes:
   NeuroBrowser:

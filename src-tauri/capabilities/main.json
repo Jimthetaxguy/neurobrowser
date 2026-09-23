@@ -1,28 +1,28 @@
 {
   "identifier": "main-capability",
-  "description": "Main application capabilities",
-  "windows": ["main"],
+  "description": "Host commands for the main control webview only",
+  "webviews": ["main"],
   "permissions": [
-    "core:default",
-    "allow-ask",
     "allow-browser-back",
     "allow-browser-forward",
     "allow-browser-reload",
-    "allow-browser-runtime-report",
     "allow-cancel-agent-run",
+    "allow-capture-page",
     "allow-close-page",
     "allow-create-page",
     "allow-create-session",
+    "allow-explain-memory-result",
+    "allow-forget-memory",
     "allow-get-action-policy",
+    "allow-get-memory-stats",
     "allow-get-page-snapshot",
     "allow-navigate",
+    "allow-search-local-memory",
     "allow-set-action-policy",
     "allow-set-active-page",
     "allow-set-provider",
     "allow-start-agent-run",
     "allow-submit-approval",
-    "allow-sync-browser-viewport",
-    "allow-validate-url",
-    "allow-wait-for-page-ready"
+    "allow-sync-browser-viewport"
   ]
 }

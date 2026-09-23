@@ -1,10 +1,9 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, AiProvider, AiResponse,
-    ProviderConfig, ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, resolve_endpoint, AiContext,
+    AiProvider, AiResponse, ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct AnthropicProvider {
     config: ProviderConfig,
@@ -13,10 +12,8 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let origin = resolve_endpoint(config.base_url.as_deref(), "https://api.anthropic.com", "");
+        let client = client_for_origin(&origin);
 
         Self { config, client }
     }
@@ -36,18 +33,6 @@ impl AnthropicProvider {
             "max_tokens": self.config.max_tokens.unwrap_or(4096),
             "temperature": self.config.temperature.unwrap_or(0.3),
         })
-    }
-
-    /// Normalize Anthropic's `stop_reason` into the provider-agnostic vocabulary
-    /// the agent loop expects. The loop terminates on `finish_reason == "stop"`,
-    /// which Anthropic never emits verbatim (it uses `end_turn`/`stop_sequence`).
-    fn normalize_finish_reason(stop_reason: &str) -> String {
-        match stop_reason {
-            "end_turn" | "stop_sequence" => "stop",
-            "max_tokens" => "length",
-            other => other,
-        }
-        .to_string()
     }
 
     /// Concatenate the text of every `text`-typed content block in a Messages API
@@ -117,15 +102,11 @@ impl AiProvider for AnthropicProvider {
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         let content = Self::extract_text(&json);
-        let finish_reason =
-            Self::normalize_finish_reason(json["stop_reason"].as_str().unwrap_or("end_turn"));
         let tool_calls = parse_tool_calls(&content);
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
-            finish_reason,
         })
     }
 
@@ -137,17 +118,13 @@ impl AiProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::ScrollPosition;
 
     fn ctx() -> AiContext {
         AiContext {
             current_url: String::new(),
             page_title: String::new(),
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results: Vec::new(),
-            conversation_history: Vec::new(),
+            personal_memory: false,
         }
     }
 
@@ -179,40 +156,17 @@ mod tests {
     }
 
     #[test]
-    fn finish_reason_is_normalized_to_shared_vocabulary() {
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("end_turn"),
-            "stop"
-        );
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("stop_sequence"),
-            "stop"
-        );
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("max_tokens"),
-            "length"
-        );
-        // an unknown/other reason (e.g. tool_use) passes through unchanged
-        assert_eq!(
-            AnthropicProvider::normalize_finish_reason("tool_use"),
-            "tool_use"
-        );
-    }
-
-    #[test]
     fn user_turn_sends_prompt_only_when_tool_results_exist() {
         let mut context = ctx();
         context.tool_results.push(crate::tools::ToolResult::success(
             "get_text",
-            std::collections::HashMap::new(),
             "hello".to_string(),
         ));
         let body = provider().build_request_body("do the thing", &context);
+        // Tool results reach the model once, through the shared system prompt.
         assert_eq!(body["messages"][0]["content"], "do the thing");
         let system = body["system"].as_str().expect("system prompt");
-        assert!(system.contains("Recent tool results:"));
-        assert!(system.contains("get_text"));
-        assert!(!system.contains("Tool results:\nget_text: hello"));
+        assert!(system.contains("Recent tool results:\n- get_text: hello\n"));
     }
 
     #[test]

@@ -1,10 +1,9 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, AiProvider, AiResponse,
-    ProviderConfig, ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, resolve_endpoint, AiContext,
+    AiProvider, AiResponse, ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct OllamaProvider {
     config: ProviderConfig,
@@ -13,10 +12,8 @@ pub struct OllamaProvider {
 
 impl OllamaProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let origin = resolve_endpoint(config.base_url.as_deref(), "http://localhost:11434", "");
+        let client = client_for_origin(&origin);
 
         Self { config, client }
     }
@@ -75,19 +72,11 @@ impl AiProvider for OllamaProvider {
 
         let content = json["response"].as_str().unwrap_or("").to_string();
 
-        let finish_reason = if json["done"].as_bool().unwrap_or(true) {
-            "stop".to_string()
-        } else {
-            "length".to_string()
-        };
-
         let tool_calls = parse_tool_calls(&content);
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
-            finish_reason,
         })
     }
 

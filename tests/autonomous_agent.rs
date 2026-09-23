@@ -49,10 +49,6 @@ impl BrowserInterface for TestBrowser {
         Ok(self.snapshot.text.clone().unwrap_or_default())
     }
 
-    async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-        Ok(HashMap::new())
-    }
-
     async fn click(&self, _selector: &str) -> Result<(), String> {
         Ok(())
     }
@@ -106,12 +102,20 @@ impl AiProvider for FakeProvider {
     }
 }
 
-fn response(content: &str, tool_calls: Vec<ToolCall>, finish_reason: &str) -> AiResponse {
+fn response(content: &str, tool_calls: Vec<ToolCall>) -> AiResponse {
     AiResponse {
         content: content.to_string(),
-        reasoning: None,
         tool_calls,
-        finish_reason: finish_reason.to_string(),
+    }
+}
+
+/// Build an `AiResponse` the way the three real providers do: parse
+/// `ToolCall: {json}` from ordinary completion text. The agent dispatches
+/// those calls and returns only when `tool_calls` is empty.
+fn real_shaped_response(content: &str) -> AiResponse {
+    AiResponse {
+        content: content.to_string(),
+        tool_calls: neurobrowser::providers::parse_tool_calls(content),
     }
 }
 
@@ -159,9 +163,6 @@ impl BrowserInterface for MutBrowser {
     }
     async fn get_text(&self, _selector: &str) -> Result<String, String> {
         Ok("ready".to_string())
-    }
-    async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-        Ok(HashMap::new())
     }
     async fn click(&self, _selector: &str) -> Result<(), String> {
         Ok(())
@@ -217,6 +218,112 @@ impl AiProvider for RecordingProvider {
     }
 }
 
+/// A provider that records every `AiContext` it is handed.
+struct ContextRecordingProvider {
+    responses: Mutex<VecDeque<AiResponse>>,
+    contexts: Arc<Mutex<Vec<AiContext>>>,
+}
+
+#[async_trait]
+impl AiProvider for ContextRecordingProvider {
+    async fn complete(&self, _prompt: &str, context: &AiContext) -> ProviderResult<AiResponse> {
+        self.contexts.lock().unwrap().push(context.clone());
+        Ok(self
+            .responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("context recording provider response"))
+    }
+    fn provider_name(&self) -> &str {
+        "context-recording"
+    }
+}
+
+#[tokio::test]
+async fn invalid_tool_call_reports_error_to_model_instead_of_completing() {
+    // `navigate` is a real tool, but this call omits its required `url`.
+    // Before the fix the parser dropped it, `tool_calls` came back empty, and
+    // the run reported Completed with the raw tool-call text.
+    let invalid = r#"ToolCall: {"name":"navigate","arguments":{}}"#;
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(ContextRecordingProvider {
+        responses: Mutex::new(
+            vec![real_shaped_response(invalid), real_shaped_response(invalid)].into(),
+        ),
+        contexts: contexts.clone(),
+    });
+    let browser = MutBrowser::new("https://before.example");
+    let config = AgentConfig {
+        max_iterations: 2,
+        ..AgentConfig::default()
+    };
+    let agent = neurobrowser::ReActAgent::new(config, provider);
+
+    let run = agent
+        .execute_with_policy("open the page", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    assert_ne!(run.status, AgentRunStatus::Completed);
+    assert_eq!(run.status, AgentRunStatus::Failed);
+    assert_eq!(
+        run.final_response.as_deref(),
+        Some("Max iterations reached")
+    );
+    assert!(!run
+        .events
+        .iter()
+        .any(|event| matches!(event, AgentRunEvent::RunDone { .. })));
+
+    // Fail closed: the call is reported, never started, and never navigates.
+    assert!(!run
+        .events
+        .iter()
+        .any(|event| matches!(event, AgentRunEvent::ToolCallStarted { .. })));
+    let failures: Vec<&str> = run
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            AgentRunEvent::ToolCallResult {
+                tool,
+                result,
+                success: false,
+                ..
+            } if tool == "navigate" => Some(result.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failures,
+        vec!["Error: missing required argument(s): url"; 2],
+        "{:?}",
+        run.events
+    );
+    assert_eq!(
+        browser.snapshot().await.unwrap().url,
+        "https://before.example"
+    );
+
+    // The model's next turn carries the failure and the reason.
+    let contexts = contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 2, "the model must be asked again");
+    let feedback = &contexts[1];
+    assert!(
+        feedback
+            .tool_results
+            .iter()
+            .any(|result| result.tool_name == "navigate" && !result.success),
+        "{:?}",
+        feedback.tool_results
+    );
+    let prompt = neurobrowser::providers::build_system_prompt(feedback);
+    assert!(
+        prompt.contains("- navigate: Error: missing required argument(s): url\n"),
+        "{prompt}"
+    );
+}
+
 #[tokio::test]
 async fn post_navigation_url_reaches_model_next_iteration() {
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -226,9 +333,8 @@ async fn post_navigation_url_reaches_model_next_iteration() {
             response(
                 "go",
                 vec![call("navigate", &[("url", "https://after.example")])],
-                "tool_calls",
             ),
-            response("Final Answer: done", vec![], "stop"),
+            response("Final Answer: done", vec![]),
         ],
         seen.clone(),
     ));
@@ -259,9 +365,8 @@ async fn deterministic_provider_runs_read_tool_loop() {
         response(
             "Need text.\nToolCall: {\"name\":\"get_text\",\"arguments\":{\"selector\":\"main\"}}",
             vec![call("get_text", &[("selector", "main")])],
-            "tool_calls",
         ),
-        response("Final Answer: Invoice total is $42.00", vec![], "stop"),
+        response("Final Answer: Invoice total is $42.00", vec![]),
     ]));
     let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
 
@@ -282,12 +387,47 @@ async fn deterministic_provider_runs_read_tool_loop() {
 }
 
 #[tokio::test]
+async fn real_shaped_toolcall_json_dispatches_despite_provider_stop() {
+    // Tool calls live in ordinary completion text as `ToolCall: {json}`.
+    // The agent dispatches parsed `tool_calls` and returns only when that
+    // list is empty.
+    let tool_turn =
+        "Need text.\nToolCall: {\"name\":\"get_text\",\"arguments\":{\"selector\":\"main\"}}";
+    let parsed = neurobrowser::providers::parse_tool_calls(tool_turn);
+    assert_eq!(parsed.len(), 1, "fixture must parse like a real provider");
+    assert_eq!(parsed[0].name, "get_text");
+
+    let browser = TestBrowser::new("https://invoice.example", "Invoice total is $42.00");
+    let provider = Arc::new(FakeProvider::new(vec![
+        real_shaped_response(tool_turn),
+        real_shaped_response("Final Answer: Invoice total is $42.00"),
+    ]));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+
+    let run = agent
+        .execute_with_policy("Find the invoice total", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(
+        run.final_response.as_deref(),
+        Some("Invoice total is $42.00")
+    );
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, AgentRunEvent::ToolCallResult { tool, success: true, .. } if tool == "get_text")
+        ),
+        "parsed ToolCall JSON must dispatch"
+    );
+}
+
+#[tokio::test]
 async fn approval_required_run_stops_before_click() {
     let browser = TestBrowser::new("https://form.example", "Submit");
     let provider = Arc::new(FakeProvider::new(vec![response(
         "ToolCall: {\"name\":\"click\",\"arguments\":{\"selector\":\"#submit\"}}",
         vec![call("click", &[("selector", "#submit")])],
-        "tool_calls",
     )]));
     let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
 
@@ -318,5 +458,38 @@ fn parses_structured_tool_calls_without_provider_specific_logic() {
     assert_eq!(
         calls[0].arguments.get("count").map(String::as_str),
         Some("2")
+    );
+}
+
+#[test]
+fn parses_legacy_action_syntax_for_compatibility() {
+    let calls = neurobrowser::providers::parse_tool_calls("Action: click(selector=\"#go\")");
+
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "click");
+    assert_eq!(
+        calls[0].arguments.get("selector").map(String::as_str),
+        Some("#go")
+    );
+}
+
+#[test]
+fn parses_legacy_action_syntax_with_multiple_positional_args() {
+    // `type(selector, text)` is a two-arg legacy positional call. Both
+    // args must survive as distinct values (mapped to the `type` tool's
+    // real `selector`/`text` parameter names) rather than the second
+    // positional arg overwriting the first under a shared "value" key.
+    let calls = neurobrowser::providers::parse_tool_calls("Action: type(#input, hello)");
+
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "type");
+    assert_eq!(calls[0].arguments.len(), 2);
+    assert_eq!(
+        calls[0].arguments.get("selector").map(String::as_str),
+        Some("#input")
+    );
+    assert_eq!(
+        calls[0].arguments.get("text").map(String::as_str),
+        Some("hello")
     );
 }

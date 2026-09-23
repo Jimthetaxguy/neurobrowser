@@ -177,12 +177,6 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Enables the ask command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-ask",
-          "markdownDescription": "Enables the ask command without any pre-configured scope."
-        },
-        {
           "description": "Enables the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "allow-browser-back",
@@ -213,6 +207,12 @@
           "markdownDescription": "Enables the cancel_agent_run command without any pre-configured scope."
         },
         {
+          "description": "Enables the capture_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-capture-page",
+          "markdownDescription": "Enables the capture_page command without any pre-configured scope."
+        },
+        {
           "description": "Enables the close_page command without any pre-configured scope.",
           "type": "string",
           "const": "allow-close-page",
@@ -231,10 +231,28 @@
           "markdownDescription": "Enables the create_session command without any pre-configured scope."
         },
         {
+          "description": "Enables the explain_memory_result command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-explain-memory-result",
+          "markdownDescription": "Enables the explain_memory_result command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the forget_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-forget-memory",
+          "markdownDescription": "Enables the forget_memory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_action_policy command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-action-policy",
           "markdownDescription": "Enables the get_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_memory_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-memory-stats",
+          "markdownDescription": "Enables the get_memory_stats command without any pre-configured scope."
         },
         {
           "description": "Enables the get_page_snapshot command without any pre-configured scope.",
@@ -247,6 +265,12 @@
           "type": "string",
           "const": "allow-navigate",
           "markdownDescription": "Enables the navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_local_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-local-memory",
+          "markdownDescription": "Enables the search_local_memory command without any pre-configured scope."
         },
         {
           "description": "Enables the set_action_policy command without any pre-configured scope.",
@@ -285,24 +309,6 @@
           "markdownDescription": "Enables the sync_browser_viewport command without any pre-configured scope."
         },
         {
-          "description": "Enables the validate_url command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-validate-url",
-          "markdownDescription": "Enables the validate_url command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the wait_for_page_ready command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-wait-for-page-ready",
-          "markdownDescription": "Enables the wait_for_page_ready command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the ask command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-ask",
-          "markdownDescription": "Denies the ask command without any pre-configured scope."
-        },
-        {
           "description": "Denies the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "deny-browser-back",
@@ -333,6 +339,12 @@
           "markdownDescription": "Denies the cancel_agent_run command without any pre-configured scope."
         },
         {
+          "description": "Denies the capture_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-capture-page",
+          "markdownDescription": "Denies the capture_page command without any pre-configured scope."
+        },
+        {
           "description": "Denies the close_page command without any pre-configured scope.",
           "type": "string",
           "const": "deny-close-page",
@@ -351,10 +363,28 @@
           "markdownDescription": "Denies the create_session command without any pre-configured scope."
         },
         {
+          "description": "Denies the explain_memory_result command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-explain-memory-result",
+          "markdownDescription": "Denies the explain_memory_result command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the forget_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-forget-memory",
+          "markdownDescription": "Denies the forget_memory command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_action_policy command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-action-policy",
           "markdownDescription": "Denies the get_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_memory_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-memory-stats",
+          "markdownDescription": "Denies the get_memory_stats command without any pre-configured scope."
         },
         {
           "description": "Denies the get_page_snapshot command without any pre-configured scope.",
@@ -367,6 +397,12 @@
           "type": "string",
           "const": "deny-navigate",
           "markdownDescription": "Denies the navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_local_memory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-local-memory",
+          "markdownDescription": "Denies the search_local_memory command without any pre-configured scope."
         },
         {
           "description": "Denies the set_action_policy command without any pre-configured scope.",
@@ -403,18 +439,6 @@
           "type": "string",
           "const": "deny-sync-browser-viewport",
           "markdownDescription": "Denies the sync_browser_viewport command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the validate_url command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-validate-url",
-          "markdownDescription": "Denies the validate_url command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the wait_for_page_ready command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-wait-for-page-ready",
-          "markdownDescription": "Denies the wait_for_page_ready command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
