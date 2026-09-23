@@ -10,9 +10,9 @@
 //! Time is Unix epoch milliseconds (`u64`) via [`now_millis`].
 
 pub mod model;
+pub mod policy;
 
 // Later milestones declare these modules next to `model`:
-// M1.2 pub mod policy;
 // M1.3 pub mod capture;
 // M1.4 pub mod store;
 // M1.5 pub mod index;
@@ -22,6 +22,7 @@ pub use model::{
     now_millis, CapturedPage, MemoryError, ScoreComponent, SearchExplain, SearchRequest,
     SearchResult, SemanticBlock,
 };
+pub use policy::{CaptureDecision, CapturePolicy};
 
 use std::path::{Path, PathBuf};
 use url::Url;
