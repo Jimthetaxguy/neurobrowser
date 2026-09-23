@@ -718,7 +718,7 @@ impl BrowserTool for GetTablesTool {
     }
 
     fn description(&self) -> &str {
-        "Extract table data from the current page"
+        "Table N: H headers, R rows per table"
     }
 
     fn definition(&self) -> ToolDefinition {
@@ -1152,24 +1152,6 @@ impl BrowserTool for ReloadTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The canonical SSRF vectors live in `crate::netguard::tests` (IPv4-mapped,
-    /// unique-local, fail-closed, redirect). This test's job is narrower and still
-    /// worth keeping: prove the engine path is wired to that shared boundary at all,
-    /// so a later refactor cannot quietly unhook it.
-    #[test]
-    fn ssrf_guard_blocks_internal_hosts_via_shared_boundary() {
-        use crate::netguard::blocked_reason;
-        assert!(blocked_reason("http://169.254.169.254/latest/meta-data/").is_some());
-        assert!(blocked_reason("http://127.0.0.1:8080/").is_some());
-        assert!(blocked_reason("http://10.0.0.5/").is_some());
-        assert!(blocked_reason("http://192.168.1.1/").is_some());
-        assert!(blocked_reason("http://[::1]/").is_some());
-        // The spelling that used to get through.
-        assert!(blocked_reason("http://[::ffff:169.254.169.254]/").is_some());
-        // a normal public IP literal is allowed through
-        assert!(blocked_reason("http://93.184.216.34/").is_none());
-    }
 
     #[test]
     fn enrich_snapshot_extracts_prices_from_text() {

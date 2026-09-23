@@ -300,7 +300,7 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("- reload(): Reload page\n");
     prompt.push_str("- get_links(): Get all links on page\n");
     prompt.push_str("- get_prices(): Extract price information\n");
-    prompt.push_str("- get_tables(): Extract table data\n");
+    prompt.push_str("- get_tables(): Table N: H headers, R rows per table\n");
 
     prompt
 }
