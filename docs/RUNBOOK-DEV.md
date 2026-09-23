@@ -69,7 +69,7 @@ Integration tests live in `tests/`:
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
 - `agent_memory_metrics.rs` — memory + metrics.
-- Headless argument and policy tests live in `src-tauri/src/bin/headless.rs`
+- Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
   and run explicitly with the `headless` feature.
 
 ## Tauri IPC
