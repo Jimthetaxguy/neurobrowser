@@ -330,3 +330,63 @@ test("serializer output matches root.outerHTML exactly for a secret-free page (p
     dom.window.close();
   }
 });
+
+test("snapshot html drops noscript content entirely when it arrives as one raw text node (real-engine parse shape)", () => {
+  // WKWebView/WebView2 run with scripting enabled, so their HTML parser
+  // stores <noscript> content as ONE raw text node holding the literal
+  // source markup, the same way <script>/<style> content is stored.
+  // Escaping that text node as ordinary text (which is what treating
+  // noscript like any other element does) does not redact it: escaping
+  // only changes how <, >, & display, so a credential's own characters
+  // (e.g. "secret") survive untouched inside the escaped string. jsdom
+  // does not reproduce this parse shape (see the next test), so it is
+  // built by hand here with a real DOM call.
+  const dom = new JSDOM(`<!doctype html><html><body></body></html>`, {
+    url: "https://example.test/page",
+    runScripts: "outside-only",
+  });
+  try {
+    dom.window.eval(runtimeInitScript);
+    dom.window.eval(`
+      var ns = document.createElement('noscript');
+      ns.setAttribute('data-x', 'y');
+      ns.appendChild(document.createTextNode('<input type="password" value="secret">'));
+      document.body.appendChild(ns);
+    `);
+
+    const runtime = dom.window.__NEUROBROWSER_RUNTIME__;
+    const snapshot = runtime.snapshot();
+
+    assert.equal(
+      snapshot.html.includes("secret"),
+      false,
+      "credential text inside noscript's raw text node leaked into snapshot html",
+    );
+    assert.ok(
+      snapshot.html.includes('<noscript data-x="y"></noscript>'),
+      "noscript should keep its own attributes but serialize with no content",
+    );
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("snapshot html drops noscript content entirely when it parses into real child elements (jsdom's parse shape)", () => {
+  // Scripting-disabled parsers (and jsdom, which does not implement the
+  // scripting-enabled noscript tokenizer state either way) parse
+  // noscript's markup into ordinary child elements instead of one raw
+  // text node. The fix must drop this shape too, not just the raw-text
+  // one above — it must not depend on which shape a given engine
+  // produces.
+  const snapshot = snapshotOf(`<noscript><input type="password" value="secret"></noscript>`);
+
+  assert.equal(
+    snapshot.html.includes("secret"),
+    false,
+    "credential inside noscript's child elements leaked into snapshot html",
+  );
+  assert.ok(
+    snapshot.html.includes("<noscript></noscript>"),
+    "noscript should serialize with no content at all",
+  );
+});

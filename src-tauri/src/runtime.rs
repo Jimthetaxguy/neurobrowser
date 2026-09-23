@@ -99,12 +99,9 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
 
   // Elements whose text children the serialization algorithm emits
   // verbatim (unescaped), matching outerHTML. `noscript` is spec-listed
-  // too, but only when scripting is enabled for that parse; this engine
-  // does not implement that conditional; it always escapes a noscript
-  // text child (and parses noscript markup into real child elements, not
-  // one raw-text node) the same as any other element, so `noscript` is
-  // deliberately left out here to match this engine's own outerHTML
-  // rather than the unconditional spec text.
+  // too, but is handled separately below — its content is dropped
+  // entirely rather than classified as raw-or-escaped — so it does not
+  // need an entry here; see the `tag === 'noscript'` branch for why.
   const RAW_TEXT_PARENTS = new Set([
     'style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext'
   ]);
@@ -207,6 +204,25 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
           }
 
           stack.push({ close: tag });
+
+          if (tag === 'noscript') {
+            // Fail closed instead of trusting this engine's parse shape.
+            // WKWebView/WebView2 run with scripting enabled, and their
+            // HTML parser stores noscript's content as ONE raw text node
+            // holding the literal source markup — the same way script's
+            // content is stored. Treating that text node as ordinary
+            // text (escaping it) does not redact it: escaping only
+            // changes how <, >, & display, so a credential's own
+            // characters survive untouched inside the escaped string.
+            // jsdom instead parses noscript's markup into real child
+            // elements, which is a different shape again. Rather than
+            // classify which shape a given engine produced and redact
+            // within it, drop noscript's content outright: the target
+            // runtimes always run JS, so noscript content never renders
+            // in them either way, and dropping it costs nothing. Its own
+            // attributes are unaffected — only children are skipped.
+            continue;
+          }
 
           // A <template>'s children live in its own inert `content`
           // DocumentFragment, not in its own childNodes. Substituting
