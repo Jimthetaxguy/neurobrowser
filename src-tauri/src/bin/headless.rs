@@ -19,13 +19,15 @@
 //! Wire format (newline-delimited JSON over the socket):
 //!
 //! ```json
-//! // request
-//! { "id": "uuid", "method": "snapshot", "params": { "url": "https://example.com" } }
+//! // request — `snapshot` ignores `params` and returns a hardcoded stub
+//! { "id": "uuid", "method": "snapshot", "params": {} }
 //! // response (on the next newline)
 //! { "id": "uuid", "ok": true, "result": { ... } }
 //! // or
-//! { "id": "uuid", "ok": false, "error": { "code": "TIMEOUT", "message": "..." } }
+//! { "id": "uuid", "ok": false, "error": { "code": "UNKNOWN_METHOD", "message": "..." } }
 //! ```
+//!
+//! Error codes: `BAD_REQUEST`, `INTERNAL`, `VALIDATION`, `UNKNOWN_METHOD`.
 
 #![cfg(feature = "headless")]
 
@@ -35,7 +37,7 @@ use std::sync::Arc;
 
 use neurobrowser::agent::policy::ActionPolicy;
 use neurobrowser::browser::default_tool_registry;
-use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, ToolRisk};
+use neurobrowser::tools::{PageSnapshot, ToolAction, ToolRegistry, ToolRisk};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -131,19 +133,13 @@ impl SessionState {
             interactive_ready: true,
         };
 
-        // Resolve the tool's *real* risk from the browser tool registry
-        // (type/submit_form/purchase are High/Critical + often sensitive)
-        // instead of hardcoding Read/Low, which made `policy.evaluate`
-        // treat every tool as a harmless read and silently Allow it under
-        // Assisted/HighAutonomy autonomy. Genuinely unknown tool names
-        // (not registered) fall back to a conservative, high-risk default
-        // so they always require approval (Assisted) or are blocked
-        // (ReadOnly) rather than defaulting to an auto-allowed Read.
+        // Registered tools use their real `ToolRisk`. Unknown names fall
+        // back to Destructive so they are not treated as reads.
         let tool_risk = self
             .tool_registry
             .get(name)
             .map(|tool| tool.definition().risk)
-            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive, RiskLevel::Critical));
+            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive));
 
         let policy = self.policy.lock().await;
         let decision = policy.evaluate(name, &tool_risk, args, &snapshot);
@@ -283,11 +279,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(unix)]
 async fn listen_unix(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    // Ensure parent dir exists.
     if let Some(parent) = socket_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    // Remove a stale socket file.
     let _ = std::fs::remove_file(&socket_path);
 
     let listener = match UnixListener::bind(&socket_path) {
@@ -308,14 +302,11 @@ async fn listen_unix(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Err
     // Restrict the control socket to the owning user. This is defense-in-depth;
     // full per-connection peer-credential authz (SO_PEERCRED same-uid + per-client
     // session state) is tracked as a follow-up.
-    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(error) =
+        std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
     {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(error) =
-            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
-        {
-            tracing::warn!(?error, "failed to restrict control-socket permissions");
-        }
+        tracing::warn!(?error, "failed to restrict control-socket permissions");
     }
 
     let session_state = SessionState::new();
@@ -546,10 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_high_risk_tool() {
-        // `type` is High risk + sensitive in the real registry. Under the
-        // old `ToolRisk::new(ToolAction::Read, RiskLevel::Low)` bug this
-        // would have been silently `Allow`ed in Assisted mode (the default
-        // policy autonomy level) because Read is in the Assisted allow-list.
+        // `type` is sensitive in the real registry. Assisted mode must not auto-allow it.
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#input".to_string());
@@ -568,14 +556,14 @@ mod tests {
 
         assert_ne!(
             outcome, "Allow",
-            "high-risk 'type' tool call was silently allowed: {result}"
+            "sensitive 'type' tool call was silently allowed: {result}"
         );
         assert_eq!(outcome, "RequireApproval");
     }
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_submit_form() {
-        // Same check for `submit_form` (High risk, externally visible).
+        // Same check for `submit_form` (`externally_visible: true`).
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#checkout-form".to_string());
@@ -601,10 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_falls_back_to_conservative_risk_for_unknown_tools() {
-        // A genuinely-unknown tool name (not in `default_tool_registry`)
-        // must not fall back to Read/Low either — it should get the same
-        // conservative high-risk default so it can't slip through as an
-        // auto-allowed read.
+        // Unregistered names get the conservative high-risk default.
         let state = SessionState::new();
         let args = HashMap::new();
 
@@ -629,9 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_still_allows_a_real_read_only_tool() {
-        // Sanity check the fix isn't over-broad: a genuinely low-risk,
-        // read-only tool (get_text) should still be allowed in Assisted
-        // mode, same as before.
+        // `get_text` is low-risk and remains allowed in Assisted mode.
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "h1".to_string());

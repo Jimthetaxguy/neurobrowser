@@ -4,31 +4,29 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod contracts;
+pub mod memory_tools;
 
-pub use contracts::{RiskLevel, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
+pub use contracts::{ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
     pub tool_name: String,
-    pub arguments: HashMap<String, String>,
     pub result: String,
     pub success: bool,
 }
 
 impl ToolResult {
-    pub fn success(tool_name: &str, arguments: HashMap<String, String>, result: String) -> Self {
+    pub fn success(tool_name: &str, result: String) -> Self {
         Self {
             tool_name: tool_name.to_string(),
-            arguments,
             result,
             success: true,
         }
     }
 
-    pub fn error(tool_name: &str, arguments: HashMap<String, String>, error: String) -> Self {
+    pub fn error(tool_name: &str, error: String) -> Self {
         Self {
             tool_name: tool_name.to_string(),
-            arguments,
             result: error,
             success: false,
         }
@@ -43,7 +41,7 @@ pub trait BrowserTool: Send + Sync {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
     async fn execute(
@@ -121,7 +119,6 @@ pub struct ElementInfo {
 pub struct LinkInfo {
     pub href: String,
     pub text: String,
-    pub selector: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,14 +134,12 @@ pub struct FormInfo {
     pub action: String,
     pub method: String,
     pub inputs: Vec<FormInputInfo>,
-    pub selector: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormInputInfo {
     pub name: String,
     pub input_type: String,
-    pub selector: String,
     pub value: Option<String>,
 }
 
@@ -152,7 +147,6 @@ pub struct FormInputInfo {
 pub struct PriceInfo {
     pub value: String,
     pub currency: String,
-    pub selector: String,
     pub context: String,
 }
 
@@ -160,7 +154,6 @@ pub struct PriceInfo {
 pub struct TableInfo {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
-    pub selector: String,
 }
 
 pub struct ToolRegistry {
@@ -180,6 +173,14 @@ impl ToolRegistry {
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
         self.tools.get(name).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
     }
 }
 

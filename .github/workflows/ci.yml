@@ -58,12 +58,16 @@ jobs:
         working-directory: src-tauri
         run: npm ci
 
+      - name: npm test
+        working-directory: src-tauri
+        run: npm test
+
       - name: npm build
         working-directory: src-tauri
         run: npm run build
 
       - name: cargo check tauri
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 
       - name: cargo check tauri (headless)
         run: cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
@@ -80,8 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # grep is on ubuntu-latest; never wrap it in `if`/`2>/dev/null` — a
-      # missing tool must fail the job, not skip the scan.
+      # Do not wrap grep in `if`/`2>/dev/null`; a missing tool must fail the job.
       # nullglob: crates/ is present before any crate manifest exists.
       - name: No-mock dependency guard
         run: |
@@ -107,7 +110,8 @@ jobs:
           set -euo pipefail
           set +e
           grep -R -n -I -E '<<<<<<<|>>>>>>>' --exclude='*.lock' \
-            src src-tauri tests NeuroBrowser crates
+            src src-tauri tests NeuroBrowser crates docs \
+            README.md SKILL.md CHANGELOG.md
           rc=$?
           set -e
           if [ "$rc" -eq 0 ]; then
@@ -122,7 +126,9 @@ jobs:
       - name: iCloud duplicate detection
         run: |
           set -euo pipefail
-          dupes=$(find src src-tauri tests NeuroBrowser crates -name '* 2*')
+          dupes=$(find src src-tauri tests NeuroBrowser crates docs \
+            README.md SKILL.md CHANGELOG.md \
+            \( -name '* 2.*' -o -name '* 3.*' -o -name '* 4.*' \))
           if [ -n "$dupes" ]; then
             echo "$dupes"
             echo "::error::iCloud duplicate files detected."
