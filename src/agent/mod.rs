@@ -38,20 +38,47 @@ pub struct ReActAgent {
     provider: Mutex<Arc<dyn AiProvider + Send + Sync>>,
     tool_registry: ToolRegistry,
     state: Mutex<AgentState>,
+    /// True when `search_personal_memory` and `inspect_active_page` are registered.
+    ///
+    /// This flag follows [`neuro_memory::MemoryService`], not in-run agent memory
+    /// (removed by #19).
+    personal_memory: bool,
 }
 
 impl ReActAgent {
     pub fn new(config: AgentConfig, provider: Arc<dyn AiProvider + Send + Sync>) -> Self {
+        Self::with_memory(config, provider, None)
+    }
+
+    /// `new`, plus the two personal-memory tools when `memory` is set.
+    ///
+    /// `memory` is durable page memory ([`neuro_memory::MemoryService`]). The
+    /// in-run [`AgentMemory`] log is unchanged. `None` keeps the 17 browser tools.
+    /// Inspect uses [`neuro_memory::CapturePolicy::default`].
+    pub fn with_memory(
+        config: AgentConfig,
+        provider: Arc<dyn AiProvider + Send + Sync>,
+        memory: Option<Arc<neuro_memory::MemoryService>>,
+    ) -> Self {
+        let personal_memory = memory.is_some();
+        let tool_registry = match memory {
+            Some(memory) => crate::browser::default_tool_registry_with_memory(
+                memory,
+                neuro_memory::CapturePolicy::default(),
+            ),
+            None => crate::browser::default_tool_registry(),
+        };
         Self {
             config: Mutex::new(config.clone()),
             provider: Mutex::new(provider),
-            tool_registry: crate::browser::default_tool_registry(),
+            tool_registry,
             state: Mutex::new(AgentState {
                 current_url: String::new(),
                 page_title: String::new(),
                 tool_results: Vec::new(),
                 iterations: 0,
             }),
+            personal_memory,
         }
     }
 
@@ -219,18 +246,6 @@ impl ReActAgent {
                     success,
                 };
 
-                // Re-snapshot AFTER the tool ran so a navigating tool updates the
-                // url/title the model sees on the next iteration. The pre-execution
-                // `snapshot` (used above for policy evaluation) is stale here after
-                // a navigate. Taken outside the state lock to avoid holding it
-                // across `.await`.
-                // A post-tool snapshot may legitimately fail transiently: on the
-                // desktop runtime it can land while the old document is unloading.
-                // Propagating that with `?` failed the ENTIRE otherwise-successful run
-                // over a timing artifact. Retry once, then degrade to keeping the
-                // previous url/title rather than discarding the run's work — the tool
-                // already succeeded, and a stale label is a smaller lie than a failed
-                // run that actually did its job.
                 let post_snapshot = match browser.snapshot().await {
                     Ok(snapshot) => Some(snapshot),
                     Err(first_err) => {
@@ -243,8 +258,7 @@ impl ReActAgent {
                             Err(second_err) => {
                                 tracing::warn!(
                                     error = %second_err,
-                                    "post-tool snapshot failed twice; keeping previous \
-                                     url/title for this iteration"
+                                    "post-tool snapshot failed twice; keeping previous url/title for this iteration"
                                 );
                                 None
                             }
@@ -381,6 +395,7 @@ impl ReActAgent {
             current_url: state.current_url.clone(),
             page_title: state.page_title.clone(),
             tool_results: state.tool_results.clone(),
+            personal_memory: self.personal_memory,
         })
     }
 
