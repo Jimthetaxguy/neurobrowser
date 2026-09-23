@@ -53,6 +53,8 @@ Arguments are `HashMap<String, String>`. Results are `ToolResult`
 (`tool_name`, `result`, `success`).
 
 `ToolDefinition` exposes `name`, `description`, `arguments`, and `risk`.
+Every `BrowserTool` must implement `definition()`; there is no default risk.
+The registry keys each tool by `definition().name`.
 `ToolRisk` contains the action category plus the `sensitive` and
 `externally_visible` flags; both flags default to `false`. There is no
 risk-level or tool-version field. The catalog below names each action and

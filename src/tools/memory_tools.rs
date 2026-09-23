@@ -100,14 +100,6 @@ struct SearchPersonalMemoryTool {
 
 #[async_trait]
 impl BrowserTool for SearchPersonalMemoryTool {
-    fn name(&self) -> &str {
-        SEARCH_PERSONAL_MEMORY
-    }
-
-    fn description(&self) -> &str {
-        SEARCH_PERSONAL_MEMORY_DESCRIPTION
-    }
-
     fn definition(&self) -> ToolDefinition {
         search_definition()
     }
@@ -123,24 +115,25 @@ impl BrowserTool for SearchPersonalMemoryTool {
             .filter(|query| !query.is_empty())
         else {
             return ToolResult::error(
-                self.name(),
+                SEARCH_PERSONAL_MEMORY,
                 "search_personal_memory requires a non-empty query".to_string(),
             );
         };
         let limit = match parse_limit(args.get("limit")) {
             Ok(limit) => limit,
-            Err(error) => return ToolResult::error(self.name(), error),
+            Err(error) => return ToolResult::error(SEARCH_PERSONAL_MEMORY, error),
         };
         let request = SearchRequest {
             query: query.to_string(),
             limit,
         };
         match self.memory.search(request).await {
-            Ok(hits) if hits.is_empty() => {
-                ToolResult::success(self.name(), "No personal memory matches.".to_string())
-            }
-            Ok(hits) => ToolResult::success(self.name(), format_search_hits(&hits)),
-            Err(error) => ToolResult::error(self.name(), error.to_string()),
+            Ok(hits) if hits.is_empty() => ToolResult::success(
+                SEARCH_PERSONAL_MEMORY,
+                "No personal memory matches.".to_string(),
+            ),
+            Ok(hits) => ToolResult::success(SEARCH_PERSONAL_MEMORY, format_search_hits(&hits)),
+            Err(error) => ToolResult::error(SEARCH_PERSONAL_MEMORY, error.to_string()),
         }
     }
 }
@@ -153,14 +146,6 @@ struct InspectActivePageTool {
 
 #[async_trait]
 impl BrowserTool for InspectActivePageTool {
-    fn name(&self) -> &str {
-        INSPECT_ACTIVE_PAGE
-    }
-
-    fn description(&self) -> &str {
-        INSPECT_ACTIVE_PAGE_DESCRIPTION
-    }
-
     fn definition(&self) -> ToolDefinition {
         inspect_definition()
     }
@@ -172,31 +157,32 @@ impl BrowserTool for InspectActivePageTool {
     ) -> ToolResult {
         let snapshot = match browser.snapshot().await {
             Ok(snapshot) => snapshot,
-            Err(error) => return ToolResult::error(self.name(), error),
+            Err(error) => return ToolResult::error(INSPECT_ACTIVE_PAGE, error),
         };
         let page_url = snapshot.url;
         if let CaptureDecision::Deny { reason } = self.policy.evaluate(&page_url) {
-            return ToolResult::error(self.name(), format!("capture denied: {reason}"));
+            return ToolResult::error(INSPECT_ACTIVE_PAGE, format!("capture denied: {reason}"));
         }
         let Ok(parsed) = url::Url::parse(&page_url) else {
             return ToolResult::error(
-                self.name(),
+                INSPECT_ACTIVE_PAGE,
                 "capture denied: URL could not be parsed".to_string(),
             );
         };
         match self.memory.blocks_for_url(&parsed).await {
-            Ok(blocks) if blocks.is_empty() => {
-                ToolResult::error(self.name(), format!("No captured content for {page_url}"))
-            }
+            Ok(blocks) if blocks.is_empty() => ToolResult::error(
+                INSPECT_ACTIVE_PAGE,
+                format!("No captured content for {page_url}"),
+            ),
             Ok(blocks) => {
                 let body = blocks
                     .iter()
                     .map(|block| format_section(&block.heading_path, &block.text))
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                ToolResult::success(self.name(), format!("{page_url}\n\n{body}"))
+                ToolResult::success(INSPECT_ACTIVE_PAGE, format!("{page_url}\n\n{body}"))
             }
-            Err(error) => ToolResult::error(self.name(), error.to_string()),
+            Err(error) => ToolResult::error(INSPECT_ACTIVE_PAGE, error.to_string()),
         }
     }
 }

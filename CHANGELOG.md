@@ -27,6 +27,9 @@ remain 0.1.0 until an actual version bump and release tag.
   before, it ran.
 - The prompt shows each failed tool result with its message, not a bare
   `Error`.
+- `BrowserTool::definition()` is required. Before, a tool that did not
+  override it defaulted to `Read` risk, which `Assisted` allows without
+  approval. The registry keys each tool by `definition().name`.
 
 ### Fixed
 
@@ -52,6 +55,10 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Removed
 
+- `BrowserTool::name()` / `description()` (the strings live in
+  `definition()`) and `ToolRegistry`'s `Default` impl, which built an empty
+  registry. Use `ToolRegistry::new()` and `register`, or
+  `default_tool_registry()`.
 - Unread tool-result echo fields: `ToolResult.arguments` (kept raw `type`
   values after the result string was de-leaked), unused
   `ToolArgumentDefinition.sensitive`, and constant snapshot `selector` fields
