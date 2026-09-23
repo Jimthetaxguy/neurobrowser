@@ -22,7 +22,6 @@ export function createTauriHostAdapter() {
   };
 
   return {
-    lane: "tauri",
     rendersPageInHost: true,
     async createSession() {
       return invoke("create_session");
@@ -98,7 +97,6 @@ export function createAppKitHostAdapter() {
   };
 
   return {
-    lane: "appkit",
     rendersPageInHost: false,
     async createSession() {
       await send("create_session", { sessionId });

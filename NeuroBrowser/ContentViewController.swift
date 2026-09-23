@@ -257,7 +257,6 @@ class ContentViewController: NSViewController {
           const text = document.body ? document.body.innerText : "";
           return {
             title: document.title || "",
-            text: text.slice(0, 20000),
             link_count: document.links ? document.links.length : 0,
             image_count: document.images ? document.images.length : 0,
             form_count: document.forms ? document.forms.length : 0,
@@ -283,16 +282,11 @@ class ContentViewController: NSViewController {
         return [
             "url": "",
             "title": "",
-            "html": "",
-            "text": "",
             "link_count": 0,
             "image_count": 0,
             "form_count": 0,
             "price_count": 0,
-            "table_count": 0,
-            "viewport_width": Int(view.bounds.width),
-            "viewport_height": Int(view.bounds.height),
-            "interactive_ready": true
+            "table_count": 0
         ]
     }
 
