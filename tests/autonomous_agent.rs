@@ -117,7 +117,6 @@ fn response(content: &str, tool_calls: Vec<ToolCall>) -> AiResponse {
 fn real_shaped_response(content: &str) -> AiResponse {
     AiResponse {
         content: content.to_string(),
-        reasoning: None,
         tool_calls: neurobrowser::providers::parse_tool_calls(content),
     }
 }
