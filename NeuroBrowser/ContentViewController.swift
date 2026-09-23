@@ -13,10 +13,16 @@ class ContentViewController: NSViewController {
     var tabBar: NSSegmentedControl!
     var pageUpdateHandler: (([String: Any]) -> Void)?
     private var webViewContainer: NSView!
+    private var pageIds: [Int] = []
+    // React allocates nonnegative IDs; native menu tabs use a disjoint sequence.
+    private var nextNativePageId = -1
     
     // MARK: - State
     
     var currentTabIndex: Int = 0
+    var currentPageId: Int? {
+        pageIds.indices.contains(currentTabIndex) ? pageIds[currentTabIndex] : nil
+    }
     
     // MARK: - Lifecycle
     
@@ -60,9 +66,9 @@ class ContentViewController: NSViewController {
         tabBar = NSSegmentedControl()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.segmentCount = 1
-        tabBar.setLabel("New Tab", forSegment: 0)
+        tabBar.setLabel("+", forSegment: 0)
         tabBar.setWidth(100, forSegment: 0)
-        tabBar.selectedSegment = 0
+        tabBar.selectedSegment = -1
         tabBar.target = self
         tabBar.action = #selector(tabBarChanged)
         tabBar.segmentStyle = .rounded
@@ -104,8 +110,6 @@ class ContentViewController: NSViewController {
             webViewContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webViewContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-        
-        addNewTab()
     }
     
     private func createNavButton(title: String, action: Selector) -> NSButton {
@@ -118,12 +122,25 @@ class ContentViewController: NSViewController {
     
     // MARK: - Tab Management
     
-    func addNewTab() {
+    func addNewTab(pageId: Int? = nil) {
+        if let pageId, let existing = pageIds.firstIndex(of: pageId) {
+            currentTabIndex = existing
+            tabBar.selectedSegment = existing
+            showCurrentTab()
+            return
+        }
+
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         
         webViews.append(webView)
+        if let pageId {
+            pageIds.append(pageId)
+        } else {
+            pageIds.append(nextNativePageId)
+            nextNativePageId -= 1
+        }
         
         let newIndex = webViews.count - 1
         tabBar.segmentCount = webViews.count + 1
@@ -143,25 +160,45 @@ class ContentViewController: NSViewController {
     }
     
     func closeCurrentTab() {
+        closePage(pageId: currentPageId)
+    }
+
+    func closePage(pageId: Int? = nil) {
         guard webViews.count > 1 else { return }
-        
-        let webView = webViews[currentTabIndex]
+        let id = pageId ?? currentPageId
+        guard let id, let index = pageIds.firstIndex(of: id) else { return }
+
+        let webView = webViews[index]
         webView.removeFromSuperview()
-        webViews.remove(at: currentTabIndex)
-        
+        webViews.remove(at: index)
+        pageIds.remove(at: index)
+
+        if currentTabIndex > index {
+            currentTabIndex -= 1
+        } else if currentTabIndex == index {
+            currentTabIndex = min(index, webViews.count - 1)
+        }
+
         tabBar.segmentCount = webViews.count + 1
-        tabBar.selectedSegment = min(currentTabIndex, webViews.count - 1)
-        currentTabIndex = tabBar.selectedSegment
-        
+        tabBar.setLabel("+", forSegment: webViews.count)
+        tabBar.selectedSegment = currentTabIndex
+
         showCurrentTab()
         updateNavigationButtons()
     }
 
-    func selectTab(pageId: Int) {
-        guard pageId >= 0, pageId < webViews.count else { return }
-        currentTabIndex = pageId
-        tabBar.selectedSegment = pageId
+    @discardableResult
+    func selectTab(pageId: Int) -> Bool {
+        guard let index = pageIds.firstIndex(of: pageId) else { return false }
+        currentTabIndex = index
+        tabBar.selectedSegment = index
         showCurrentTab()
+        return true
+    }
+
+    func navigate(pageId: Int?, to input: String) {
+        if let pageId, !selectTab(pageId: pageId) { return }
+        navigateCurrentTab(to: input)
     }
     
     @objc private func tabBarChanged() {
@@ -190,7 +227,18 @@ class ContentViewController: NSViewController {
             }
             
             updateNavigationButtons()
+            emitTabs()
+            emitSnapshot()
         }
+    }
+
+    private func emitTabs() {
+        guard let pageId = currentPageId else { return }
+        let tabs = zip(pageIds, webViews).map { id, webView in
+            ["id": id, "title": webView.title ?? "New Tab",
+             "url": webView.url?.absoluteString ?? ""] as [String: Any]
+        }
+        pageUpdateHandler?(["type": "tabs", "tabs": tabs, "activePageId": pageId])
     }
     
     // MARK: - Navigation
@@ -292,11 +340,13 @@ class ContentViewController: NSViewController {
     }
 
     private func emitSnapshot() {
+        guard let pageId = currentPageId else { return }
         snapshotCurrentPage { [weak self] snapshot in
-            guard let self else { return }
+            guard let self, self.currentPageId == pageId,
+                  self.pageIds.contains(pageId) else { return }
             self.pageUpdateHandler?([
                 "type": "snapshot",
-                "pageId": self.currentTabIndex,
+                "pageId": pageId,
                 "snapshot": snapshot
             ])
         }
@@ -324,10 +374,13 @@ extension ContentViewController: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "◌"
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        emitTabs()
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         if let url = webView.url {
             urlBar.stringValue = url.absoluteString
         }
