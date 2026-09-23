@@ -32,8 +32,8 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   };
 
   // Shared definition of "this input's value is a secret" so the structured
-  // (attrsToObject/collectForms) and raw-HTML (sanitizedOuterHtml) redaction
-  // paths cannot drift apart.
+  // (attrsToObject/collectForms) and raw-HTML (serializeSanitizedHtml)
+  // redaction paths cannot drift apart.
   const isSecretInputType = (type) => type === 'password' || type === 'hidden';
 
   const attrsToObject = (element) => {
@@ -89,49 +89,156 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       selector: 'table'
     }));
 
-  // Strips credential-bearing markup reachable from `root`:
-  // - `value` on password/hidden <input>
-  // - `iframe[srcdoc]`, which is an opaque HTML string (not a descendant
-  //   tree), so querySelectorAll('input') never sees controls declared only
-  //   there. Omit the attribute rather than parse it — parsing would
-  //   reintroduce a TrustedHTML sink.
-  // A <template>'s children live in its own inert `content` fragment, so
-  // walk each template's content and recurse for nested templates.
-  const redactSecretInputValues = (root) => {
-    for (const input of Array.from(root.querySelectorAll('input'))) {
-      const type = ((input.getAttribute && input.getAttribute('type')) || '').toLowerCase();
-      if (isSecretInputType(type) && input.hasAttribute('value')) {
-        input.removeAttribute('value');
-      }
+  // HTML void elements: the HTML fragment serialization algorithm gives
+  // these no end tag and no children, regardless of what the DOM holds.
+  const VOID_ELEMENTS = new Set([
+    'area', 'base', 'basefont', 'bgsound', 'br', 'col', 'embed', 'frame',
+    'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source',
+    'track', 'wbr'
+  ]);
+
+  // Elements whose text children the serialization algorithm emits
+  // verbatim (unescaped), matching outerHTML. `noscript` is spec-listed
+  // too, but only when scripting is enabled for that parse; this engine
+  // does not implement that conditional; it always escapes a noscript
+  // text child (and parses noscript markup into real child elements, not
+  // one raw-text node) the same as any other element, so `noscript` is
+  // deliberately left out here to match this engine's own outerHTML
+  // rather than the unconditional spec text.
+  const RAW_TEXT_PARENTS = new Set([
+    'style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext'
+  ]);
+
+  const ESCAPES = { '&': '&amp;', '\u00a0': '&nbsp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+  const escapeChar = (ch) => ESCAPES[ch];
+  // Text nodes: & < > nbsp. Attribute values: & " nbsp, but not < or > —
+  // this engine's own outerHTML leaves those two literal in attributes.
+  const escapeText = (data) => String(data).replace(/[&\u00a0<>]/g, escapeChar);
+  const escapeAttrValue = (data) => String(data).replace(/[&\u00a0"]/g, escapeChar);
+
+  const isSecretInput = (element) => {
+    if (element.localName !== 'input') {
+      return false;
     }
-    for (const iframe of Array.from(root.querySelectorAll('iframe[srcdoc]'))) {
-      iframe.removeAttribute('srcdoc');
-    }
-    for (const template of Array.from(root.querySelectorAll('template'))) {
-      if (template.content) {
-        redactSecretInputValues(template.content);
-      }
-    }
+    const type = ((element.getAttribute && element.getAttribute('type')) || '').toLowerCase();
+    return isSecretInputType(type);
   };
 
   // Serializes `root` for the HTML snapshot without leaking credentials or
-  // running page code. Live `root.outerHTML` includes password/hidden
-  // `value` attributes verbatim (attrsToObject/collectForms only protect
-  // the structured views), and that HTML is persisted / sent to policy.
+  // running page code: a hand-written, read-only walk of the *live* tree,
+  // built from scratch rather than parsing a string or cloning a node.
   //
-  // `importNode` into `createHTMLDocument` is inert: that document has an
-  // empty custom-element registry, so page constructors do not run
-  // (unlike `root.cloneNode(true)`). It is not a TrustedHTML sink, so
-  // `require-trusted-types-for 'script'` cannot fail the snapshot
-  // (unlike `DOMParser.parseFromString`).
-  const sanitizedOuterHtml = (root, max) => {
+  // Three rounds of "parse or clone a copy, then mutate it" each turned up
+  // a new gap: `root.cloneNode(true)` re-invokes custom element
+  // constructors (real side effects — network calls, thrown exceptions —
+  // from a mere snapshot request); `DOMParser.parseFromString` is a
+  // TrustedHTML sink, so it throws outright on a page whose CSP sets
+  // `require-trusted-types-for 'script'` without a default policy; and
+  // `iframe[srcdoc]` is an opaque attribute string that both of those
+  // leave untouched, since it is not part of the descendant tree
+  // `querySelectorAll` or cloning ever reaches. A read-only serializer
+  // has none of these problems by construction: it never feeds a string
+  // into HTML (no DOMParser / innerHTML / createContextualFragment /
+  // document.write — nothing a Trusted Types policy can object to, and
+  // nothing that would need its own recursive sanitization pass for
+  // srcdoc) and never clones, imports, or otherwise constructs a node (no
+  // custom element reactions), because it only ever *reads* an element's
+  // existing attributes and children and appends to a string.
+  //
+  // `iframe[srcdoc]` is omitted outright rather than sanitized: doing the
+  // latter would mean parsing that srcdoc string into HTML, the exact
+  // TrustedHTML sink this function exists to avoid. That is a fail-closed
+  // choice — the frame's markup (and any secret inside it) is dropped
+  // entirely instead of risked.
+  //
+  // The walk uses an explicit stack instead of recursion so a very deep
+  // page cannot overflow the call stack, and stops once the output has
+  // already passed `max` characters, since limitText truncates to `max`
+  // anyway — the stopping point yields the same prefix limitText would
+  // keep from a full, untruncated serialization.
+  const serializeSanitizedHtml = (root, max) => {
     if (!root) {
       return null;
     }
-    const inert = document.implementation.createHTMLDocument('');
-    const copy = inert.importNode(root, true);
-    redactSecretInputValues(copy);
-    return limitText(copy.outerHTML || '', max);
+
+    const parts = [];
+    let length = 0;
+    const emit = (str) => {
+      parts.push(str);
+      length += str.length;
+    };
+
+    // Each stack frame is either a node still to be visited (`open`) or an
+    // end tag to emit once that node's children are done (`close`); that
+    // pairing is what lets one iterative loop reproduce the same
+    // open-tag / children / end-tag order a recursive walk would produce.
+    const stack = [{ open: root }];
+
+    while (stack.length > 0 && length < max) {
+      const frame = stack.pop();
+
+      if (frame.close) {
+        emit(`</${frame.close}>`);
+        continue;
+      }
+
+      const node = frame.open;
+      switch (node.nodeType) {
+        case 1: { // Element
+          const tag = node.localName;
+          const secretInput = isSecretInput(node);
+          const isIframe = tag === 'iframe';
+
+          let open = `<${tag}`;
+          for (const attr of Array.from(node.attributes)) {
+            if (secretInput && attr.name === 'value') {
+              continue; // password/hidden value — see isSecretInputType
+            }
+            if (isIframe && attr.name === 'srcdoc') {
+              continue; // opaque HTML string; omitted, see comment above
+            }
+            open += ` ${attr.name}="${escapeAttrValue(attr.value)}"`;
+          }
+          open += '>';
+          emit(open);
+
+          if (VOID_ELEMENTS.has(tag)) {
+            continue;
+          }
+
+          stack.push({ close: tag });
+
+          // A <template>'s children live in its own inert `content`
+          // DocumentFragment, not in its own childNodes. Substituting
+          // that fragment's children here, uniformly at every depth, is
+          // what makes templates nested inside templates fall out for
+          // free — no separate recursive helper needed.
+          const kids = tag === 'template' && node.content ? node.content.childNodes : node.childNodes;
+          for (let i = kids.length - 1; i >= 0; i -= 1) {
+            stack.push({ open: kids[i] });
+          }
+          continue;
+        }
+        case 3: { // Text
+          const parent = node.parentElement;
+          const raw = parent && RAW_TEXT_PARENTS.has(parent.localName);
+          emit(raw ? node.data : escapeText(node.data));
+          continue;
+        }
+        case 8: // Comment
+          emit(`<!--${node.data}-->`);
+          continue;
+        case 7: // ProcessingInstruction
+          emit(`<?${node.target} ${node.data}?>`);
+          continue;
+        default:
+          // Other node types (e.g. a doctype) do not occur as descendants
+          // of an element root; nothing to serialize.
+          continue;
+      }
+    }
+
+    return limitText(parts.join(''), max);
   };
 
   const runtime = {
@@ -168,7 +275,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       return {
         url: window.location.href,
         title: document.title || '',
-        html: sanitizedOuterHtml(root, 250000),
+        html: serializeSanitizedHtml(root, 250000),
         text: document.body ? limitText(document.body.innerText || document.body.textContent || '', 50000) : null,
         viewport_width: window.innerWidth || 0,
         viewport_height: window.innerHeight || 0,

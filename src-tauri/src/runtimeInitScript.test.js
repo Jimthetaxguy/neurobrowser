@@ -204,3 +204,129 @@ test("snapshot never reconstructs custom elements (no clone-triggered constructo
     dom.window.close();
   }
 });
+
+test("snapshot html omits iframe[srcdoc] entirely, including any secret inside it", () => {
+  // srcdoc is an opaque attribute string, not a descendant tree: a
+  // password input declared inside it is invisible to querySelectorAll on
+  // the outer document, so it can only be handled by dropping the
+  // attribute outright (sanitizing it would mean parsing it as HTML).
+  const snapshot = snapshotOf(
+    `<iframe srcdoc="<input type='password' value='secret'>"></iframe>`,
+  );
+
+  assert.equal(snapshot.html.includes("srcdoc"), false, "srcdoc attribute leaked into snapshot html");
+  assert.equal(snapshot.html.includes("secret"), false, "secret embedded in iframe srcdoc leaked into snapshot html");
+  assert.ok(snapshot.html.includes("<iframe"), "iframe element itself was dropped, not just its srcdoc");
+});
+
+test("snapshot succeeds and matches its normal output even with DOMParser/innerHTML/createContextualFragment blocked (Trusted Types simulation)", () => {
+  // Simulates a page whose CSP sets `require-trusted-types-for 'script'`
+  // with no default policy: every one of these three sinks throws a
+  // TypeError on any plain-string input, the same way a real Trusted
+  // Types violation does. The serializer must not use any of them.
+  const dom = new JSDOM(
+    `<!doctype html><html><body>` +
+      `<input type="password" value="secret">` +
+      `<input type="text" name="username" value="alice">` +
+      `</body></html>`,
+    { url: "https://example.test/page", runScripts: "outside-only" },
+  );
+  try {
+    dom.window.eval(runtimeInitScript);
+    const runtime = dom.window.__NEUROBROWSER_RUNTIME__;
+
+    // The expected output is this same (already-verified-safe) call,
+    // taken before any sink is blocked, so this test asserts "still
+    // works, identical result" rather than duplicating a hand-written
+    // expected string that could drift from the real serializer.
+    const expected = runtime.snapshot().html;
+    assert.ok(expected.includes('name="username"'));
+    assert.equal(expected.includes("secret"), false);
+
+    const { window } = dom;
+    const blocked = () => {
+      throw new TypeError("This document requires 'TrustedHTML' assignment.");
+    };
+    window.DOMParser = function BlockedDOMParser() {
+      blocked();
+    };
+    const innerHTMLDescriptor = Object.getOwnPropertyDescriptor(window.Element.prototype, "innerHTML");
+    Object.defineProperty(window.Element.prototype, "innerHTML", {
+      configurable: true,
+      get: innerHTMLDescriptor.get,
+      set: blocked,
+    });
+    window.Range.prototype.createContextualFragment = blocked;
+
+    let snapshot;
+    assert.doesNotThrow(() => {
+      snapshot = runtime.snapshot();
+    }, "snapshot() used a DOMParser/innerHTML-setter/createContextualFragment sink");
+
+    assert.equal(snapshot.html, expected, "blocking the sinks changed snapshot() output");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("serializer output matches root.outerHTML exactly for a secret-free page (parity)", () => {
+  const dom = new JSDOM(`<!doctype html><html><body></body></html>`, {
+    url: "https://example.test/page",
+    runScripts: "outside-only",
+  });
+  try {
+    dom.window.eval(runtimeInitScript);
+    // Built with real DOM calls (not an HTML string) so every character
+    // below is exactly the character under test, with no entity-decoding
+    // round trip through an HTML parser to reason about.
+    dom.window.eval(`
+      var NBSP = String.fromCharCode(160);
+      var wrap = document.createElement('div');
+      wrap.id = 'wrap';
+      wrap.setAttribute('data-note', 'He said "hi" & left <now>');
+      wrap.setAttribute('title', 'a<b>c');
+      wrap.appendChild(document.createTextNode('Text with & entity, <tag-looking> chars, and a' + NBSP + 'nbsp.'));
+
+      wrap.appendChild(document.createElement('br'));
+
+      var img = document.createElement('img');
+      img.setAttribute('src', 'x.png');
+      img.setAttribute('alt', 'a "pic" & <thing>');
+      wrap.appendChild(img);
+
+      var scriptEl = document.createElement('script');
+      scriptEl.textContent = 'if (a < b && c > "d") { /* raw & unescaped */ }';
+      wrap.appendChild(scriptEl);
+
+      var styleEl = document.createElement('style');
+      styleEl.textContent = 'a[data-x="y"] { content: "<tag>&amp;"; }';
+      wrap.appendChild(styleEl);
+
+      wrap.appendChild(document.createComment(' a comment with -- dashes & <tags> '));
+
+      var tpl = document.createElement('template');
+      tpl.innerHTML = '<span>templated <b>content</b> &amp; more</span>';
+      wrap.appendChild(tpl);
+
+      var svgHost = document.createElement('div');
+      svgHost.innerHTML = '<svg viewBox="0 0 10 10"><linearGradient id="g"><stop offset="0"></stop></linearGradient></svg>';
+      wrap.appendChild(svgHost.firstElementChild);
+
+      class ParityCountingElement extends HTMLElement {}
+      customElements.define('parity-counting-element', ParityCountingElement);
+      var custom = document.createElement('parity-counting-element');
+      custom.id = 'ce';
+      wrap.appendChild(custom);
+
+      document.body.appendChild(wrap);
+    `);
+
+    const expectedHtml = dom.window.document.documentElement.outerHTML;
+    const runtime = dom.window.__NEUROBROWSER_RUNTIME__;
+    const snapshot = runtime.snapshot();
+
+    assert.equal(snapshot.html, expectedHtml);
+  } finally {
+    dom.window.close();
+  }
+});
