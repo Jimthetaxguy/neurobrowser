@@ -89,19 +89,23 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       selector: 'table'
     }));
 
-  // Strips the `value` attribute from every password/hidden <input> reachable
-  // from `root`, including inputs declared inside <template> elements.
-  // A <template>'s children live in its own inert `content` DocumentFragment,
-  // which ordinary querySelectorAll never descends into (that's how the
-  // platform keeps template contents from being treated as live DOM), so we
-  // walk each template's content explicitly and recurse for templates
-  // nested inside templates.
+  // Strips credential-bearing markup reachable from `root`:
+  // - `value` on password/hidden <input>
+  // - `iframe[srcdoc]`, which is an opaque HTML string (not a descendant
+  //   tree), so querySelectorAll('input') never sees controls declared only
+  //   there. Omit the attribute rather than parse it — parsing would
+  //   reintroduce a TrustedHTML sink.
+  // A <template>'s children live in its own inert `content` fragment, so
+  // walk each template's content and recurse for nested templates.
   const redactSecretInputValues = (root) => {
     for (const input of Array.from(root.querySelectorAll('input'))) {
       const type = ((input.getAttribute && input.getAttribute('type')) || '').toLowerCase();
       if (isSecretInputType(type) && input.hasAttribute('value')) {
         input.removeAttribute('value');
       }
+    }
+    for (const iframe of Array.from(root.querySelectorAll('iframe[srcdoc]'))) {
+      iframe.removeAttribute('srcdoc');
     }
     for (const template of Array.from(root.querySelectorAll('template'))) {
       if (template.content) {
@@ -111,27 +115,23 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   };
 
   // Serializes `root` for the HTML snapshot without leaking credentials or
-  // running page code. `root.outerHTML` on the live DOM would include the
-  // `value` attribute of password/hidden inputs verbatim (attrsToObject/
-  // collectForms only protect the structured views), and that HTML is what
-  // gets persisted and handed to the policy layer.
+  // running page code. Live `root.outerHTML` includes password/hidden
+  // `value` attributes verbatim (attrsToObject/collectForms only protect
+  // the structured views), and that HTML is persisted / sent to policy.
   //
-  // This used to clone the live node and redact the clone, but
-  // `root.cloneNode(true)` synchronously reconstructs every custom element in
-  // the subtree (the platform reruns each one's constructor for the clone),
-  // and that page-defined code can throw or cause real side effects (network
-  // calls, global mutation) — so merely requesting a snapshot could fail or
-  // change page behavior. Parsing a pure string serialization instead avoids
-  // that: `root.outerHTML` only reads the existing tree (no construction),
-  // and a DOMParser document has no browsing context, so nothing in it is
-  // ever upgraded, connected, or executed.
+  // `importNode` into `createHTMLDocument` is inert: that document has an
+  // empty custom-element registry, so page constructors do not run
+  // (unlike `root.cloneNode(true)`). It is not a TrustedHTML sink, so
+  // `require-trusted-types-for 'script'` cannot fail the snapshot
+  // (unlike `DOMParser.parseFromString`).
   const sanitizedOuterHtml = (root, max) => {
     if (!root) {
       return null;
     }
-    const doc = new DOMParser().parseFromString(root.outerHTML || '', 'text/html');
-    redactSecretInputValues(doc);
-    return limitText((doc.documentElement && doc.documentElement.outerHTML) || '', max);
+    const inert = document.implementation.createHTMLDocument('');
+    const copy = inert.importNode(root, true);
+    redactSecretInputValues(copy);
+    return limitText(copy.outerHTML || '', max);
   };
 
   const runtime = {
