@@ -1,5 +1,4 @@
 import AppKit
-import WebKit
 
 class MainWindowController: NSWindowController {
     

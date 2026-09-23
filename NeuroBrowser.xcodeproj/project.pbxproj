@@ -10,7 +10,6 @@
 		0A2CC44B81DFB053CADF6D19 /* BrowserViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413FF80CF13473E0E3857CBF /* BrowserViewController.swift */; };
 		33CFE7B5C1CDBF9E2CED2BF1 /* ReactControlSurfaceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE9F8D46AC462A6A3CF9597 /* ReactControlSurfaceViewController.swift */; };
 		35A87FB1A1C6E8A72A17216D /* ControlSurface in Resources */ = {isa = PBXBuildFile; fileRef = BA98FD1FB01DD731BE60F008 /* ControlSurface */; };
-		4B5104017A61DB596F34F20E /* SidebarViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD00DABE9B8EA1A5DEDCE9C /* SidebarViewController.swift */; };
 		5BF1F3AD2A663A750EDFE421 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A93138B837807A5447C94D7 /* AppDelegate.swift */; };
 		A5E35A96FC3186B676C3D4F5 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2F39ECA8A6475B642B9532 /* MainWindowController.swift */; };
 		B144B18817F1039E257C87AA /* ContentViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C97382E579548A578AACD96 /* ContentViewController.swift */; };
@@ -24,7 +23,6 @@
 		6C97382E579548A578AACD96 /* ContentViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewController.swift; sourceTree = "<group>"; };
 		9A2F39ECA8A6475B642B9532 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
 		BA98FD1FB01DD731BE60F008 /* ControlSurface */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ControlSurface; path = NeuroBrowser/ControlSurface; sourceTree = SOURCE_ROOT; };
-		ECD00DABE9B8EA1A5DEDCE9C /* SidebarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -53,7 +51,6 @@
 				BA98FD1FB01DD731BE60F008 /* ControlSurface */,
 				9A2F39ECA8A6475B642B9532 /* MainWindowController.swift */,
 				1BE9F8D46AC462A6A3CF9597 /* ReactControlSurfaceViewController.swift */,
-				ECD00DABE9B8EA1A5DEDCE9C /* SidebarViewController.swift */,
 			);
 			path = NeuroBrowser;
 			sourceTree = "<group>";
@@ -130,7 +127,6 @@
 				B144B18817F1039E257C87AA /* ContentViewController.swift in Sources */,
 				A5E35A96FC3186B676C3D4F5 /* MainWindowController.swift in Sources */,
 				33CFE7B5C1CDBF9E2CED2BF1 /* ReactControlSurfaceViewController.swift in Sources */,
-				4B5104017A61DB596F34F20E /* SidebarViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
