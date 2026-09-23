@@ -4,26 +4,28 @@
 //! memory (`neurobrowser::agent::memory::AgentMemory`).
 //!
 //! M1.1 scaffolded the types and service stubs. M1.3 adds [`extract_blocks`].
-//! Capture, search, explain, and forget stay stubs until their milestones.
+//! M1.5 adds the Tantivy block index ([`index::BlockIndex`]). M1.6 adds
+//! [`search`] and [`explain`]. [`MemoryService`] stays a stub until M1.7.
 //! This crate is not a Cargo workspace member. The root and `src-tauri` crates
 //! take a path dependency in M1.7.
 //!
 //! Time is Unix epoch milliseconds (`u64`) via [`now_millis`].
 
 pub mod capture;
+pub mod index;
 pub mod model;
+pub mod query;
 
 // Later milestones declare these modules next to `model`:
 // M1.2 pub mod policy;
 // M1.4 pub mod store;
-// M1.5 pub mod index;
-// M1.6 pub mod query;
 
 pub use capture::{extract_blocks, MAX_BLOCK_CHARS};
 pub use model::{
     now_millis, CapturedPage, MemoryError, ScoreComponent, SearchExplain, SearchRequest,
     SearchResult, SemanticBlock,
 };
+pub use query::{explain, search, QueryError};
 
 use std::path::{Path, PathBuf};
 use url::Url;
@@ -60,7 +62,7 @@ impl MemoryService {
 
     /// Search indexed blocks.
     pub async fn search(&self, request: SearchRequest) -> Result<Vec<SearchResult>, MemoryError> {
-        // M1.6 fill-in: query parser and TopDocs. M1.7 wires the call.
+        // M1.7 wires query::search. Stub until then.
         let _ = (request, self.data_dir());
         Err(MemoryError::NotImplemented { task: "M1.6" })
     }
@@ -71,7 +73,7 @@ impl MemoryService {
         request: &SearchRequest,
         result: &SearchResult,
     ) -> Result<SearchExplain, MemoryError> {
-        // M1.6 fill-in: Tantivy explain and SnippetGenerator.
+        // M1.7 wires query::explain. Stub until then.
         let _ = (request, result, self.data_dir());
         Err(MemoryError::NotImplemented { task: "M1.6" })
     }
