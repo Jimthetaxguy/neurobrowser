@@ -127,11 +127,11 @@ function eventSummary(event) {
 function ApprovalCard({ approval, onResolve, onCancel }) {
   const approvalEvent = latestApprovalEvent(approval);
   const reasons = approvalEvent?.decision?.reasons ?? [];
-  const args = approvalEvent?.decision?.redacted_arguments ?? approval?.pending_tool_call?.arguments ?? {};
+  const args = approvalEvent?.decision?.redacted_arguments ?? {};
   return (
     <div className="approval-card">
       <div className="approval-title">Approval required</div>
-      <div className="approval-tool">{approval?.pending_tool_call?.name || approvalEvent?.tool}</div>
+      <div className="approval-tool">{approvalEvent?.tool}</div>
       {reasons.length > 0 && <div className="approval-reason">{reasons.join("; ")}</div>}
       <pre className="approval-args">{JSON.stringify(args, null, 2)}</pre>
       <div className="approval-actions">
@@ -465,7 +465,7 @@ export default function App({ adapter, lane }) {
       if (!pendingApproval) return;
       setThinking(true);
       try {
-        const result = await adapter.submitApproval(pendingApproval.run_id, approved, null);
+        const result = await adapter.submitApproval(pendingApproval.run_id, approved);
         setActionEvents((items) => [...items, ...(result.events || [])]);
         setPendingApproval(null);
         appendMessage("assistant", result.final_response || (approved ? "Approved action ran." : "Approval denied."));
