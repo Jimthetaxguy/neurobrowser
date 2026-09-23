@@ -50,9 +50,6 @@ export function createTauriHostAdapter() {
     async getPageSnapshot(sessionId, pageId) {
       return invoke("get_page_snapshot", { sessionId, pageId });
     },
-    async ask(sessionId, pageId, prompt) {
-      return invoke("ask", { sessionId, pageId, prompt });
-    },
     async startAgentRun(sessionId, pageId, prompt) {
       return invoke("start_agent_run", { sessionId, pageId, prompt });
     },

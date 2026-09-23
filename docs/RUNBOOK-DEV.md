@@ -74,7 +74,7 @@ Integration tests live in `tests/`:
 
 ## Tauri IPC
 
-The desktop app exposes 20 commands (see `src-tauri/src/main.rs`). From
+The desktop app exposes 18 commands (see `src-tauri/src/main.rs`). From
 the React frontend:
 
 ```javascript
