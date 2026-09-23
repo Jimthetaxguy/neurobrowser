@@ -8,8 +8,7 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Fixed
 
-- Policy canonicalizes supported tool aliases before deny and approval checks.
-  Navigation domains are checked case-insensitively; unsafe URL schemes are
+- Navigation domains are checked case-insensitively; unsafe URL schemes are
   rejected without DNS lookups. ReadOnly blocks navigation.
 - Credential keys are recognized across case, camelCase, and separators, require
   approval, and are redacted in policy decisions. Benign words such as `author`
