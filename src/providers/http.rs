@@ -49,9 +49,7 @@ pub(crate) fn client_for_origin(origin: &str) -> Client {
 mod tests {
     use super::client_for_origin;
     use crate::netguard::blocked_reason;
-    use crate::providers::{
-        AiContext, AiProvider, OllamaProvider, ProviderConfig, ProviderType, ScrollPosition,
-    };
+    use crate::providers::{AiContext, AiProvider, OllamaProvider, ProviderConfig, ProviderType};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -60,11 +58,7 @@ mod tests {
         AiContext {
             current_url: String::new(),
             page_title: String::new(),
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results: Vec::new(),
-            conversation_history: Vec::new(),
         }
     }
 

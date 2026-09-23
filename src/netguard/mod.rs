@@ -532,7 +532,7 @@ mod resolver_tests {
         }
     }
 
-    fn resolve_named(
+    async fn resolve_named(
         name: &str,
         inner: Vec<&str>,
         allow_host: Option<&str>,
@@ -543,50 +543,55 @@ mod resolver_tests {
             guarded = guarded.allowing_host(host);
         }
         let name = Name::from_str(name).unwrap();
-        futures::executor::block_on(async {
-            match guarded.resolve(name).await {
-                Ok(it) => Ok(it.collect()),
-                Err(e) => Err(e.to_string()),
-            }
-        })
+        match guarded.resolve(name).await {
+            Ok(it) => Ok(it.collect()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
-    fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
-        resolve_named("example.test", inner, None)
+    async fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
+        resolve_named("example.test", inner, None).await
     }
 
-    #[test]
-    fn resolver_strips_internal_addresses_returned_by_dns() {
+    #[tokio::test]
+    async fn resolver_strips_internal_addresses_returned_by_dns() {
         // The rebinding case: DNS answers with a public AND a loopback address.
-        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"]).expect("some kept");
+        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"])
+            .await
+            .expect("some kept");
         assert_eq!(kept.len(), 1, "internal address must be filtered out");
         assert_eq!(kept[0].ip().to_string(), "93.184.216.34");
     }
 
-    #[test]
-    fn resolver_refuses_when_every_address_is_internal() {
+    #[tokio::test]
+    async fn resolver_refuses_when_every_address_is_internal() {
         let err = resolve_all(vec!["169.254.169.254:80", "10.0.0.1:80"])
+            .await
             .expect_err("must refuse, not return an empty set");
         assert!(err.contains("internal/loopback"), "got: {err}");
     }
 
-    #[test]
-    fn resolver_passes_ordinary_public_addresses_through() {
-        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"]).expect("kept");
+    #[tokio::test]
+    async fn resolver_passes_ordinary_public_addresses_through() {
+        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"])
+            .await
+            .expect("kept");
         assert_eq!(kept.len(), 2);
     }
 
-    #[test]
-    fn resolver_keeps_loopback_for_configured_localhost() {
+    #[tokio::test]
+    async fn resolver_keeps_loopback_for_configured_localhost() {
         let kept = resolve_named("localhost", vec!["127.0.0.1:80"], Some("localhost"))
+            .await
             .expect("configured localhost must remain resolvable");
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].ip().to_string(), "127.0.0.1");
     }
 
-    #[test]
-    fn resolver_still_strips_loopback_for_names_that_are_not_the_allow() {
+    #[tokio::test]
+    async fn resolver_still_strips_loopback_for_names_that_are_not_the_allow() {
         let err = resolve_named("evil.test", vec!["127.0.0.1:80"], Some("localhost"))
+            .await
             .expect_err("a different host must not inherit the allow");
         assert!(err.contains("internal/loopback"), "got: {err}");
     }
