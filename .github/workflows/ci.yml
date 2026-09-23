@@ -71,6 +71,9 @@ jobs:
       - name: cargo test headless
         run: cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
 
+      - name: cargo test webview capabilities
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities
+
   guards:
     name: "Guards: no-mock + merge conflicts + iCloud"
     runs-on: ubuntu-latest
@@ -79,12 +82,15 @@ jobs:
 
       # grep is on ubuntu-latest; never wrap it in `if`/`2>/dev/null` — a
       # missing tool must fail the job, not skip the scan.
+      # nullglob: crates/ is present before any crate manifest exists.
       - name: No-mock dependency guard
         run: |
           set -euo pipefail
+          shopt -s nullglob
           set +e
           grep -n -F -e mockall -e mockito -e wiremock -- \
-            Cargo.toml Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock
+            Cargo.toml Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock \
+            crates/*/Cargo.toml crates/*/Cargo.lock
           rc=$?
           set -e
           if [ "$rc" -eq 0 ]; then
@@ -101,7 +107,7 @@ jobs:
           set -euo pipefail
           set +e
           grep -R -n -I -E '<<<<<<<|>>>>>>>' --exclude='*.lock' \
-            src src-tauri tests NeuroBrowser
+            src src-tauri tests NeuroBrowser crates
           rc=$?
           set -e
           if [ "$rc" -eq 0 ]; then
@@ -116,7 +122,7 @@ jobs:
       - name: iCloud duplicate detection
         run: |
           set -euo pipefail
-          dupes=$(find src src-tauri tests NeuroBrowser -name '* 2*')
+          dupes=$(find src src-tauri tests NeuroBrowser crates -name '* 2*')
           if [ -n "$dupes" ]; then
             echo "$dupes"
             echo "::error::iCloud duplicate files detected."

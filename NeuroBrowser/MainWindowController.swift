@@ -26,10 +26,6 @@ class MainWindowController: NSWindowController {
         window.contentViewController = browserViewController
     }
     
-    override func windowDidLoad() {
-        super.windowDidLoad()
-    }
-    
     // MARK: - Menu Actions
     
     @objc func newTab(_ sender: Any?) {
