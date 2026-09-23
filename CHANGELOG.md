@@ -30,6 +30,10 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Removed
 
+- Unread tool-result echo fields: `ToolResult.arguments` (kept raw `type`
+  values after the result string was de-leaked), unused
+  `ToolArgumentDefinition.sensitive`, and constant snapshot `selector` fields
+  on links/forms/tables/prices.
 - Unused agent scaffolding, worker spawn/inbox plumbing, Worker summary types,
   empty compatibility readers, and unused exports/tests. Worker execution was
   never shipped.

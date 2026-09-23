@@ -241,7 +241,6 @@ impl ReActAgent {
 
                 let tool_result = ToolResult {
                     tool_name: tool_call.name.clone(),
-                    arguments: tool_call.arguments.clone(),
                     result: result.clone(),
                     success,
                 };
@@ -379,7 +378,6 @@ impl ReActAgent {
             let mut state = self.state.lock().map_err(|e| e.to_string())?;
             state.tool_results.push(ToolResult {
                 tool_name: tool_call.name.clone(),
-                arguments: tool_call.arguments.clone(),
                 result: result.clone(),
                 success,
             });

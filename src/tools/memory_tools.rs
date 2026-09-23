@@ -83,7 +83,6 @@ impl BrowserTool for SearchPersonalMemoryTool {
                 description: format!(
                     "Maximum hits to return (default {DEFAULT_SEARCH_LIMIT}, max {MAX_SEARCH_LIMIT})"
                 ),
-                sensitive: false,
             },
         ])
     }
@@ -100,13 +99,12 @@ impl BrowserTool for SearchPersonalMemoryTool {
         else {
             return ToolResult::error(
                 self.name(),
-                args,
                 "search_personal_memory requires a non-empty query".to_string(),
             );
         };
         let limit = match parse_limit(args.get("limit")) {
             Ok(limit) => limit,
-            Err(error) => return ToolResult::error(self.name(), args, error),
+            Err(error) => return ToolResult::error(self.name(), error),
         };
         let request = SearchRequest {
             query: query.to_string(),
@@ -114,10 +112,10 @@ impl BrowserTool for SearchPersonalMemoryTool {
         };
         match self.memory.search(request).await {
             Ok(hits) if hits.is_empty() => {
-                ToolResult::success(self.name(), args, "No personal memory matches.".to_string())
+                ToolResult::success(self.name(), "No personal memory matches.".to_string())
             }
-            Ok(hits) => ToolResult::success(self.name(), args, format_search_hits(&hits)),
-            Err(error) => ToolResult::error(self.name(), args, error.to_string()),
+            Ok(hits) => ToolResult::success(self.name(), format_search_hits(&hits)),
+            Err(error) => ToolResult::error(self.name(), error.to_string()),
         }
     }
 }
@@ -148,39 +146,36 @@ impl BrowserTool for InspectActivePageTool {
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> ToolResult {
         let snapshot = match browser.snapshot().await {
             Ok(snapshot) => snapshot,
-            Err(error) => return ToolResult::error(self.name(), args, error),
+            Err(error) => return ToolResult::error(self.name(), error),
         };
         let page_url = snapshot.url;
         if let CaptureDecision::Deny { reason } = self.policy.evaluate(&page_url) {
-            return ToolResult::error(self.name(), args, format!("capture denied: {reason}"));
+            return ToolResult::error(self.name(), format!("capture denied: {reason}"));
         }
         let Ok(parsed) = url::Url::parse(&page_url) else {
             return ToolResult::error(
                 self.name(),
-                args,
                 "capture denied: URL could not be parsed".to_string(),
             );
         };
         match self.memory.blocks_for_url(&parsed).await {
-            Ok(blocks) if blocks.is_empty() => ToolResult::error(
-                self.name(),
-                args,
-                format!("No captured content for {page_url}"),
-            ),
+            Ok(blocks) if blocks.is_empty() => {
+                ToolResult::error(self.name(), format!("No captured content for {page_url}"))
+            }
             Ok(blocks) => {
                 let body = blocks
                     .iter()
                     .map(|block| format_section(&block.heading_path, &block.text))
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                ToolResult::success(self.name(), args, format!("{page_url}\n\n{body}"))
+                ToolResult::success(self.name(), format!("{page_url}\n\n{body}"))
             }
-            Err(error) => ToolResult::error(self.name(), args, error.to_string()),
+            Err(error) => ToolResult::error(self.name(), error.to_string()),
         }
     }
 }

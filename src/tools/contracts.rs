@@ -54,7 +54,6 @@ pub struct ToolArgumentDefinition {
     pub name: String,
     pub required: bool,
     pub description: String,
-    pub sensitive: bool,
 }
 
 impl ToolArgumentDefinition {
@@ -63,13 +62,7 @@ impl ToolArgumentDefinition {
             name: name.to_string(),
             required: true,
             description: description.to_string(),
-            sensitive: false,
         }
-    }
-
-    pub fn sensitive(mut self, value: bool) -> Self {
-        self.sensitive = value;
-        self
     }
 }
 
