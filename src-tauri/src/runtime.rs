@@ -31,6 +31,11 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     return value.trim().slice(0, max);
   };
 
+  // Shared definition of "this input's value is a secret" so the structured
+  // (attrsToObject/collectForms) and raw-HTML (sanitizedOuterHtml) redaction
+  // paths cannot drift apart.
+  const isSecretInputType = (type) => type === 'password' || type === 'hidden';
+
   const attrsToObject = (element) => {
     const attrs = {};
     if (!element || !element.attributes) {
@@ -38,7 +43,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     }
     const type = ((element.getAttribute && element.getAttribute('type')) || '').toLowerCase();
     for (const attr of Array.from(element.attributes)) {
-      if ((type === 'password' || type === 'hidden') && attr.name.toLowerCase() === 'value') {
+      if (isSecretInputType(type) && attr.name.toLowerCase() === 'value') {
         continue;
       }
       attrs[attr.name] = attr.value;
@@ -68,7 +73,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
             name: input.getAttribute('name') || '',
             input_type: input.getAttribute('type') || input.tagName.toLowerCase(),
             selector: input.tagName.toLowerCase(),
-            value: (inputType === 'password' || inputType === 'hidden')
+            value: isSecretInputType(inputType)
               ? null
               : (typeof input.value === 'string' ? limitText(input.value, 200) : null)
           };
@@ -83,6 +88,27 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       ).filter((row) => row.length > 0),
       selector: 'table'
     }));
+
+  // Serializes `root` for the HTML snapshot without leaking credentials.
+  // `root.outerHTML` on the live DOM would include the `value` attribute of
+  // password/hidden inputs verbatim (attrsToObject/collectForms only protect
+  // the structured views), and that HTML is what gets persisted and handed to
+  // the policy layer. We serialize a deep clone instead of the live node so
+  // the visible page is never touched; live `.value` properties are already
+  // excluded from outerHTML by the DOM and need no handling here.
+  const sanitizedOuterHtml = (root, max) => {
+    if (!root) {
+      return null;
+    }
+    const clone = root.cloneNode(true);
+    for (const input of Array.from(clone.querySelectorAll('input'))) {
+      const type = ((input.getAttribute && input.getAttribute('type')) || '').toLowerCase();
+      if (isSecretInputType(type) && input.hasAttribute('value')) {
+        input.removeAttribute('value');
+      }
+    }
+    return limitText(clone.outerHTML || '', max);
+  };
 
   const runtime = {
     dispatch(pageId, requestId, producer) {
@@ -118,7 +144,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       return {
         url: window.location.href,
         title: document.title || '',
-        html: root ? limitText(root.outerHTML || '', 250000) : null,
+        html: sanitizedOuterHtml(root, 250000),
         text: document.body ? limitText(document.body.innerText || document.body.textContent || '', 50000) : null,
         viewport_width: window.innerWidth || 0,
         viewport_height: window.innerHeight || 0,
