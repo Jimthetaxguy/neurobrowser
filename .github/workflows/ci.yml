@@ -31,6 +31,9 @@ jobs:
       - name: cargo test
         run: cargo test --all-targets
 
+      - name: cargo test neuro-memory
+        run: cargo test --manifest-path crates/neuro-memory/Cargo.toml
+
       - name: cargo build (release)
         run: cargo build --release
 

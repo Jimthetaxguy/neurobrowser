@@ -25,11 +25,12 @@ This is the verification chain in `verify.sh`:
 1. `cargo fmt -- --check`
 2. `cargo clippy --all-targets -- -D warnings`
 3. `cargo test --all-targets`
-4. `cd src-tauri && npm ci && npm run build`
-5. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
-6. Locked headless check and binary tests with `--features headless`
-7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
-8. `cargo build --release` (library crate)
+4. `cargo test --manifest-path crates/neuro-memory/Cargo.toml`
+5. `cd src-tauri && npm ci && npm test && npm run build`
+6. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
+7. Locked headless check and binary tests with `--features headless`
+8. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
+9. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
@@ -61,6 +62,7 @@ does not construct `BrowserEngine`, navigate, or execute registry tools.
 
 ```bash
 cargo test --all-targets
+cargo test --manifest-path crates/neuro-memory/Cargo.toml
 ```
 
 Integration tests live in `tests/`:
@@ -68,14 +70,14 @@ Integration tests live in `tests/`:
 - `action_policy.rs` — deny-wins-over-allow, assisted-mode click approval,
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
-- `agent_memory_metrics.rs` — memory + metrics.
+- `memory_tools.rs` — personal-memory tools over `MemoryService`.
 - Headless argument and policy tests live in `src-tauri/src/bin/headless.rs`
   and run explicitly with the `headless` feature.
 
 ## Tauri IPC
 
-The desktop app exposes 18 commands (see `src-tauri/src/main.rs`). From
-the React frontend:
+The desktop app exposes 22 commands (`tauri::generate_handler!` in
+`src-tauri/src/main.rs`). From the React frontend:
 
 ```javascript
 import { invoke } from "@tauri-apps/api/core";
@@ -113,7 +115,8 @@ commands (including provider changes and approval submission).
 | `cargo fmt --check` | diff output | `cargo fmt`, re-run |
 | `cargo clippy` | warnings-as-errors | fix the warning, re-run |
 | `cargo test` | failed assertions | fix the test or the code |
-| `npm ci && npm run build` | Vite error | check `src-tauri/src/*.{jsx,js}` |
+| `cargo test --manifest-path crates/neuro-memory/Cargo.toml` | failed assertions | fix the memory crate test or the code |
+| `npm ci && npm test && npm run build` | node:test or Vite error | check `src-tauri/src/*.{jsx,js}` |
 | `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Tauri compile error | missing icon or capability |
 | locked headless `cargo check` / `cargo test --bin neurobrowser-headless` | headless compile or binary test failure | fix the headless feature path |
 | `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
@@ -132,7 +135,8 @@ commands (including provider changes and approval submission).
 | `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | `https://api.openai.com` (via `resolve_endpoint`) |
 | `CUSTOM_PROVIDER_MODEL` | `set_provider("custom")` | `gpt-4o` |
 | `NEUROBROWSER_SOCKET` | headless daemon | temp dir `neurobrowser-<pid>.sock` |
-| `RUST_LOG` | tracing | `neurobrowser=info,headless=info` |
+| `RUST_LOG` | desktop tracing (`src-tauri/src/main.rs`) | `neurobrowser=info` |
+| `RUST_LOG` | headless tracing | `neurobrowser=info,headless=info` |
 
 Local keys go in a gitignored `.env`.
 
@@ -141,6 +145,7 @@ Local keys go in a gitignored `.env`.
 | Layer | Path |
 |---|---|
 | Library crate | `src/` |
+| Memory crate | `crates/neuro-memory` |
 | Tauri shell | `src-tauri/` |
 | React frontend | `src-tauri/src/App.jsx` + `hostAdapters.js` |
 | Tauri IPC bridge | `src-tauri/src/main.rs` |

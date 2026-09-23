@@ -46,8 +46,10 @@ cd neurobrowser
 ./verify.sh
 ```
 
-Full `./verify.sh` type-checks the Tauri crate (macOS, or GTK/WebKit on
-Linux). Library-only: `cargo test`. See `docs/RUNBOOK-DEV.md`.
+Full `./verify.sh` runs `cargo test --manifest-path crates/neuro-memory/Cargo.toml`,
+`npm test` (`src-tauri` `src/*.test.js`), and type-checks the Tauri crate
+(macOS, or GTK/WebKit on Linux). Library-only: `cargo test`. See
+`docs/RUNBOOK-DEV.md`.
 
 Headless daemon:
 
@@ -143,7 +145,7 @@ the Tauri runtime overrides it.
 | Level | Auto-allow | Gate |
 |---|---|---|
 | `ReadOnly` | Read, wait, scroll | Other actions, including navigate, `Block` |
-| `Assisted` (default) | Read, wait, scroll, same-domain navigate | Click / type / submit / cross-domain → `RequireApproval` |
+| `Assisted` (default) | Read, wait, scroll, same-domain navigate | otherwise `RequireApproval` |
 | `HighAutonomy` | Remaining non-high-impact actions | Submit / purchase / auth / upload / message / destructive → `RequireApproval` |
 
 The mode table applies after the common gates below. Sensitive inputs and
