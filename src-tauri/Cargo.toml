@@ -19,6 +19,8 @@ required-features = ["headless"]
 
 [dependencies]
 neurobrowser = { path = "..", features = [] }
+# Persistent page memory (neuro_memory::MemoryService), distinct from agent::memory::AgentMemory.
+neuro-memory = { path = "../crates/neuro-memory" }
 tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
