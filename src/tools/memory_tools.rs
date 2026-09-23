@@ -8,7 +8,7 @@
 //! Inspect reads the current URL from `snapshot()` and does not navigate.
 
 use crate::tools::{
-    BrowserInterface, BrowserTool, RiskLevel, ToolAction, ToolArgumentDefinition, ToolDefinition,
+    BrowserInterface, BrowserTool, ToolAction, ToolArgumentDefinition, ToolDefinition,
     ToolRegistry, ToolResult, ToolRisk,
 };
 use async_trait::async_trait;
@@ -70,7 +70,7 @@ impl BrowserTool for SearchPersonalMemoryTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required(
@@ -142,7 +142,7 @@ impl BrowserTool for InspectActivePageTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 

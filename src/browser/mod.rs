@@ -1,7 +1,7 @@
 use crate::tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageSnapshot, PriceInfo, RiskLevel, TableInfo, ToolAction, ToolArgumentDefinition,
-    ToolDefinition, ToolRegistry, ToolRisk,
+    PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition, ToolDefinition,
+    ToolRegistry, ToolRisk,
 };
 use async_trait::async_trait;
 use regex_lite::Regex;
@@ -477,7 +477,7 @@ impl BrowserTool for NavigateTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Navigate),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "url",
@@ -517,7 +517,7 @@ impl BrowserTool for WaitTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Wait, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Wait),
         )
     }
 
@@ -549,7 +549,7 @@ impl BrowserTool for QueryDomTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -608,7 +608,7 @@ impl BrowserTool for GetTextTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -645,7 +645,7 @@ impl BrowserTool for GetLinksTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
@@ -692,7 +692,7 @@ impl BrowserTool for GetPricesTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
@@ -739,7 +739,7 @@ impl BrowserTool for GetTablesTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
@@ -794,7 +794,7 @@ impl BrowserTool for ClickTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Click, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Click),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -833,7 +833,7 @@ impl BrowserTool for TypeTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Type, RiskLevel::High).sensitive(true),
+            ToolRisk::new(ToolAction::Type).sensitive(true),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required("selector", "CSS selector to type into"),
@@ -880,7 +880,7 @@ impl BrowserTool for ScrollToTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Scroll),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -921,7 +921,7 @@ impl BrowserTool for ScrollByTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Scroll),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required("x", "Horizontal scroll delta in pixels"),
@@ -969,7 +969,7 @@ impl BrowserTool for SubmitFormTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Submit, RiskLevel::High).externally_visible(true),
+            ToolRisk::new(ToolAction::Submit).externally_visible(true),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -1010,7 +1010,7 @@ impl BrowserTool for KeypressTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Keypress, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Keypress),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "key",
@@ -1047,7 +1047,7 @@ impl BrowserTool for ScreenshotTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Screenshot, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Screenshot),
         )
     }
 
@@ -1079,7 +1079,7 @@ impl BrowserTool for BackTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Back, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Back),
         )
     }
 
@@ -1111,7 +1111,7 @@ impl BrowserTool for ForwardTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Forward, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Forward),
         )
     }
 
@@ -1145,7 +1145,7 @@ impl BrowserTool for ReloadTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Reload, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Reload),
         )
     }
 

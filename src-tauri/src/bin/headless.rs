@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use neurobrowser::agent::policy::ActionPolicy;
 use neurobrowser::browser::default_tool_registry;
-use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, ToolRisk};
+use neurobrowser::tools::{PageSnapshot, ToolAction, ToolRegistry, ToolRisk};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -134,12 +134,12 @@ impl SessionState {
         };
 
         // Registered tools use their real `ToolRisk`. Unknown names fall
-        // back to Destructive/Critical so they are not treated as reads.
+        // back to Destructive so they are not treated as reads.
         let tool_risk = self
             .tool_registry
             .get(name)
             .map(|tool| tool.definition().risk)
-            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive, RiskLevel::Critical));
+            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive));
 
         let policy = self.policy.lock().await;
         let decision = policy.evaluate(name, &tool_risk, args, &snapshot);
@@ -537,7 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_high_risk_tool() {
-        // `type` is High risk + sensitive; Assisted mode must not auto-allow it.
+        // `type` is sensitive in the real registry. Assisted mode must not auto-allow it.
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#input".to_string());
@@ -556,14 +556,14 @@ mod tests {
 
         assert_ne!(
             outcome, "Allow",
-            "high-risk 'type' tool call was silently allowed: {result}"
+            "sensitive 'type' tool call was silently allowed: {result}"
         );
         assert_eq!(outcome, "RequireApproval");
     }
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_submit_form() {
-        // Same check for `submit_form` (High risk, externally visible).
+        // Same check for `submit_form` (`externally_visible: true`).
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#checkout-form".to_string());
