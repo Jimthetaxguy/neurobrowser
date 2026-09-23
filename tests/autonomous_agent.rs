@@ -110,10 +110,8 @@ fn response(content: &str, tool_calls: Vec<ToolCall>) -> AiResponse {
 }
 
 /// Build an `AiResponse` the way the three real providers do: parse
-/// `ToolCall: {json}` from ordinary completion text. Those providers all
-/// emit a terminal stop after that text (OpenAI `finish_reason`, Anthropic
-/// `end_turn` normalized to `"stop"`, Ollama `done` → `"stop"`). The loop
-/// must dispatch on the parsed `tool_calls`, not on that stop reason.
+/// `ToolCall: {json}` from ordinary completion text. The agent dispatches
+/// those calls and returns only when `tool_calls` is empty.
 fn real_shaped_response(content: &str) -> AiResponse {
     AiResponse {
         content: content.to_string(),
@@ -284,10 +282,9 @@ async fn deterministic_provider_runs_read_tool_loop() {
 
 #[tokio::test]
 async fn real_shaped_toolcall_json_dispatches_despite_provider_stop() {
-    // OpenAI/Anthropic/Ollama all attach a terminal stop to ordinary text.
-    // Tool calls live in that text as `ToolCall: {json}`. Before this fix,
-    // `finish_reason == "stop"` short-circuited the loop so the 17-tool
-    // registry never ran on a real provider.
+    // Tool calls live in ordinary completion text as `ToolCall: {json}`.
+    // The agent dispatches parsed `tool_calls` and returns only when that
+    // list is empty.
     let tool_turn =
         "Need text.\nToolCall: {\"name\":\"get_text\",\"arguments\":{\"selector\":\"main\"}}";
     let parsed = neurobrowser::providers::parse_tool_calls(tool_turn);
@@ -315,7 +312,7 @@ async fn real_shaped_toolcall_json_dispatches_despite_provider_stop() {
         run.events.iter().any(
             |event| matches!(event, AgentRunEvent::ToolCallResult { tool, success: true, .. } if tool == "get_text")
         ),
-        "parsed ToolCall JSON must dispatch even when the provider would have said stop"
+        "parsed ToolCall JSON must dispatch"
     );
 }
 
