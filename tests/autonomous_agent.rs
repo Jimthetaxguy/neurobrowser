@@ -367,6 +367,36 @@ fn parses_legacy_action_syntax_for_compatibility() {
     );
 }
 
+#[tokio::test]
+async fn zero_arg_action_wait_reaches_the_tool_path() {
+    let tool_turn = "Action: wait()";
+    let parsed = neurobrowser::providers::parse_tool_calls(tool_turn);
+    assert_eq!(parsed.len(), 1, "Action: wait() must not be dropped");
+    assert_eq!(parsed[0].name, "wait");
+    assert!(parsed[0].arguments.is_empty());
+
+    let browser = TestBrowser::new("https://invoice.example", "ready");
+    let provider = Arc::new(FakeProvider::new(vec![
+        real_shaped_response(tool_turn),
+        real_shaped_response("Final Answer: page is ready"),
+    ]));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+
+    let run = agent
+        .execute_with_policy("Wait for the page", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(run.final_response.as_deref(), Some("page is ready"));
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, AgentRunEvent::ToolCallResult { tool, success: true, result, .. } if tool == "wait" && result == "Page is ready")
+        ),
+        "parsed Action: wait() must dispatch"
+    );
+}
+
 #[test]
 fn parses_legacy_action_syntax_with_multiple_positional_args() {
     // `type(selector, text)` is a two-arg legacy positional call. Both

@@ -105,7 +105,8 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
 
                 let arguments = parse_arguments(name, args_str);
 
-                if !arguments.is_empty() {
+                // Empty argument maps are valid (`wait()`, `inspect_active_page()`).
+                if !name.is_empty() {
                     calls.push(ToolCall {
                         name: name.to_string(),
                         arguments,
@@ -350,7 +351,35 @@ pub fn create_provider(config: &ProviderConfig) -> Arc<dyn AiProvider> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_endpoint;
+    use super::{parse_tool_calls, resolve_endpoint};
+
+    #[test]
+    fn parse_tool_calls_keeps_zero_argument_legacy_actions() {
+        for name in [
+            "wait",
+            "inspect_active_page",
+            "get_links",
+            "get_prices",
+            "get_tables",
+            "screenshot",
+            "back",
+            "forward",
+            "reload",
+        ] {
+            let calls = parse_tool_calls(&format!("Action: {name}()"));
+            assert_eq!(calls.len(), 1, "{name} was dropped");
+            assert_eq!(calls[0].name, name);
+            assert!(
+                calls[0].arguments.is_empty(),
+                "{name} should keep an empty argument map"
+            );
+        }
+
+        assert!(
+            parse_tool_calls("Action: ()").is_empty(),
+            "an empty tool name is not a call"
+        );
+    }
 
     #[test]
     fn resolve_endpoint_uses_default_origin_when_unset() {

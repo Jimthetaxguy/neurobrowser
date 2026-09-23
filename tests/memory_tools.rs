@@ -385,3 +385,46 @@ fn prompt_lists_memory_tools_only_when_personal_memory_is_attached() {
         Some(MEMORY_TOKEN)
     );
 }
+
+#[tokio::test]
+async fn zero_arg_action_inspect_active_page_reaches_the_tool_path() {
+    let (_dir, service) = open_with_page().await;
+    let content = "Action: inspect_active_page()";
+    let calls = parse_tool_calls(content);
+    assert_eq!(
+        calls.len(),
+        1,
+        "Action: inspect_active_page() must not be dropped"
+    );
+    assert_eq!(calls[0].name, "inspect_active_page");
+    assert!(calls[0].arguments.is_empty());
+
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        AiResponse {
+            content: content.to_string(),
+            tool_calls: calls,
+        },
+        final_response("inspected"),
+    ]));
+    let agent = ReActAgent::with_memory(AgentConfig::default(), provider, Some(service));
+    let run = agent
+        .execute_with_policy(
+            "inspect this page",
+            &PageBrowser::new(PAGE_URL, BROWSER_TOKEN),
+            &ActionPolicy::default(),
+        )
+        .await
+        .expect("run");
+
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    match tool_result(&run.events, "inspect_active_page") {
+        AgentRunEvent::ToolCallResult {
+            success, result, ..
+        } => {
+            assert!(success, "{result}");
+            assert!(result.contains(MEMORY_TOKEN), "{result}");
+            assert!(result.contains(PAGE_URL), "{result}");
+        }
+        other => panic!("unexpected event {other:?}"),
+    }
+}
