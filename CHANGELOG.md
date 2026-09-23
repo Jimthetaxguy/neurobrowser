@@ -26,8 +26,7 @@ remain 0.1.0 until an actual version bump and release tag.
   Snapshots remain associated with their source page, and stale page IDs cannot
   navigate or run history commands on another tab. Background tab updates preserve
   URL edits, and native selection/snapshot bursts use the new active page.
-- Frontend dependency lockfile updated within the existing package constraints;
-  the moderate-severity npm audit check is retained in the spec and story.
+- Frontend dependency lockfile updated within the existing package constraints.
 
 ### Removed
 
@@ -38,8 +37,9 @@ remain 0.1.0 until an actual version bump and release tag.
   `list_sessions`, `list_workers`, `get_worker`, `ask`). The command manifest and
   generated permissions now cover the 18 actual commands.
 - The redundant headless `policy.snapshot` method; `policy.get` reads policy.
-- Obsolete status dumps and misleading architectural claims. The root glossary,
-  project summary, agent surface, and skill describe the maintained boundaries.
+- Obsolete status dumps and misleading architectural claims. README, the agent
+  surface, ADR-001, and the skill describe the maintained boundaries.
+- Redundant status glossary, project summary, and the implemented GitSpec pair.
 
 ## [0.1.1] — 2026-07-08
 
@@ -72,9 +72,9 @@ Later removals and fixes are recorded above; the current surface is described in
 
 - Real browser and agent execution through the headless protocol.
 - CLI and MCP clients, cross-process worker execution, and a worker sidebar.
-- Native function calling in the ReAct loop, full screenshot support, and
-  budget-capped real-provider integration coverage. Unit test provider fixtures
-  do not constitute real-provider integration verification.
+- Native function calling in the ReAct loop, full screenshot support, visual
+  regression tests, and budget-capped real-provider integration coverage. Unit
+  test provider fixtures do not constitute real-provider integration verification.
 
 ## [0.1.0] — 2026-02-23
 

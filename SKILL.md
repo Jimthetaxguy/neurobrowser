@@ -43,9 +43,11 @@ live DOM.
 ```bash
 git clone https://github.com/Jimthetaxguy/neurobrowser.git
 cd neurobrowser
-chmod +x verify.sh
 ./verify.sh
 ```
+
+Full `./verify.sh` type-checks the Tauri crate (macOS, or GTK/WebKit on
+Linux). Library-only: `cargo test`. See `docs/RUNBOOK-DEV.md`.
 
 Headless daemon:
 
