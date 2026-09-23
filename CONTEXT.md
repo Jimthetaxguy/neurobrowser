@@ -19,6 +19,7 @@ shell, and a separate AppKit shell. This glossary records shared vocabulary;
 | TauriBrowserRuntime | Desktop runtime that routes browser operations to real child webviews. |
 | Webview capability | The local main control webview owns host commands. Page webviews can only report runtime results from blank/HTTP/HTTPS documents; they cannot submit approvals or change providers. |
 | ActionPolicy | Evaluates proposed tool calls and returns Allow, RequireApproval, or Block with redacted arguments. |
+| ToolRisk | Action category plus sensitive and externally_visible flags; the schema has no risk-level or tool-version field. |
 | ReadOnly / Assisted / HighAutonomy | Policy modes; domain/tool denials, sensitive input, and high-impact actions retain explicit gates. |
 | Agent run | ReAct loop using a real configured provider and BrowserInterface; pending actions require a caller-managed approval. |
 | Tool registry | CSS-selector browser tools in default_tool_registry; see the canonical [agent surface](docs/AGENT-SURFACE.md). |

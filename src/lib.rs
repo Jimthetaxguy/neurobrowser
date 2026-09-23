@@ -20,6 +20,6 @@ pub use providers::{AiContext, AiProvider, AiResponse, ProviderConfig, ProviderT
 pub use session::{PageHandle, SessionManager};
 pub use tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageSnapshot, PriceInfo, RiskLevel, TableInfo, ToolAction, ToolArgumentDefinition,
-    ToolDefinition, ToolRegistry, ToolResult, ToolRisk,
+    PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition, ToolDefinition,
+    ToolRegistry, ToolResult, ToolRisk,
 };

@@ -6,7 +6,7 @@ use std::sync::Arc;
 pub mod contracts;
 pub mod memory_tools;
 
-pub use contracts::{RiskLevel, ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
+pub use contracts::{ToolAction, ToolArgumentDefinition, ToolDefinition, ToolRisk};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
@@ -44,7 +44,7 @@ pub trait BrowserTool: Send + Sync {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
     async fn execute(
