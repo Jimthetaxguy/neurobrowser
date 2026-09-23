@@ -58,6 +58,10 @@ jobs:
         working-directory: src-tauri
         run: npm ci
 
+      - name: npm test
+        working-directory: src-tauri
+        run: npm test
+
       - name: npm build
         working-directory: src-tauri
         run: npm run build
