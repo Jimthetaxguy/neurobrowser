@@ -17,6 +17,7 @@ shell, and a separate AppKit shell. This glossary records shared vocabulary;
 | BrowserInterface | Rust interface implemented by the HTTP scraper and Tauri webview runtime. Unsupported capabilities return errors. |
 | BrowserEngine | reqwest + scraper implementation; it does not run JavaScript or provide a live interactive DOM. |
 | TauriBrowserRuntime | Desktop runtime that routes browser operations to real child webviews. |
+| Webview capability | The local main control webview owns host commands. Page webviews can only report runtime results from blank/HTTP/HTTPS documents; they cannot submit approvals or change providers. |
 | ActionPolicy | Evaluates proposed tool calls and returns Allow, RequireApproval, or Block with redacted arguments. |
 | ReadOnly / Assisted / HighAutonomy | Policy modes; domain/tool denials, sensitive input, and high-impact actions retain explicit gates. |
 | Agent run | ReAct loop using a real configured provider and BrowserInterface; pending actions require a caller-managed approval. |

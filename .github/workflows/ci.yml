@@ -71,6 +71,9 @@ jobs:
       - name: cargo test headless
         run: cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
 
+      - name: cargo test webview capabilities
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities
+
   guards:
     name: "Guards: no-mock + merge conflicts + iCloud"
     runs-on: ubuntu-latest

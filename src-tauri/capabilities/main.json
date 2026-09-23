@@ -1,14 +1,13 @@
 {
   "identifier": "main-capability",
-  "description": "Main application capabilities",
-  "windows": ["main"],
+  "description": "Host commands for the main control webview only",
+  "webviews": ["main"],
   "permissions": [
     "core:default",
     "allow-ask",
     "allow-browser-back",
     "allow-browser-forward",
     "allow-browser-reload",
-    "allow-browser-runtime-report",
     "allow-cancel-agent-run",
     "allow-close-page",
     "allow-create-page",
