@@ -10,9 +10,6 @@
   --bg: #0f172a;
   --border: rgba(145, 160, 184, 0.18);
   --muted: #91a0b8;
-  --panel: #16213e;
-  --panel-2: #1f2a44;
-  --surface: #f5f7fb;
   --text: #e8ecf4;
 }
 
@@ -469,12 +466,6 @@ main {
   align-self: flex-end;
   background: linear-gradient(135deg, rgba(255, 91, 91, 0.95), rgba(255, 165, 82, 0.9));
   color: white;
-}
-
-.tools-used {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 8px;
 }
 
 .approval-card,

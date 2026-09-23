@@ -15,7 +15,7 @@ function postToAppKit(command, payload = {}) {
 
 export function createTauriHostAdapter() {
   const invoke = (command, payload = {}) => {
-    if (!window.__TAURI_INTERNALS__ && !window.__TAURI__) {
+    if (!window.__TAURI_INTERNALS__) {
       throw new Error("Tauri IPC bridge is unavailable. Run this app through the Tauri desktop runtime.");
     }
     return tauriInvoke(command, payload);
