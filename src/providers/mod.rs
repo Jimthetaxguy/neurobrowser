@@ -36,6 +36,13 @@ pub struct AiContext {
     pub current_url: String,
     pub page_title: String,
     pub tool_results: Vec<ToolResult>,
+    /// When true, the system prompt lists `search_personal_memory` and
+    /// `inspect_active_page`. Set by `ReActAgent::with_memory`.
+    ///
+    /// Those tools read `neuro_memory::MemoryService`. They do not read an
+    /// in-run agent log.
+    #[serde(default)]
+    pub personal_memory: bool,
 }
 
 #[async_trait]
@@ -188,6 +195,9 @@ fn parse_arguments(tool_name: &str, args_str: &str) -> HashMap<String, String> {
 /// unknown tool names, in which case positional args get distinct
 /// `value1`, `value2`, ... keys rather than overwriting each other.
 fn positional_argument_names(tool_name: &str) -> Vec<String> {
+    if let Some(names) = crate::tools::memory_tools::positional_argument_names(tool_name) {
+        return names;
+    }
     static REGISTRY: std::sync::OnceLock<crate::tools::ToolRegistry> = std::sync::OnceLock::new();
     REGISTRY
         .get_or_init(crate::browser::default_tool_registry)
@@ -287,6 +297,14 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("- get_links(): Get all links on page\n");
     prompt.push_str("- get_prices(): Extract price information\n");
     prompt.push_str("- get_tables(): Table N: H headers, R rows per table\n");
+    if context.personal_memory {
+        prompt.push_str(
+            "- search_personal_memory(query): Search persistent personal page memory (MemoryService, not the in-run agent log)\n",
+        );
+        prompt.push_str(
+            "- inspect_active_page(): Read captured personal-memory content for the current page URL\n",
+        );
+    }
 
     prompt
 }
