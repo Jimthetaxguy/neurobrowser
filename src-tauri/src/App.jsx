@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Omnibox } from "./OmniboxSuggestions.jsx";
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -218,15 +219,17 @@ function ChatPanel({
 }
 
 function Header({
-  provider,
-  setProvider,
-  policyMode,
-  setPolicyMode,
-  url,
-  setUrl,
+  adapter,
+  compact,
   onNavigate,
   onNewTab,
-  compact,
+  onStatus,
+  policyMode,
+  provider,
+  setPolicyMode,
+  setProvider,
+  setUrl,
+  url,
 }) {
   return (
     <header className={compact ? "header compact" : "header"}>
@@ -256,23 +259,13 @@ function Header({
           </option>
         ))}
       </select>
-      <form
-        className="url-bar"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onNavigate();
-        }}
-      >
-        <input
-          className="url-input"
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="Enter a URL or domain"
-          value={url}
-        />
-        <button className="btn" type="submit">
-          Go
-        </button>
-      </form>
+      <Omnibox
+        adapter={adapter}
+        onNavigate={onNavigate}
+        onStatus={onStatus}
+        setUrl={setUrl}
+        url={url}
+      />
       <button className="btn btn-secondary" onClick={onNewTab} type="button">
         New Tab
       </button>
@@ -398,9 +391,9 @@ export default function App({ adapter, lane }) {
     [adapter, sessionId, syncBrowserViewportForPage, tabs]
   );
 
-  const navigateCurrentPage = useCallback(async () => {
+  const navigateCurrentPage = useCallback(async (nextUrl) => {
     if (currentPageId == null || !sessionId) return;
-    const rawUrl = url.trim();
+    const rawUrl = (typeof nextUrl === "string" ? nextUrl : url).trim();
     if (!rawUrl) return;
 
     setStatus(`Navigating to ${rawUrl}`);
@@ -634,9 +627,11 @@ export default function App({ adapter, lane }) {
     return (
       <div className="app-shell appkit-shell">
         <Header
+          adapter={adapter}
           compact
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
+          onStatus={setStatus}
           policyMode={policyMode}
           provider={provider}
           setPolicyMode={selectPolicyMode}
@@ -677,8 +672,10 @@ export default function App({ adapter, lane }) {
         </div>
       )}
       <Header
+        adapter={adapter}
         onNavigate={navigateCurrentPage}
         onNewTab={createNewTab}
+        onStatus={setStatus}
         policyMode={policyMode}
         provider={provider}
         setPolicyMode={selectPolicyMode}
