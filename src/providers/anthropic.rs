@@ -147,6 +147,7 @@ mod tests {
             scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results: Vec::new(),
             conversation_history: Vec::new(),
+            personal_memory: false,
         }
     }
 

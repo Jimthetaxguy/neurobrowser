@@ -250,6 +250,20 @@ pub fn default_tool_registry() -> ToolRegistry {
     registry
 }
 
+/// The 17 browser tools plus `search_personal_memory` and `inspect_active_page`.
+///
+/// `memory` is durable `neuro_memory::MemoryService` state. `policy` gates
+/// `inspect_active_page` only. `ReActAgent::with_memory` builds this registry
+/// with `CapturePolicy::default`.
+pub fn default_tool_registry_with_memory(
+    memory: Arc<neuro_memory::MemoryService>,
+    policy: neuro_memory::CapturePolicy,
+) -> ToolRegistry {
+    let mut registry = default_tool_registry();
+    crate::tools::memory_tools::register_memory_tools(&mut registry, memory, policy);
+    registry
+}
+
 pub fn enrich_snapshot(snapshot: &mut PageSnapshot) {
     if !snapshot.prices.is_empty() {
         return;

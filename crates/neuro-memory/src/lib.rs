@@ -7,6 +7,7 @@
 //! [`extract_blocks`]. M1.4 adds the page store ([`store::PageStore`]). M1.5
 //! adds the Tantivy block index ([`index::BlockIndex`]). M1.6 adds [`search`]
 //! and [`explain`]. M1.7 wires those pieces into [`MemoryService`].
+//! [`MemoryService::blocks_for_url`] reads the blocks committed for one page.
 //! This crate is not a Cargo workspace member. The root and `src-tauri` crates
 //! depend on it by path.
 //!
@@ -97,6 +98,13 @@ impl MemoryService {
     /// Search indexed blocks. Delegates to [`search`].
     pub async fn search(&self, request: SearchRequest) -> Result<Vec<SearchResult>, MemoryError> {
         search(&self.index, &request).map_err(query_error)
+    }
+
+    /// Blocks committed for `page_url` by the last capture of that exact URL.
+    ///
+    /// Uncommitted adds are omitted. An unknown URL is an empty list, not an error.
+    pub async fn blocks_for_url(&self, page_url: &Url) -> Result<Vec<SemanticBlock>, MemoryError> {
+        self.index.blocks_for_url(page_url).map_err(index_error)
     }
 
     /// Score breakdown and matched snippets for one hit. Delegates to [`explain`].

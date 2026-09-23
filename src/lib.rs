@@ -14,7 +14,10 @@ pub use agent::{
     },
     AgentConfig, AgentMessage, AgentSnapshot, AgentState, ReActAgent,
 };
-pub use browser::{BrowserEngine, PageConfig, PageState};
+pub use browser::{
+    default_tool_registry, default_tool_registry_with_memory, BrowserEngine, PageConfig, PageState,
+};
+pub use neuro_memory::{CapturePolicy, MemoryService};
 pub use providers::{
     AiContext, AiProvider, AiResponse, Message, ProviderConfig, ProviderType, ToolCall,
 };

@@ -59,14 +59,39 @@ pub struct ReActAgent {
     tool_registry: Mutex<ToolRegistry>,
     state: Mutex<AgentState>,
     memory: Mutex<AgentMemory>,
+    /// True when `search_personal_memory` and `inspect_active_page` are registered.
+    ///
+    /// This flag follows [`neuro_memory::MemoryService`], not [`AgentMemory`].
+    personal_memory: bool,
 }
 
 impl ReActAgent {
     pub fn new(config: AgentConfig, provider: Arc<dyn AiProvider + Send + Sync>) -> Self {
+        Self::with_memory(config, provider, None)
+    }
+
+    /// `new`, plus the two personal-memory tools when `memory` is set.
+    ///
+    /// `memory` is durable page memory ([`neuro_memory::MemoryService`]). The
+    /// in-run [`AgentMemory`] log is unchanged. `None` keeps the 17 browser tools.
+    /// Inspect uses [`neuro_memory::CapturePolicy::default`].
+    pub fn with_memory(
+        config: AgentConfig,
+        provider: Arc<dyn AiProvider + Send + Sync>,
+        memory: Option<Arc<neuro_memory::MemoryService>>,
+    ) -> Self {
+        let personal_memory = memory.is_some();
+        let tool_registry = match memory {
+            Some(memory) => crate::browser::default_tool_registry_with_memory(
+                memory,
+                neuro_memory::CapturePolicy::default(),
+            ),
+            None => crate::browser::default_tool_registry(),
+        };
         Self {
             config: Mutex::new(config.clone()),
             provider: Mutex::new(provider),
-            tool_registry: Mutex::new(crate::browser::default_tool_registry()),
+            tool_registry: Mutex::new(tool_registry),
             state: Mutex::new(AgentState {
                 current_url: String::new(),
                 page_title: String::new(),
@@ -75,6 +100,7 @@ impl ReActAgent {
                 iterations: 0,
             }),
             memory: Mutex::new(AgentMemory::default()),
+            personal_memory,
         }
     }
 
@@ -456,6 +482,7 @@ impl ReActAgent {
             scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results,
             conversation_history: Vec::new(),
+            personal_memory: self.personal_memory,
         })
     }
 
