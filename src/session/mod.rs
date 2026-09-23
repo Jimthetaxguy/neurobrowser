@@ -1,5 +1,4 @@
 use crate::agent::{AgentConfig, ReActAgent};
-use crate::browser::PageConfig;
 use crate::providers::{create_provider, ProviderConfig};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -12,11 +11,10 @@ pub struct SessionManager {
 
 struct SessionState {
     pages: Vec<PageHandle>,
-    active_page: Option<usize>,
 }
 
 impl SessionManager {
-    pub fn new(_browser_config: PageConfig, agent_config: AgentConfig) -> Self {
+    pub fn new(agent_config: AgentConfig) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             agent_config: Mutex::new(agent_config),
@@ -28,13 +26,7 @@ impl SessionManager {
         let id = uuid_v4();
 
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.insert(
-            id.clone(),
-            SessionState {
-                pages: Vec::new(),
-                active_page: None,
-            },
-        );
+        sessions.insert(id.clone(), SessionState { pages: Vec::new() });
 
         id
     }
@@ -64,7 +56,6 @@ impl SessionManager {
         let mut sessions = self.sessions.lock().unwrap();
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;
         session.pages.push(handle.clone());
-        session.active_page = Some(page_id);
 
         Ok(handle)
     }
@@ -81,10 +72,9 @@ impl SessionManager {
     }
 
     pub fn set_active_page(&self, session_id: &str, page_id: usize) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().unwrap();
-        let session = sessions.get_mut(session_id).ok_or("Session not found")?;
+        let sessions = self.sessions.lock().unwrap();
+        let session = sessions.get(session_id).ok_or("Session not found")?;
         if session.pages.iter().any(|page| page.id == page_id) {
-            session.active_page = Some(page_id);
             Ok(())
         } else {
             Err("Page not found".to_string())
@@ -102,12 +92,6 @@ impl SessionManager {
             .ok_or("Page not found")?;
 
         session.pages.remove(pos);
-
-        if let Some(active) = session.active_page {
-            if active == page_id {
-                session.active_page = session.pages.first().map(|p| p.id);
-            }
-        }
 
         Ok(())
     }
