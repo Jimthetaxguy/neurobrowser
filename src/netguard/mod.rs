@@ -1,4 +1,5 @@
-//! Shared SSRF boundary for every `BrowserInterface` implementation.
+//! Shared SSRF boundary for every `BrowserInterface` implementation and for
+//! provider egress.
 //!
 //! Previously this logic lived privately inside `BrowserEngine`, which meant the static
 //! HTTP engine was guarded and the Tauri webview runtime — the interactive path that
@@ -212,15 +213,44 @@ pub fn blocked_reason_for_parsed(parsed: &url::Url) -> Option<BlockReason> {
 /// content. Attaching this to the client makes the check apply to the destination that
 /// is actually fetched.
 pub fn redirect_policy() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
+    redirect_policy_allowing(None)
+}
+
+/// Like [`redirect_policy`], but hops that stay on `allowed_origin` are followed
+/// even when that origin is loopback or otherwise internal.
+///
+/// Provider clients use this so an operator-configured origin (default Ollama is
+/// `http://localhost:11434`) remains reachable, while a redirect off that origin
+/// onto metadata or another internal host still fails closed.
+pub fn redirect_policy_allowing(allowed_origin: Option<url::Url>) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= 10 {
             return attempt.error("too many redirects");
+        }
+        if allowed_origin
+            .as_ref()
+            .is_some_and(|allowed| same_origin(allowed, attempt.url()))
+        {
+            return attempt.follow();
         }
         match blocked_reason_for_parsed(attempt.url()) {
             Some(reason) => attempt.error(reason.to_string()),
             None => attempt.follow(),
         }
     })
+}
+
+/// Scheme + host + port. Hosts compare case-insensitively; a trailing DNS dot
+/// does not create a second origin.
+fn same_origin(allowed: &url::Url, candidate: &url::Url) -> bool {
+    allowed.scheme().eq_ignore_ascii_case(candidate.scheme())
+        && normalize_dns_host(allowed.host_str().unwrap_or_default())
+            == normalize_dns_host(candidate.host_str().unwrap_or_default())
+        && allowed.port_or_known_default() == candidate.port_or_known_default()
+}
+
+fn normalize_dns_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -362,6 +392,29 @@ mod tests {
             "scheme is https; a query-string mention must not trip the scheme guard"
         );
     }
+
+    #[test]
+    fn same_origin_is_scheme_host_port_not_path() {
+        let allowed = url::Url::parse("http://localhost:11434").unwrap();
+        assert!(same_origin(
+            &allowed,
+            &url::Url::parse("http://LocalHost:11434/api/generate").unwrap()
+        ));
+        assert!(
+            !same_origin(
+                &allowed,
+                &url::Url::parse("http://localhost:8080/api/generate").unwrap()
+            ),
+            "a different port is a different origin"
+        );
+        assert!(
+            !same_origin(
+                &allowed,
+                &url::Url::parse("http://127.0.0.1:11434/api/generate").unwrap()
+            ),
+            "127.0.0.1 is not localhost; a hop there must be re-checked"
+        );
+    }
 }
 
 /// A `reqwest` DNS resolver that refuses to hand back blocked addresses.
@@ -380,19 +433,38 @@ mod tests {
 /// resolver. Naming it honestly rather than claiming immunity.
 pub struct GuardedResolver {
     inner: std::sync::Arc<dyn reqwest::dns::Resolve>,
+    /// Hostnames whose resolved addresses are not filtered. Used only for an
+    /// operator-configured provider origin that is itself internal (Ollama on
+    /// localhost). Other names still have internal addresses stripped.
+    allow_hosts: Vec<String>,
 }
 
 impl GuardedResolver {
     pub fn new(inner: std::sync::Arc<dyn reqwest::dns::Resolve>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            allow_hosts: Vec::new(),
+        }
+    }
+
+    pub fn allowing_host(mut self, host: &str) -> Self {
+        self.allow_hosts.push(normalize_dns_host(host));
+        self
     }
 }
 
 impl reqwest::dns::Resolve for GuardedResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let inner = self.inner.clone();
+        let allow_internal = self
+            .allow_hosts
+            .iter()
+            .any(|h| h == &normalize_dns_host(name.as_str()));
         Box::pin(async move {
             let addrs = inner.resolve(name).await?;
+            if allow_internal {
+                return Ok(addrs);
+            }
             let kept: Vec<std::net::SocketAddr> =
                 addrs.filter(|addr| !is_blocked_ip(&addr.ip())).collect();
             if kept.is_empty() {
@@ -411,6 +483,15 @@ impl reqwest::dns::Resolve for GuardedResolver {
 /// Default system resolver wrapped in the guard. Used by `BrowserEngine`'s client.
 pub fn guarded_resolver() -> std::sync::Arc<GuardedResolver> {
     std::sync::Arc::new(GuardedResolver::new(std::sync::Arc::new(SystemResolver)))
+}
+
+/// Like [`guarded_resolver`], but `host` may resolve to loopback or other
+/// internal addresses. Redirect hops to a different name still go through the
+/// filter.
+pub fn guarded_resolver_allowing(host: &str) -> std::sync::Arc<GuardedResolver> {
+    std::sync::Arc::new(
+        GuardedResolver::new(std::sync::Arc::new(SystemResolver)).allowing_host(host),
+    )
 }
 
 /// Minimal blocking-friendly system resolver: `ToSocketAddrs` on a blocking thread.
@@ -451,36 +532,67 @@ mod resolver_tests {
         }
     }
 
-    fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
+    async fn resolve_named(
+        name: &str,
+        inner: Vec<&str>,
+        allow_host: Option<&str>,
+    ) -> Result<Vec<SocketAddr>, String> {
         let addrs: Vec<SocketAddr> = inner.iter().map(|s| s.parse().unwrap()).collect();
-        let guarded = GuardedResolver::new(Arc::new(FixedResolver(addrs)));
-        let name = Name::from_str("example.test").unwrap();
-        futures::executor::block_on(async {
-            match guarded.resolve(name).await {
-                Ok(it) => Ok(it.collect()),
-                Err(e) => Err(e.to_string()),
-            }
-        })
+        let mut guarded = GuardedResolver::new(Arc::new(FixedResolver(addrs)));
+        if let Some(host) = allow_host {
+            guarded = guarded.allowing_host(host);
+        }
+        let name = Name::from_str(name).unwrap();
+        match guarded.resolve(name).await {
+            Ok(it) => Ok(it.collect()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
-    #[test]
-    fn resolver_strips_internal_addresses_returned_by_dns() {
+    async fn resolve_all(inner: Vec<&str>) -> Result<Vec<SocketAddr>, String> {
+        resolve_named("example.test", inner, None).await
+    }
+
+    #[tokio::test]
+    async fn resolver_strips_internal_addresses_returned_by_dns() {
         // The rebinding case: DNS answers with a public AND a loopback address.
-        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"]).expect("some kept");
+        let kept = resolve_all(vec!["93.184.216.34:80", "127.0.0.1:80"])
+            .await
+            .expect("some kept");
         assert_eq!(kept.len(), 1, "internal address must be filtered out");
         assert_eq!(kept[0].ip().to_string(), "93.184.216.34");
     }
 
-    #[test]
-    fn resolver_refuses_when_every_address_is_internal() {
+    #[tokio::test]
+    async fn resolver_refuses_when_every_address_is_internal() {
         let err = resolve_all(vec!["169.254.169.254:80", "10.0.0.1:80"])
+            .await
             .expect_err("must refuse, not return an empty set");
         assert!(err.contains("internal/loopback"), "got: {err}");
     }
 
-    #[test]
-    fn resolver_passes_ordinary_public_addresses_through() {
-        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"]).expect("kept");
+    #[tokio::test]
+    async fn resolver_passes_ordinary_public_addresses_through() {
+        let kept = resolve_all(vec!["93.184.216.34:80", "8.8.8.8:80"])
+            .await
+            .expect("kept");
         assert_eq!(kept.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn resolver_keeps_loopback_for_configured_localhost() {
+        let kept = resolve_named("localhost", vec!["127.0.0.1:80"], Some("localhost"))
+            .await
+            .expect("configured localhost must remain resolvable");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].ip().to_string(), "127.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn resolver_still_strips_loopback_for_names_that_are_not_the_allow() {
+        let err = resolve_named("evil.test", vec!["127.0.0.1:80"], Some("localhost"))
+            .await
+            .expect_err("a different host must not inherit the allow");
+        assert!(err.contains("internal/loopback"), "got: {err}");
     }
 }

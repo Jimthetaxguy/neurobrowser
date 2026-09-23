@@ -6,8 +6,6 @@
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIconFile</key>
-    <string></string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -22,15 +20,13 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSMinimumSystemVersion</key>
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-    <key>NSMainStoryboardFile</key>
-    <string></string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026. All rights reserved.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>
 </dict>

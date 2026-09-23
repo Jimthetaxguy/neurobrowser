@@ -1,29 +1,14 @@
-pub mod memory;
-pub mod observability;
 pub mod policy;
-pub mod streaming;
-pub mod worker;
 
-use crate::agent::memory::{AgentEvent, AgentMemory};
-use crate::agent::observability::AgentMetrics;
 use crate::agent::policy::{
     ActionPolicy, AgentRunEvent, AgentRunResult, AgentRunStatus, PolicyOutcome,
 };
 use crate::providers::{
-    create_provider, AiContext, AiProvider, ProviderConfig, ScrollPosition, ToolCall, ToolResult,
+    create_provider, AiContext, AiProvider, ProviderConfig, ToolCall, ToolResult,
 };
 use crate::tools::{BrowserInterface, BrowserTool, ToolRegistry};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, OnceLock};
-
-const CONVERSATION_WINDOW: usize = 20;
-
-static GLOBAL_METRICS: OnceLock<AgentMetrics> = OnceLock::new();
-
-pub fn metrics() -> &'static AgentMetrics {
-    GLOBAL_METRICS.get_or_init(AgentMetrics::default)
-}
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -45,45 +30,56 @@ pub struct AgentState {
     pub current_url: String,
     pub page_title: String,
     pub tool_results: Vec<ToolResult>,
-    pub conversation: VecDeque<AgentMessage>,
     pub iterations: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentMessage {
-    pub role: String,
-    pub content: String,
 }
 
 pub struct ReActAgent {
     config: Mutex<AgentConfig>,
     provider: Mutex<Arc<dyn AiProvider + Send + Sync>>,
-    tool_registry: Mutex<ToolRegistry>,
+    tool_registry: ToolRegistry,
     state: Mutex<AgentState>,
-    memory: Mutex<AgentMemory>,
+    /// True when `search_personal_memory` and `inspect_active_page` are registered.
+    ///
+    /// This flag follows [`neuro_memory::MemoryService`]. The shipped crate has
+    /// no in-run `agent::memory` store.
+    personal_memory: bool,
 }
 
 impl ReActAgent {
     pub fn new(config: AgentConfig, provider: Arc<dyn AiProvider + Send + Sync>) -> Self {
+        Self::with_memory(config, provider, None)
+    }
+
+    /// `new`, plus the two personal-memory tools when `memory` is set.
+    ///
+    /// `memory` is durable page memory ([`neuro_memory::MemoryService`]).
+    /// `None` keeps the 17 browser tools. Inspect uses
+    /// [`neuro_memory::CapturePolicy::default`].
+    pub fn with_memory(
+        config: AgentConfig,
+        provider: Arc<dyn AiProvider + Send + Sync>,
+        memory: Option<Arc<neuro_memory::MemoryService>>,
+    ) -> Self {
+        let personal_memory = memory.is_some();
+        let tool_registry = match memory {
+            Some(memory) => crate::browser::default_tool_registry_with_memory(
+                memory,
+                neuro_memory::CapturePolicy::default(),
+            ),
+            None => crate::browser::default_tool_registry(),
+        };
         Self {
             config: Mutex::new(config.clone()),
             provider: Mutex::new(provider),
-            tool_registry: Mutex::new(crate::browser::default_tool_registry()),
+            tool_registry,
             state: Mutex::new(AgentState {
                 current_url: String::new(),
                 page_title: String::new(),
                 tool_results: Vec::new(),
-                conversation: VecDeque::with_capacity(CONVERSATION_WINDOW),
                 iterations: 0,
             }),
-            memory: Mutex::new(AgentMemory::default()),
+            personal_memory,
         }
-    }
-
-    pub fn snapshot_state(&self) -> Result<AgentSnapshot, String> {
-        let state = self.state.lock().map_err(|e| e.to_string())?.clone();
-        let memory = self.memory.lock().map_err(|e| e.to_string())?.clone();
-        Ok(AgentSnapshot { state, memory })
     }
 
     pub fn set_provider_config(&self, provider_config: ProviderConfig) -> Result<(), String> {
@@ -95,27 +91,6 @@ impl ReActAgent {
 
         tracing::info!("Provider changed to: {:?}", provider_config.provider_type);
         Ok(())
-    }
-
-    pub async fn execute(
-        &self,
-        user_prompt: &str,
-        browser: &dyn BrowserInterface,
-    ) -> Result<String, String> {
-        let run = self
-            .execute_with_policy(user_prompt, browser, &ActionPolicy::default())
-            .await?;
-        match run.status {
-            AgentRunStatus::Completed => Ok(run.final_response.unwrap_or_default()),
-            AgentRunStatus::AwaitingApproval => {
-                Ok("Action requires approval before continuing".to_string())
-            }
-            AgentRunStatus::Blocked => Ok("Action blocked by policy".to_string()),
-            AgentRunStatus::Cancelled => Ok("Run cancelled".to_string()),
-            AgentRunStatus::Failed => Err(run
-                .final_response
-                .unwrap_or_else(|| "Agent run failed".to_string())),
-        }
     }
 
     pub async fn execute_with_policy(
@@ -133,13 +108,7 @@ impl ReActAgent {
             state.page_title = page_info.title.clone();
             state.iterations = 0;
             state.tool_results.clear();
-            state.conversation.clear();
         }
-
-        self.push_conversation_bounded(AgentMessage {
-            role: "user".to_string(),
-            content: user_prompt.to_string(),
-        })?;
 
         let max_iterations = self
             .config
@@ -147,7 +116,6 @@ impl ReActAgent {
             .map_err(|e| e.to_string())?
             .max_iterations;
         let mut events = Vec::new();
-        metrics().record_request();
 
         for iteration in 0..max_iterations {
             let context = self.build_context()?;
@@ -156,22 +124,7 @@ impl ReActAgent {
             let response = provider
                 .complete(user_prompt, &context)
                 .await
-                .map_err(|e| {
-                    self.record_error_metric();
-                    e.to_string()
-                })?;
-
-            self.push_conversation_bounded(AgentMessage {
-                role: "assistant".to_string(),
-                content: response.content.clone(),
-            })?;
-            self.push_episodic(AgentEvent::LlmCall {
-                run_id: run_id.clone(),
-                model: provider.provider_name().to_string(),
-                iteration,
-                content_preview: response.content.chars().take(200).collect(),
-                timestamp: AgentEvent::now("LlmCall"),
-            })?;
+                .map_err(|e| e.to_string())?;
 
             if response.tool_calls.is_empty() {
                 let answer = self.extract_final_answer(&response.content);
@@ -193,7 +146,7 @@ impl ReActAgent {
 
             for tool_call in &response.tool_calls {
                 let snapshot = browser.snapshot().await?;
-                let Some(tool) = self.get_tool(&tool_call.name)? else {
+                let Some(tool) = self.get_tool(&tool_call.name) else {
                     let decision = crate::agent::policy::PolicyDecision {
                         outcome: PolicyOutcome::Block,
                         reasons: vec![format!("Unknown tool '{}'", tool_call.name)],
@@ -207,7 +160,6 @@ impl ReActAgent {
                         tool: tool_call.name.clone(),
                         decision,
                     });
-                    self.record_error_metric();
                     return Ok(AgentRunResult {
                         run_id,
                         status: AgentRunStatus::Blocked,
@@ -233,7 +185,6 @@ impl ReActAgent {
                             tool: tool_call.name.clone(),
                             decision,
                         });
-                        self.record_error_metric();
                         return Ok(AgentRunResult {
                             run_id,
                             status: AgentRunStatus::Blocked,
@@ -287,19 +238,9 @@ impl ReActAgent {
                     result: result.clone(),
                     success,
                 });
-                self.record_tool_call_metrics(&tool_call.name);
-                self.push_episodic(AgentEvent::ToolCall {
-                    run_id: run_id.clone(),
-                    tool: tool_call.name.clone(),
-                    arguments: tool_call.arguments.clone(),
-                    success,
-                    result_preview: result.chars().take(200).collect(),
-                    timestamp: AgentEvent::now("ToolCall"),
-                })?;
 
                 let tool_result = ToolResult {
                     tool_name: tool_call.name.clone(),
-                    arguments: tool_call.arguments.clone(),
                     result: result.clone(),
                     success,
                 };
@@ -348,7 +289,6 @@ impl ReActAgent {
             }
         }
 
-        self.record_error_metric();
         Ok(AgentRunResult {
             run_id,
             status: AgentRunStatus::Failed,
@@ -392,7 +332,7 @@ impl ReActAgent {
             });
         }
 
-        let Some(tool) = self.get_tool(&tool_call.name)? else {
+        let Some(tool) = self.get_tool(&tool_call.name) else {
             events.push(AgentRunEvent::ToolCallBlocked {
                 run_id: run_id.clone(),
                 tool: tool_call.name.clone(),
@@ -438,7 +378,6 @@ impl ReActAgent {
             let mut state = self.state.lock().map_err(|e| e.to_string())?;
             state.tool_results.push(ToolResult {
                 tool_name: tool_call.name.clone(),
-                arguments: tool_call.arguments.clone(),
                 result: result.clone(),
                 success,
             });
@@ -462,29 +401,17 @@ impl ReActAgent {
     }
 
     fn build_context(&self) -> Result<AiContext, String> {
-        let (current_url, page_title, tool_results) = {
-            let state = self.state.lock().map_err(|e| e.to_string())?;
-            (
-                state.current_url.clone(),
-                state.page_title.clone(),
-                state.tool_results.clone(),
-            )
-        };
-
+        let state = self.state.lock().map_err(|e| e.to_string())?;
         Ok(AiContext {
-            current_url,
-            page_title,
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
-            tool_results,
-            conversation_history: Vec::new(),
+            current_url: state.current_url.clone(),
+            page_title: state.page_title.clone(),
+            tool_results: state.tool_results.clone(),
+            personal_memory: self.personal_memory,
         })
     }
 
-    fn get_tool(&self, name: &str) -> Result<Option<Arc<dyn BrowserTool>>, String> {
-        let registry = self.tool_registry.lock().map_err(|e| e.to_string())?;
-        Ok(registry.get(name))
+    fn get_tool(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
+        self.tool_registry.get(name)
     }
 
     async fn execute_tool_with_handle(
@@ -514,33 +441,4 @@ impl ReActAgent {
         }
         content.to_string()
     }
-
-    fn push_conversation_bounded(&self, message: AgentMessage) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        if state.conversation.len() >= CONVERSATION_WINDOW {
-            state.conversation.pop_front();
-        }
-        state.conversation.push_back(message);
-        Ok(())
-    }
-
-    fn record_tool_call_metrics(&self, tool_name: &str) {
-        metrics().record_tool_call_named(tool_name);
-    }
-
-    fn record_error_metric(&self) {
-        metrics().record_error();
-    }
-
-    fn push_episodic(&self, event: AgentEvent) -> Result<(), String> {
-        let mut memory = self.memory.lock().map_err(|e| e.to_string())?;
-        memory.episodic.push(event);
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentSnapshot {
-    pub state: AgentState,
-    pub memory: AgentMemory,
 }

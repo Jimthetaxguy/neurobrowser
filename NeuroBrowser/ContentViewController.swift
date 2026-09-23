@@ -13,10 +13,16 @@ class ContentViewController: NSViewController {
     var tabBar: NSSegmentedControl!
     var pageUpdateHandler: (([String: Any]) -> Void)?
     private var webViewContainer: NSView!
+    private var pageIds: [Int] = []
+    // React allocates nonnegative IDs; native menu tabs use a disjoint sequence.
+    private var nextNativePageId = -1
     
     // MARK: - State
     
     var currentTabIndex: Int = 0
+    var currentPageId: Int? {
+        pageIds.indices.contains(currentTabIndex) ? pageIds[currentTabIndex] : nil
+    }
     
     // MARK: - Lifecycle
     
@@ -60,9 +66,9 @@ class ContentViewController: NSViewController {
         tabBar = NSSegmentedControl()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.segmentCount = 1
-        tabBar.setLabel("New Tab", forSegment: 0)
+        tabBar.setLabel("+", forSegment: 0)
         tabBar.setWidth(100, forSegment: 0)
-        tabBar.selectedSegment = 0
+        tabBar.selectedSegment = -1
         tabBar.target = self
         tabBar.action = #selector(tabBarChanged)
         tabBar.segmentStyle = .rounded
@@ -104,8 +110,6 @@ class ContentViewController: NSViewController {
             webViewContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webViewContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-        
-        addNewTab()
     }
     
     private func createNavButton(title: String, action: Selector) -> NSButton {
@@ -118,12 +122,25 @@ class ContentViewController: NSViewController {
     
     // MARK: - Tab Management
     
-    func addNewTab() {
+    func addNewTab(pageId: Int? = nil) {
+        if let pageId, let existing = pageIds.firstIndex(of: pageId) {
+            currentTabIndex = existing
+            tabBar.selectedSegment = existing
+            showCurrentTab()
+            return
+        }
+
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         
         webViews.append(webView)
+        if let pageId {
+            pageIds.append(pageId)
+        } else {
+            pageIds.append(nextNativePageId)
+            nextNativePageId -= 1
+        }
         
         let newIndex = webViews.count - 1
         tabBar.segmentCount = webViews.count + 1
@@ -139,34 +156,49 @@ class ContentViewController: NSViewController {
         webView.autoresizingMask = [.width, .height]
         webViewContainer.addSubview(webView)
         showCurrentTab()
-        
-        if let url = URL(string: "https://www.example.com") {
-            webView.load(URLRequest(url: url))
-        }
-        
         updateNavigationButtons()
     }
     
     func closeCurrentTab() {
+        closePage(pageId: currentPageId)
+    }
+
+    func closePage(pageId: Int? = nil) {
         guard webViews.count > 1 else { return }
-        
-        let webView = webViews[currentTabIndex]
+        let id = pageId ?? currentPageId
+        guard let id, let index = pageIds.firstIndex(of: id) else { return }
+
+        let webView = webViews[index]
         webView.removeFromSuperview()
-        webViews.remove(at: currentTabIndex)
-        
+        webViews.remove(at: index)
+        pageIds.remove(at: index)
+
+        if currentTabIndex > index {
+            currentTabIndex -= 1
+        } else if currentTabIndex == index {
+            currentTabIndex = min(index, webViews.count - 1)
+        }
+
         tabBar.segmentCount = webViews.count + 1
-        tabBar.selectedSegment = min(currentTabIndex, webViews.count - 1)
-        currentTabIndex = tabBar.selectedSegment
-        
+        tabBar.setLabel("+", forSegment: webViews.count)
+        tabBar.selectedSegment = currentTabIndex
+
         showCurrentTab()
         updateNavigationButtons()
     }
 
-    func selectTab(pageId: Int) {
-        guard pageId >= 0, pageId < webViews.count else { return }
-        currentTabIndex = pageId
-        tabBar.selectedSegment = pageId
+    @discardableResult
+    func selectTab(pageId: Int) -> Bool {
+        guard let index = pageIds.firstIndex(of: pageId) else { return false }
+        currentTabIndex = index
+        tabBar.selectedSegment = index
         showCurrentTab()
+        return true
+    }
+
+    func navigate(pageId: Int?, to input: String) {
+        if let pageId, !selectTab(pageId: pageId) { return }
+        navigateCurrentTab(to: input)
     }
     
     @objc private func tabBarChanged() {
@@ -195,7 +227,18 @@ class ContentViewController: NSViewController {
             }
             
             updateNavigationButtons()
+            emitTabs()
+            emitSnapshot()
         }
+    }
+
+    private func emitTabs() {
+        guard let pageId = currentPageId else { return }
+        let tabs = zip(pageIds, webViews).map { id, webView in
+            ["id": id, "title": webView.title ?? "New Tab",
+             "url": webView.url?.absoluteString ?? ""] as [String: Any]
+        }
+        pageUpdateHandler?(["type": "tabs", "tabs": tabs, "activePageId": pageId])
     }
     
     // MARK: - Navigation
@@ -228,6 +271,13 @@ class ContentViewController: NSViewController {
         webViews[currentTabIndex].load(URLRequest(url: url))
     }
 
+    /// First-stage http(s) allowlist shared by the URL bar and page WKWebViews.
+    /// Scheme-only: does not port Rust netguard DNS/SSRF checks.
+    private static func allowsHttpNavigation(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
     private static func validatedNavigationURL(from input: String) -> URL? {
         let normalized: String
         if input.hasPrefix("http://") || input.hasPrefix("https://") {
@@ -238,8 +288,7 @@ class ContentViewController: NSViewController {
             return nil
         }
         guard let url = URL(string: normalized),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
+              allowsHttpNavigation(url) else {
             return nil
         }
         return url
@@ -257,7 +306,6 @@ class ContentViewController: NSViewController {
           const text = document.body ? document.body.innerText : "";
           return {
             title: document.title || "",
-            text: text.slice(0, 20000),
             link_count: document.links ? document.links.length : 0,
             image_count: document.images ? document.images.length : 0,
             form_count: document.forms ? document.forms.length : 0,
@@ -283,25 +331,22 @@ class ContentViewController: NSViewController {
         return [
             "url": "",
             "title": "",
-            "html": "",
-            "text": "",
             "link_count": 0,
             "image_count": 0,
             "form_count": 0,
             "price_count": 0,
-            "table_count": 0,
-            "viewport_width": Int(view.bounds.width),
-            "viewport_height": Int(view.bounds.height),
-            "interactive_ready": true
+            "table_count": 0
         ]
     }
 
     private func emitSnapshot() {
+        guard let pageId = currentPageId else { return }
         snapshotCurrentPage { [weak self] snapshot in
-            guard let self else { return }
+            guard let self, self.currentPageId == pageId,
+                  self.pageIds.contains(pageId) else { return }
             self.pageUpdateHandler?([
                 "type": "snapshot",
-                "pageId": self.currentTabIndex,
+                "pageId": pageId,
                 "snapshot": snapshot
             ])
         }
@@ -318,12 +363,24 @@ class ContentViewController: NSViewController {
 // MARK: - WKNavigationDelegate
 
 extension ContentViewController: WKNavigationDelegate {
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url,
+              Self.allowsHttpNavigation(url) else {
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
     
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "◌"
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        emitTabs()
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         if let url = webView.url {
             urlBar.stringValue = url.absoluteString
         }

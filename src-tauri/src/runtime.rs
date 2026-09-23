@@ -12,6 +12,10 @@ use tokio::time::sleep;
 
 const ABOUT_BLANK_URL: &str = "about:blank";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+// Page webviews load arbitrary sites. This script must stay so host-driven
+// eval can post snapshot/action results through `browser_runtime_report`.
+// ACL is report-only on `page-runtime-*` (see capabilities/page-runtime.json);
+// page JS must not inherit the control-surface host command set.
 const RUNTIME_INIT_SCRIPT: &str = r#"
 (() => {
   if (window.__NEUROBROWSER_RUNTIME__) {
@@ -48,40 +52,8 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     classes: Array.from(element.classList || []),
     text: limitText(element.innerText || element.textContent || '', 220),
     attributes: attrsToObject(element),
-    selector,
-    xpath: elementToXPath(element)
+    selector
   });
-
-  const elementToXPath = (element) => {
-    if (!element || element.nodeType !== 1) {
-      return '';
-    }
-    const parts = [];
-    let current = element;
-    while (current && current.nodeType === 1 && current !== document.body) {
-      let segment = current.tagName ? current.tagName.toLowerCase() : '';
-      if (current.id) {
-        segment += `[@id='${current.id}']`;
-        parts.unshift(segment);
-        break;
-      }
-      const parent = current.parentElement;
-      if (parent) {
-        let i = 1;
-        let sibling = current.previousElementSibling;
-        while (sibling) {
-          if (sibling.tagName === current.tagName) {
-            i += 1;
-          }
-          sibling = sibling.previousElementSibling;
-        }
-        segment += `[${i}]`;
-      }
-      parts.unshift(segment);
-      current = current.parentElement;
-    }
-    return '//' + parts.join('/');
-  };
 
   const collectForms = () =>
     Array.from(document.querySelectorAll('form')).slice(0, 40).map((form) => ({
@@ -179,14 +151,6 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         .slice(0, 100)
         .map((element) => limitText(element.innerText || element.textContent || '', 1000))
         .join('\n');
-    },
-
-    getAttributes(selector) {
-      const element = document.querySelector(selector);
-      if (!element) {
-        throw new Error(`No element matched selector: ${selector}`);
-      }
-      return attrsToObject(element);
     },
 
     click(selector) {
@@ -512,12 +476,6 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn get_text(&self, selector: &str) -> Result<String, String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.request_json(&format!("runtime.getText({selector_json})"))
-            .await
-    }
-
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.request_json(&format!("runtime.getAttributes({selector_json})"))
             .await
     }
 

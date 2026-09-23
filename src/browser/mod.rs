@@ -1,7 +1,7 @@
 use crate::tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
-    PageSnapshot, PriceInfo, RiskLevel, TableInfo, ToolAction, ToolArgumentDefinition,
-    ToolDefinition, ToolRegistry, ToolRisk,
+    PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition, ToolDefinition,
+    ToolRegistry, ToolRisk,
 };
 use async_trait::async_trait;
 use regex_lite::Regex;
@@ -116,32 +116,6 @@ impl BrowserEngine {
             config,
         }
     }
-
-    pub fn load_html(&self, html: &str) -> Result<(), String> {
-        let snapshot = snapshot_from_html(
-            "about:blank",
-            html,
-            self.config.viewport_width,
-            self.config.viewport_height,
-            false,
-        );
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.url = snapshot.url.clone();
-        state.title = snapshot.title.clone();
-        state.html = snapshot.html.clone().unwrap_or_default();
-        state.text = snapshot.text.clone().unwrap_or_default();
-        state.scroll_x = snapshot.scroll_x;
-        state.scroll_y = snapshot.scroll_y;
-        state.viewport_width = snapshot.viewport_width;
-        state.viewport_height = snapshot.viewport_height;
-        state.interactive_ready = snapshot.interactive_ready;
-        Ok(())
-    }
-
-    pub fn get_state(&self) -> Result<PageState, String> {
-        let state = self.state.lock().map_err(|e| e.to_string())?;
-        Ok(state.clone())
-    }
 }
 
 #[async_trait]
@@ -196,7 +170,7 @@ impl BrowserInterface for BrowserEngine {
 
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
         let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
-        Ok(query_selector_from_html(&html, selector))
+        query_selector_from_html(&html, selector)
     }
 
     async fn get_text(&self, selector: &str) -> Result<String, String> {
@@ -208,32 +182,14 @@ impl BrowserInterface for BrowserEngine {
             .join("\n"))
     }
 
-    async fn get_attributes(&self, selector: &str) -> Result<HashMap<String, String>, String> {
-        let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
-        let doc = Html::parse_document(&html);
-        let selector = Selector::parse(selector).map_err(|e| e.to_string())?;
-        Ok(doc
-            .select(&selector)
-            .next()
-            .map(|element| {
-                element
-                    .value()
-                    .attrs()
-                    .map(|(key, value)| (key.to_string(), value.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default())
-    }
-
     async fn click(&self, selector: &str) -> Result<(), String> {
         let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
         Err(static_interaction_error(&html, "click", selector))
     }
 
     async fn type_text(&self, selector: &str, _text: &str) -> Result<(), String> {
-        // `_text` is the `.sensitive(true)` typed value (see `TypeTool`'s
-        // argument definition); it is intentionally unused and never logged,
-        // since tracing output flows to the log sink.
+        // `_text` is the typed value; it is intentionally unused and never
+        // logged, since tracing output flows to the log sink.
         let html = self.state.lock().map_err(|e| e.to_string())?.html.clone();
         Err(static_interaction_error(&html, "type into", selector))
     }
@@ -293,6 +249,20 @@ pub fn default_tool_registry() -> ToolRegistry {
     registry
 }
 
+/// The 17 browser tools plus `search_personal_memory` and `inspect_active_page`.
+///
+/// `memory` is durable `neuro_memory::MemoryService` state. `policy` gates
+/// `inspect_active_page` only. `ReActAgent::with_memory` builds this registry
+/// with `CapturePolicy::default`.
+pub fn default_tool_registry_with_memory(
+    memory: Arc<neuro_memory::MemoryService>,
+    policy: neuro_memory::CapturePolicy,
+) -> ToolRegistry {
+    let mut registry = default_tool_registry();
+    crate::tools::memory_tools::register_memory_tools(&mut registry, memory, policy);
+    registry
+}
+
 pub fn enrich_snapshot(snapshot: &mut PageSnapshot) {
     if !snapshot.prices.is_empty() {
         return;
@@ -342,18 +312,18 @@ fn snapshot_from_html(
     snapshot
 }
 
-fn query_selector_from_html(html: &str, selector: &str) -> Vec<ElementInfo> {
+fn query_selector_from_html(html: &str, selector: &str) -> Result<Vec<ElementInfo>, String> {
+    let parsed_selector = match Selector::parse(selector) {
+        Ok(selector) => selector,
+        Err(_) => return Err(format!("Cannot query: invalid CSS selector '{selector}'")),
+    };
+
     if html.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
 
     let document = Html::parse_document(html);
-    let parsed_selector = match Selector::parse(selector) {
-        Ok(selector) => selector,
-        Err(_) => return vec![],
-    };
-
-    document
+    Ok(document
         .select(&parsed_selector)
         .map(|element| ElementInfo {
             tag: element.value().name().to_string(),
@@ -371,7 +341,7 @@ fn query_selector_from_html(html: &str, selector: &str) -> Vec<ElementInfo> {
                 .collect(),
             selector: selector.to_string(),
         })
-        .collect()
+        .collect())
 }
 
 fn extract_links(doc: &Html) -> Vec<LinkInfo> {
@@ -382,7 +352,6 @@ fn extract_links(doc: &Html) -> Vec<LinkInfo> {
             Some(LinkInfo {
                 href,
                 text: limit_text(&element.text().collect::<Vec<_>>().join(" "), 160),
-                selector: "a[href]".to_string(),
             })
         })
         .collect()
@@ -422,7 +391,6 @@ fn extract_forms(doc: &Html) -> Vec<FormInfo> {
                         .attr("type")
                         .unwrap_or_else(|| input.value().name())
                         .to_string(),
-                    selector: input.value().name().to_string(),
                     value: input.value().attr("value").map(|value| value.to_string()),
                 })
                 .collect();
@@ -431,7 +399,6 @@ fn extract_forms(doc: &Html) -> Vec<FormInfo> {
                 action: form.value().attr("action").unwrap_or_default().to_string(),
                 method: form.value().attr("method").unwrap_or("get").to_string(),
                 inputs,
-                selector: "form".to_string(),
             }
         })
         .collect()
@@ -460,11 +427,7 @@ fn extract_tables(doc: &Html) -> Vec<TableInfo> {
                 .filter(|row| !row.is_empty())
                 .collect();
 
-            TableInfo {
-                headers,
-                rows,
-                selector: "table".to_string(),
-            }
+            TableInfo { headers, rows }
         })
         .collect()
 }
@@ -479,7 +442,6 @@ fn extract_prices(source_text: &str) -> Vec<PriceInfo> {
             PriceInfo {
                 value: price_match.as_str().to_string(),
                 currency: "USD".to_string(),
-                selector: String::new(),
                 context: limit_text(&source_text[start..end], 80),
             }
         })
@@ -506,7 +468,7 @@ impl BrowserTool for NavigateTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Navigate, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Navigate),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "url",
@@ -523,9 +485,9 @@ impl BrowserTool for NavigateTool {
         match browser.navigate(&url).await {
             Ok(()) => {
                 let _ = browser.wait_for_navigation().await;
-                crate::tools::ToolResult::success("navigate", args, format!("Navigated to {url}"))
+                crate::tools::ToolResult::success("navigate", format!("Navigated to {url}"))
             }
-            Err(error) => crate::tools::ToolResult::error("navigate", args, error),
+            Err(error) => crate::tools::ToolResult::error("navigate", error),
         }
     }
 }
@@ -546,18 +508,18 @@ impl BrowserTool for WaitTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Wait, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Wait),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.wait_for_navigation().await {
-            Ok(()) => crate::tools::ToolResult::success("wait", args, "Page is ready".to_string()),
-            Err(error) => crate::tools::ToolResult::error("wait", args, error),
+            Ok(()) => crate::tools::ToolResult::success("wait", "Page is ready".to_string()),
+            Err(error) => crate::tools::ToolResult::error("wait", error),
         }
     }
 }
@@ -578,7 +540,7 @@ impl BrowserTool for QueryDomTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -608,7 +570,6 @@ impl BrowserTool for QueryDomTool {
                     .collect();
                 crate::tools::ToolResult::success(
                     "query_dom",
-                    args,
                     if results.is_empty() {
                         "No elements found".to_string()
                     } else {
@@ -616,7 +577,7 @@ impl BrowserTool for QueryDomTool {
                     },
                 )
             }
-            Err(error) => crate::tools::ToolResult::error("query_dom", args, error),
+            Err(error) => crate::tools::ToolResult::error("query_dom", error),
         }
     }
 }
@@ -637,7 +598,7 @@ impl BrowserTool for GetTextTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -652,8 +613,8 @@ impl BrowserTool for GetTextTool {
     ) -> crate::tools::ToolResult {
         let selector = args.get("selector").cloned().unwrap_or_default();
         match browser.get_text(&selector).await {
-            Ok(text) => crate::tools::ToolResult::success("get_text", args, text),
-            Err(error) => crate::tools::ToolResult::error("get_text", args, error),
+            Ok(text) => crate::tools::ToolResult::success("get_text", text),
+            Err(error) => crate::tools::ToolResult::error("get_text", error),
         }
     }
 }
@@ -674,13 +635,13 @@ impl BrowserTool for GetLinksTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.snapshot().await {
@@ -692,7 +653,6 @@ impl BrowserTool for GetLinksTool {
                     .collect();
                 crate::tools::ToolResult::success(
                     "get_links",
-                    args,
                     if links.is_empty() {
                         "No links found".to_string()
                     } else {
@@ -700,7 +660,7 @@ impl BrowserTool for GetLinksTool {
                     },
                 )
             }
-            Err(error) => crate::tools::ToolResult::error("get_links", args, error),
+            Err(error) => crate::tools::ToolResult::error("get_links", error),
         }
     }
 }
@@ -721,13 +681,13 @@ impl BrowserTool for GetPricesTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.snapshot().await {
@@ -739,7 +699,6 @@ impl BrowserTool for GetPricesTool {
                     .collect();
                 crate::tools::ToolResult::success(
                     "get_prices",
-                    args,
                     if prices.is_empty() {
                         "No prices found".to_string()
                     } else {
@@ -747,7 +706,7 @@ impl BrowserTool for GetPricesTool {
                     },
                 )
             }
-            Err(error) => crate::tools::ToolResult::error("get_prices", args, error),
+            Err(error) => crate::tools::ToolResult::error("get_prices", error),
         }
     }
 }
@@ -761,20 +720,20 @@ impl BrowserTool for GetTablesTool {
     }
 
     fn description(&self) -> &str {
-        "Extract table data from the current page"
+        "Table N: H headers, R rows per table"
     }
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Read, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Read),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.snapshot().await {
@@ -794,7 +753,6 @@ impl BrowserTool for GetTablesTool {
                     .collect::<Vec<_>>();
                 crate::tools::ToolResult::success(
                     "get_tables",
-                    args,
                     if tables.is_empty() {
                         "No tables found".to_string()
                     } else {
@@ -802,7 +760,7 @@ impl BrowserTool for GetTablesTool {
                     },
                 )
             }
-            Err(error) => crate::tools::ToolResult::error("get_tables", args, error),
+            Err(error) => crate::tools::ToolResult::error("get_tables", error),
         }
     }
 }
@@ -823,7 +781,7 @@ impl BrowserTool for ClickTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Click, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Click),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -839,9 +797,9 @@ impl BrowserTool for ClickTool {
         let selector = args.get("selector").cloned().unwrap_or_default();
         match browser.click(&selector).await {
             Ok(()) => {
-                crate::tools::ToolResult::success("click", args, "Clicked successfully".to_string())
+                crate::tools::ToolResult::success("click", "Clicked successfully".to_string())
             }
-            Err(error) => crate::tools::ToolResult::error("click", args, error),
+            Err(error) => crate::tools::ToolResult::error("click", error),
         }
     }
 }
@@ -862,11 +820,11 @@ impl BrowserTool for TypeTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Type, RiskLevel::High).sensitive(true),
+            ToolRisk::new(ToolAction::Type).sensitive(true),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required("selector", "CSS selector to type into"),
-            ToolArgumentDefinition::required("text", "Text to type").sensitive(true),
+            ToolArgumentDefinition::required("text", "Text to type"),
         ])
     }
 
@@ -878,17 +836,15 @@ impl BrowserTool for TypeTool {
         let selector = args.get("selector").cloned().unwrap_or_default();
         let text = args.get("text").cloned().unwrap_or_default();
         match browser.type_text(&selector, &text).await {
-            // `text` is marked `.sensitive(true)` on this tool's argument
-            // definition — never echo the raw value back into the result
-            // string, since it flows unredacted into ToolCallResult,
-            // result_preview, and stored session context. Report a
-            // length-based confirmation instead.
+            // Never echo the raw typed value back into the result string,
+            // since it flows unredacted into ToolCallResult, result_preview,
+            // and stored session context. Report a length-based confirmation
+            // instead.
             Ok(()) => crate::tools::ToolResult::success(
                 "type",
-                args,
                 format!("Typed {} characters successfully", text.chars().count()),
             ),
-            Err(error) => crate::tools::ToolResult::error("type", args, error),
+            Err(error) => crate::tools::ToolResult::error("type", error),
         }
     }
 }
@@ -909,7 +865,7 @@ impl BrowserTool for ScrollToTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Scroll),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -924,12 +880,10 @@ impl BrowserTool for ScrollToTool {
     ) -> crate::tools::ToolResult {
         let selector = args.get("selector").cloned().unwrap_or_default();
         match browser.scroll_to(&selector).await {
-            Ok(()) => crate::tools::ToolResult::success(
-                "scroll_to",
-                args,
-                "Scrolled to element".to_string(),
-            ),
-            Err(error) => crate::tools::ToolResult::error("scroll_to", args, error),
+            Ok(()) => {
+                crate::tools::ToolResult::success("scroll_to", "Scrolled to element".to_string())
+            }
+            Err(error) => crate::tools::ToolResult::error("scroll_to", error),
         }
     }
 }
@@ -950,7 +904,7 @@ impl BrowserTool for ScrollByTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Scroll, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Scroll),
         )
         .with_arguments(vec![
             ToolArgumentDefinition::required("x", "Horizontal scroll delta in pixels"),
@@ -972,12 +926,10 @@ impl BrowserTool for ScrollByTool {
             .and_then(|value| value.parse().ok())
             .unwrap_or(0.0);
         match browser.scroll_by(x, y).await {
-            Ok(()) => crate::tools::ToolResult::success(
-                "scroll_by",
-                args,
-                format!("Scrolled by {}, {}", x, y),
-            ),
-            Err(error) => crate::tools::ToolResult::error("scroll_by", args, error),
+            Ok(()) => {
+                crate::tools::ToolResult::success("scroll_by", format!("Scrolled by {}, {}", x, y))
+            }
+            Err(error) => crate::tools::ToolResult::error("scroll_by", error),
         }
     }
 }
@@ -998,7 +950,7 @@ impl BrowserTool for SubmitFormTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Submit, RiskLevel::High).externally_visible(true),
+            ToolRisk::new(ToolAction::Submit).externally_visible(true),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "selector",
@@ -1015,10 +967,9 @@ impl BrowserTool for SubmitFormTool {
         match browser.submit_form(&selector).await {
             Ok(()) => crate::tools::ToolResult::success(
                 "submit_form",
-                args,
                 "Form submitted successfully".to_string(),
             ),
-            Err(error) => crate::tools::ToolResult::error("submit_form", args, error),
+            Err(error) => crate::tools::ToolResult::error("submit_form", error),
         }
     }
 }
@@ -1039,7 +990,7 @@ impl BrowserTool for KeypressTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Keypress, RiskLevel::Medium),
+            ToolRisk::new(ToolAction::Keypress),
         )
         .with_arguments(vec![ToolArgumentDefinition::required(
             "key",
@@ -1054,8 +1005,8 @@ impl BrowserTool for KeypressTool {
     ) -> crate::tools::ToolResult {
         let key = args.get("key").cloned().unwrap_or_default();
         match browser.keypress(&key).await {
-            Ok(()) => crate::tools::ToolResult::success("keypress", args, format!("Pressed {key}")),
-            Err(error) => crate::tools::ToolResult::error("keypress", args, error),
+            Ok(()) => crate::tools::ToolResult::success("keypress", format!("Pressed {key}")),
+            Err(error) => crate::tools::ToolResult::error("keypress", error),
         }
     }
 }
@@ -1076,18 +1027,18 @@ impl BrowserTool for ScreenshotTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Screenshot, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Screenshot),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.screenshot().await {
-            Ok(value) => crate::tools::ToolResult::success("screenshot", args, value),
-            Err(error) => crate::tools::ToolResult::error("screenshot", args, error),
+            Ok(value) => crate::tools::ToolResult::success("screenshot", value),
+            Err(error) => crate::tools::ToolResult::error("screenshot", error),
         }
     }
 }
@@ -1108,18 +1059,18 @@ impl BrowserTool for BackTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Back, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Back),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.browser_back().await {
-            Ok(()) => crate::tools::ToolResult::success("back", args, "Navigated back".to_string()),
-            Err(error) => crate::tools::ToolResult::error("back", args, error),
+            Ok(()) => crate::tools::ToolResult::success("back", "Navigated back".to_string()),
+            Err(error) => crate::tools::ToolResult::error("back", error),
         }
     }
 }
@@ -1140,20 +1091,18 @@ impl BrowserTool for ForwardTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Forward, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Forward),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.browser_forward().await {
-            Ok(()) => {
-                crate::tools::ToolResult::success("forward", args, "Navigated forward".to_string())
-            }
-            Err(error) => crate::tools::ToolResult::error("forward", args, error),
+            Ok(()) => crate::tools::ToolResult::success("forward", "Navigated forward".to_string()),
+            Err(error) => crate::tools::ToolResult::error("forward", error),
         }
     }
 }
@@ -1174,20 +1123,18 @@ impl BrowserTool for ReloadTool {
         ToolDefinition::new(
             self.name(),
             self.description(),
-            ToolRisk::new(ToolAction::Reload, RiskLevel::Low),
+            ToolRisk::new(ToolAction::Reload),
         )
     }
 
     async fn execute(
         &self,
-        args: HashMap<String, String>,
+        _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         match browser.browser_reload().await {
-            Ok(()) => {
-                crate::tools::ToolResult::success("reload", args, "Reloaded page".to_string())
-            }
-            Err(error) => crate::tools::ToolResult::error("reload", args, error),
+            Ok(()) => crate::tools::ToolResult::success("reload", "Reloaded page".to_string()),
+            Err(error) => crate::tools::ToolResult::error("reload", error),
         }
     }
 }
@@ -1195,24 +1142,6 @@ impl BrowserTool for ReloadTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The canonical SSRF vectors live in `crate::netguard::tests` (IPv4-mapped,
-    /// unique-local, fail-closed, redirect). This test's job is narrower and still
-    /// worth keeping: prove the engine path is wired to that shared boundary at all,
-    /// so a later refactor cannot quietly unhook it.
-    #[test]
-    fn ssrf_guard_blocks_internal_hosts_via_shared_boundary() {
-        use crate::netguard::blocked_reason;
-        assert!(blocked_reason("http://169.254.169.254/latest/meta-data/").is_some());
-        assert!(blocked_reason("http://127.0.0.1:8080/").is_some());
-        assert!(blocked_reason("http://10.0.0.5/").is_some());
-        assert!(blocked_reason("http://192.168.1.1/").is_some());
-        assert!(blocked_reason("http://[::1]/").is_some());
-        // The spelling that used to get through.
-        assert!(blocked_reason("http://[::ffff:169.254.169.254]/").is_some());
-        // a normal public IP literal is allowed through
-        assert!(blocked_reason("http://93.184.216.34/").is_none());
-    }
 
     #[test]
     fn enrich_snapshot_extracts_prices_from_text() {
@@ -1257,9 +1186,6 @@ mod tests {
         }
         async fn get_text(&self, _selector: &str) -> Result<String, String> {
             Ok(String::new())
-        }
-        async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
-            Ok(HashMap::new())
         }
         async fn click(&self, _selector: &str) -> Result<(), String> {
             Ok(())
@@ -1330,6 +1256,17 @@ mod tests {
         assert!(
             message.contains("invalid CSS selector"),
             "invalid selector should be flagged distinctly: {message}"
+        );
+    }
+
+    #[test]
+    fn query_selector_from_html_rejects_invalid_css() {
+        let error = query_selector_from_html("<html></html>", ">>bad<<")
+            .expect_err("invalid CSS must not silently match nothing");
+        assert_eq!(error, "Cannot query: invalid CSS selector '>>bad<<'");
+        assert_eq!(
+            error,
+            static_interaction_error("<html></html>", "query", ">>bad<<")
         );
     }
 }

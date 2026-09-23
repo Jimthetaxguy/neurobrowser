@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Omnibox } from "./OmniboxSuggestions.jsx";
+import { nativePageUpdates } from "./nativePageEvents.js";
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -34,7 +36,6 @@ function Message({ item }) {
   return (
     <div className={`message ${item.role}`}>
       <div>{item.text}</div>
-      {item.tools?.length > 0 && <div className="tools-used">Tools: {item.tools.join(", ")}</div>}
     </div>
   );
 }
@@ -218,15 +219,17 @@ function ChatPanel({
 }
 
 function Header({
-  provider,
-  setProvider,
-  policyMode,
-  setPolicyMode,
-  url,
-  setUrl,
+  adapter,
+  compact,
   onNavigate,
   onNewTab,
-  compact,
+  onStatus,
+  policyMode,
+  provider,
+  setPolicyMode,
+  setProvider,
+  setUrl,
+  url,
 }) {
   return (
     <header className={compact ? "header compact" : "header"}>
@@ -234,45 +237,39 @@ function Header({
         <span className="brand-dot" />
         <span>NeuroBrowser</span>
       </div>
-      <select
-        className="provider-select"
-        onChange={(event) => setProvider(event.target.value)}
-        value={provider}
-      >
-        {PROVIDERS.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-      <select
-        className="provider-select"
-        onChange={(event) => setPolicyMode(event.target.value)}
-        value={policyMode}
-      >
-        {POLICY_MODES.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-      <form
-        className="url-bar"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onNavigate();
-        }}
-      >
-        <input
-          className="url-input"
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="Enter a URL or domain"
-          value={url}
-        />
-        <button className="btn" type="submit">
-          Go
-        </button>
-      </form>
+      {!compact && (
+        <>
+          <select
+            className="provider-select"
+            onChange={(event) => setProvider(event.target.value)}
+            value={provider}
+          >
+            {PROVIDERS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="provider-select"
+            onChange={(event) => setPolicyMode(event.target.value)}
+            value={policyMode}
+          >
+            {POLICY_MODES.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+      <Omnibox
+        adapter={adapter}
+        onNavigate={onNavigate}
+        onStatus={onStatus}
+        setUrl={setUrl}
+        url={url}
+      />
       <button className="btn btn-secondary" onClick={onNewTab} type="button">
         New Tab
       </button>
@@ -286,6 +283,11 @@ export default function App({ adapter, lane }) {
   const nextMessageId = useRef(0);
   const [sessionId, setSessionId] = useState(null);
   const [currentPageId, setCurrentPageId] = useState(null);
+  const currentPageIdRef = useRef(null);
+  const setActivePageId = useCallback((pageId) => {
+    currentPageIdRef.current = pageId;
+    setCurrentPageId(pageId);
+  }, []);
   const [tabs, setTabs] = useState([]);
   const [url, setUrl] = useState("");
   const [provider, setProviderValue] = useState("openai");
@@ -302,18 +304,14 @@ export default function App({ adapter, lane }) {
     {
       id: -1,
       role: "assistant",
-      text:
-        lane === "appkit"
-          ? "Native AppKit lane ready. Page rendering stays in WKWebView while this React surface sends browser commands."
-          : "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
-      tools: [],
+      text: "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
     },
   ]);
 
-  const appendMessage = useCallback((role, text, tools = []) => {
+  const appendMessage = useCallback((role, text) => {
     const id = nextMessageId.current;
     nextMessageId.current += 1;
-    setMessages((items) => [...items, { id, role, text, tools }]);
+    setMessages((items) => [...items, { id, role, text }]);
   }, []);
 
   const updateSnapshot = useCallback((pageId, nextSnapshot) => {
@@ -328,11 +326,6 @@ export default function App({ adapter, lane }) {
     setStatus(nextSnapshot.title ? `Loaded: ${nextSnapshot.title}` : "Ready");
   }, []);
 
-  const syncBrowserViewport = useCallback(async () => {
-    if (!adapter.rendersPageInHost || currentPageId == null || !browserStageRef.current) return;
-    await adapter.syncBrowserViewport(currentPageId, browserStageRef.current.getBoundingClientRect());
-  }, [adapter, currentPageId]);
-
   const syncBrowserViewportForPage = useCallback(
     async (pageId) => {
       if (!adapter.rendersPageInHost || pageId == null || !browserStageRef.current) return;
@@ -340,6 +333,10 @@ export default function App({ adapter, lane }) {
     },
     [adapter]
   );
+
+  const syncBrowserViewport = useCallback(async () => {
+    await syncBrowserViewportForPage(currentPageId);
+  }, [currentPageId, syncBrowserViewportForPage]);
 
   const refreshSnapshot = useCallback(async () => {
     if (currentPageId == null || !sessionId) return null;
@@ -351,7 +348,7 @@ export default function App({ adapter, lane }) {
   const activatePage = useCallback(
     async (pageId) => {
       if (pageId == null || !sessionId) return;
-      setCurrentPageId(pageId);
+      setActivePageId(pageId);
       await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
       try {
@@ -361,7 +358,7 @@ export default function App({ adapter, lane }) {
         console.warn("snapshot refresh failed", messageText(error));
       }
     },
-    [adapter, sessionId, syncBrowserViewportForPage, updateSnapshot]
+    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
   );
 
   const createNewTab = useCallback(async () => {
@@ -369,13 +366,13 @@ export default function App({ adapter, lane }) {
     try {
       const pageId = await adapter.createPage(sessionId);
       setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}` }]);
-      setCurrentPageId(pageId);
+      setActivePageId(pageId);
       await syncBrowserViewportForPage(pageId);
       setStatus("New tab ready");
     } catch (error) {
       setStatus(`New tab failed: ${messageText(error)}`);
     }
-  }, [adapter, sessionId, syncBrowserViewportForPage]);
+  }, [adapter, sessionId, setActivePageId, syncBrowserViewportForPage]);
 
   const closeTab = useCallback(
     async (pageId) => {
@@ -387,7 +384,7 @@ export default function App({ adapter, lane }) {
         setTabs(nextTabs);
         const nextTab = nextTabs[closingIndex] || nextTabs[closingIndex - 1] || nextTabs[0];
         if (nextTab) {
-          setCurrentPageId(nextTab.id);
+          setActivePageId(nextTab.id);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
         }
@@ -395,12 +392,12 @@ export default function App({ adapter, lane }) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, sessionId, syncBrowserViewportForPage, tabs]
+    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs]
   );
 
-  const navigateCurrentPage = useCallback(async () => {
+  const navigateCurrentPage = useCallback(async (nextUrl) => {
     if (currentPageId == null || !sessionId) return;
-    const rawUrl = url.trim();
+    const rawUrl = (typeof nextUrl === "string" ? nextUrl : url).trim();
     if (!rawUrl) return;
 
     setStatus(`Navigating to ${rawUrl}`);
@@ -451,7 +448,7 @@ export default function App({ adapter, lane }) {
         appendMessage("assistant", result.final_response || "Run cancelled.");
         setStatus("Run cancelled");
       } else {
-        appendMessage("assistant", result.final_response ?? result.response ?? "", result.tools_used || []);
+        appendMessage("assistant", result.final_response ?? "");
         setStatus("Ready");
       }
       await refreshSnapshot();
@@ -545,15 +542,17 @@ export default function App({ adapter, lane }) {
         const pageId = await adapter.createPage(nextSessionId);
         if (disposed) return;
         setTabs([{ id: pageId, title: "Tab 1" }]);
-        setCurrentPageId(pageId);
-        try {
-          const policy = await adapter.getActionPolicy();
-          if (!disposed && policy) {
-            setActionPolicy(policy);
-            setPolicyModeValue(policy.autonomy_level || "assisted");
+        setActivePageId(pageId);
+        if (!compact) {
+          try {
+            const policy = await adapter.getActionPolicy();
+            if (!disposed && policy) {
+              setActionPolicy(policy);
+              setPolicyModeValue(policy.autonomy_level || "assisted");
+            }
+          } catch (error) {
+            console.warn("policy load failed", messageText(error));
           }
-        } catch (error) {
-          console.warn("policy load failed", messageText(error));
         }
         setStatus("Session ready");
       } catch (error) {
@@ -564,20 +563,28 @@ export default function App({ adapter, lane }) {
     return () => {
       disposed = true;
     };
-  }, [adapter]);
+  }, [adapter, compact, setActivePageId]);
 
   useEffect(() => {
     const unsubscribe = adapter.onHostEvent((event) => {
       if (!event) return;
-      if (event.type === "snapshot") {
-        updateSnapshot(event.pageId ?? currentPageId, event.snapshot);
+      if (compact) {
+        const updates = nativePageUpdates(event, currentPageIdRef.current);
+        if (updates.tabs) {
+          setTabs(updates.tabs);
+          setActivePageId(updates.activePageId);
+          if ("url" in updates) setUrl(updates.url);
+        }
+        if (updates.snapshot) updateSnapshot(event.pageId, updates.snapshot);
+      } else if (event.type === "snapshot" && event.pageId === currentPageIdRef.current) {
+        updateSnapshot(event.pageId, event.snapshot);
       }
       if (event.type === "status") {
         setStatus(event.message);
       }
     });
     return unsubscribe;
-  }, [adapter, currentPageId, updateSnapshot]);
+  }, [adapter, compact, setActivePageId, updateSnapshot]);
 
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
@@ -609,6 +616,7 @@ export default function App({ adapter, lane }) {
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
       if (event.key.toLowerCase() === "t") {
+        if (compact) return;
         event.preventDefault();
         createNewTab();
       }
@@ -617,47 +625,33 @@ export default function App({ adapter, lane }) {
         document.querySelector(".url-input")?.focus();
       }
       if (event.key.toLowerCase() === "w" && currentPageId != null) {
+        if (compact) return;
         event.preventDefault();
         closeTab(currentPageId);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [closeTab, createNewTab, currentPageId]);
+  }, [closeTab, compact, createNewTab, currentPageId]);
 
-  const stageText = useMemo(() => {
-    if (lane === "appkit") return "Real pages render in the AppKit WKWebView content pane.";
-    return "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
-  }, [lane]);
+  const stageText =
+    "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
 
   if (compact) {
     return (
       <div className="app-shell appkit-shell">
         <Header
+          adapter={adapter}
           compact
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
-          policyMode={policyMode}
-          provider={provider}
-          setPolicyMode={selectPolicyMode}
-          setProvider={selectProvider}
+          onStatus={setStatus}
           setUrl={setUrl}
           url={url}
         />
         <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} tabs={tabs} />
         <BrowserToolbar onAction={runBrowserAction} />
         <StatsRow snapshot={snapshot} />
-        <ChatPanel
-          actionEvents={actionEvents}
-          messages={messages}
-          onCancelApproval={cancelApproval}
-          onAsk={askAssistant}
-          onResolveApproval={resolveApproval}
-          pendingApproval={pendingApproval}
-          prompt={prompt}
-          setPrompt={setPrompt}
-          thinking={thinking}
-        />
         <div className="status-bar">
           <span>{status}</span>
           <span>Tabs: {tabs.length}</span>
@@ -669,7 +663,7 @@ export default function App({ adapter, lane }) {
   return (
     <div className="app-shell">
       {loading && (
-        <div className="loading-overlay active">
+        <div className="loading-overlay">
           <div className="loading-card">
             <div className="spinner" />
             <div>{loading}</div>
@@ -677,8 +671,10 @@ export default function App({ adapter, lane }) {
         </div>
       )}
       <Header
+        adapter={adapter}
         onNavigate={navigateCurrentPage}
         onNewTab={createNewTab}
+        onStatus={setStatus}
         policyMode={policyMode}
         provider={provider}
         setPolicyMode={selectPolicyMode}

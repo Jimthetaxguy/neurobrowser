@@ -1,10 +1,9 @@
 use crate::providers::{
-    build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, AiProvider, AiResponse,
-    ProviderConfig, ProviderError, ProviderResult,
+    build_system_prompt, client_for_origin, parse_tool_calls, resolve_endpoint, AiContext,
+    AiProvider, AiResponse, ProviderConfig, ProviderError, ProviderResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 
 pub struct AnthropicProvider {
     config: ProviderConfig,
@@ -13,10 +12,8 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let origin = resolve_endpoint(config.base_url.as_deref(), "https://api.anthropic.com", "");
+        let client = client_for_origin(&origin);
 
         Self { config, client }
     }
@@ -124,7 +121,6 @@ impl AiProvider for AnthropicProvider {
 
         Ok(AiResponse {
             content,
-            reasoning: None,
             tool_calls,
         })
     }
@@ -137,17 +133,13 @@ impl AiProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::ScrollPosition;
 
     fn ctx() -> AiContext {
         AiContext {
             current_url: String::new(),
             page_title: String::new(),
-            dom_snapshot: String::new(),
-            accessibility_tree: None,
-            scroll_position: ScrollPosition { x: 0.0, y: 0.0 },
             tool_results: Vec::new(),
-            conversation_history: Vec::new(),
+            personal_memory: false,
         }
     }
 

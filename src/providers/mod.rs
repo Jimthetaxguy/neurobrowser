@@ -11,8 +11,6 @@ pub enum ProviderError {
     RequestFailed(String),
     #[error("Parse error: {0}")]
     ParseError(String),
-    #[error("Authentication error: {0}")]
-    AuthError(String),
     #[error("Rate limited")]
     RateLimited,
     #[error("Provider not configured: {0}")]
@@ -24,7 +22,6 @@ pub type ProviderResult<T> = Result<T, ProviderError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiResponse {
     pub content: String,
-    pub reasoning: Option<String>,
     pub tool_calls: Vec<ToolCall>,
 }
 
@@ -38,23 +35,14 @@ pub struct ToolCall {
 pub struct AiContext {
     pub current_url: String,
     pub page_title: String,
-    pub dom_snapshot: String,
-    pub accessibility_tree: Option<String>,
-    pub scroll_position: ScrollPosition,
     pub tool_results: Vec<ToolResult>,
-    pub conversation_history: Vec<Message>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScrollPosition {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: String,
-    pub content: String,
+    /// When true, the system prompt lists `search_personal_memory` and
+    /// `inspect_active_page`. Set by `ReActAgent::with_memory`.
+    ///
+    /// Those tools read `neuro_memory::MemoryService`. They do not read an
+    /// in-run agent log.
+    #[serde(default)]
+    pub personal_memory: bool,
 }
 
 #[async_trait]
@@ -207,7 +195,12 @@ fn parse_arguments(tool_name: &str, args_str: &str) -> HashMap<String, String> {
 /// unknown tool names, in which case positional args get distinct
 /// `value1`, `value2`, ... keys rather than overwriting each other.
 fn positional_argument_names(tool_name: &str) -> Vec<String> {
-    crate::browser::default_tool_registry()
+    if let Some(names) = crate::tools::memory_tools::positional_argument_names(tool_name) {
+        return names;
+    }
+    static REGISTRY: std::sync::OnceLock<crate::tools::ToolRegistry> = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(crate::browser::default_tool_registry)
         .get(tool_name)
         .map(|tool| {
             tool.definition()
@@ -297,13 +290,21 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("- scroll_to(selector): Scroll element into view\n");
     prompt.push_str("- scroll_by(x, y): Scroll by pixels\n");
     prompt.push_str("- submit_form(selector): Submit a form\n");
-    prompt.push_str("- screenshot(): Capture the current page if supported\n");
+    prompt.push_str("- screenshot(): registered; this runtime errors\n");
     prompt.push_str("- back(): Browser history back\n");
     prompt.push_str("- forward(): Browser history forward\n");
     prompt.push_str("- reload(): Reload page\n");
     prompt.push_str("- get_links(): Get all links on page\n");
     prompt.push_str("- get_prices(): Extract price information\n");
-    prompt.push_str("- get_tables(): Extract table data\n");
+    prompt.push_str("- get_tables(): Table N: H headers, R rows per table\n");
+    if context.personal_memory {
+        prompt.push_str(
+            "- search_personal_memory(query): Search persistent personal page memory (MemoryService, not the in-run agent log)\n",
+        );
+        prompt.push_str(
+            "- inspect_active_page(): Read captured personal-memory content for the current page URL\n",
+        );
+    }
 
     prompt
 }
@@ -326,8 +327,11 @@ pub(crate) fn resolve_endpoint(base_url: Option<&str>, default_origin: &str, pat
 }
 
 pub mod anthropic;
+mod http;
 pub mod ollama;
 pub mod openai;
+
+pub(crate) use http::client_for_origin;
 
 pub use anthropic::AnthropicProvider;
 pub use ollama::OllamaProvider;

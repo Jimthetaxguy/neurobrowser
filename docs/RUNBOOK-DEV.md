@@ -8,14 +8,15 @@ How to build, run, and test NeuroBrowser locally.
 - **Node.js** + **npm** (Vite frontend under `src-tauri/`).
 - **macOS** for the desktop app (icon set + CSP are macOS-flavored).
   Windows/Linux desktop builds are not shipped. The library crate and
-  headless daemon build on Unix without a display.
+  headless daemon build on Unix without a display. Full `./verify.sh` is
+  not a portable one-shot green on bare Ubuntu: the Tauri `cargo check`
+  steps need macOS or GTK/WebKit on Linux.
 
 ## One-shot green build
 
 From repo root:
 
 ```bash
-chmod +x verify.sh   # only needed the first time
 ./verify.sh
 ```
 
@@ -27,7 +28,8 @@ This is the verification chain in `verify.sh`:
 4. `cd src-tauri && npm ci && npm run build`
 5. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
 6. Locked headless check and binary tests with `--features headless`
-7. `cargo build --release` (library crate)
+7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
+8. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
@@ -66,14 +68,13 @@ Integration tests live in `tests/`:
 - `action_policy.rs` — deny-wins-over-allow, assisted-mode click approval,
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
-- `streaming.rs` — `StreamEvent` serialization.
 - `agent_memory_metrics.rs` — memory + metrics.
 - Headless argument and policy tests live in `src-tauri/src/bin/headless.rs`
   and run explicitly with the `headless` feature.
 
 ## Tauri IPC
 
-The desktop app exposes 20 commands (see `src-tauri/src/main.rs`). From
+The desktop app exposes 18 commands (see `src-tauri/src/main.rs`). From
 the React frontend:
 
 ```javascript
@@ -93,10 +94,17 @@ Adding a command:
 1. Define it in `src-tauri/src/main.rs`.
 2. Add it to `tauri::generate_handler!`.
 3. Add the command name to the app manifest in `src-tauri/build.rs`.
-4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json`.
+4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json` (control webview only). Do not grant host commands to `page-runtime.json`.
 5. Add a wrapper in `src-tauri/src/hostAdapters.js`.
 
 Do not add a wildcard capability permission.
+
+Page webviews receive only `browser_runtime_report`, including the initial
+`about:blank` document. URLPattern requires its colon to be escaped: the JSON
+entry is `"about\\:blank"`. The capability tests exercise Tauri's compiled ACL
+without launching the app: blank/HTTP/HTTPS reports succeed, other document
+schemes and webview labels are denied, and page webviews cannot invoke control
+commands (including provider changes and approval submission).
 
 ## verify.sh failures
 
@@ -106,7 +114,8 @@ Do not add a wildcard capability permission.
 | `cargo clippy` | warnings-as-errors | fix the warning, re-run |
 | `cargo test` | failed assertions | fix the test or the code |
 | `npm ci && npm run build` | Vite error | check `src-tauri/src/*.{jsx,js}` |
-| `cargo check --manifest-path src-tauri/Cargo.toml` | Tauri compile error | missing icon or capability |
+| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Tauri compile error | missing icon or capability |
+| locked headless `cargo check` / `cargo test --bin neurobrowser-headless` | headless compile or binary test failure | fix the headless feature path |
 | `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
 
 ## Environment variables
@@ -120,7 +129,7 @@ Do not add a wildcard capability permission.
 | `OLLAMA_BASE_URL` | `set_provider("ollama")` | `http://localhost:11434` |
 | `OLLAMA_MODEL` | `set_provider("ollama")` | `llama3.2` |
 | `CUSTOM_PROVIDER_API_KEY` | `set_provider("custom")` | falls back to `OPENAI_API_KEY` |
-| `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | (none — required for custom) |
+| `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | `https://api.openai.com` (via `resolve_endpoint`) |
 | `CUSTOM_PROVIDER_MODEL` | `set_provider("custom")` | `gpt-4o` |
 | `NEUROBROWSER_SOCKET` | headless daemon | temp dir `neurobrowser-<pid>.sock` |
 | `RUST_LOG` | tracing | `neurobrowser=info,headless=info` |
@@ -137,18 +146,17 @@ Local keys go in a gitignored `.env`.
 | Tauri IPC bridge | `src-tauri/src/main.rs` |
 | Webview JS bridge | `src-tauri/src/runtime.rs` |
 | AppKit Swift spike | `NeuroBrowser/` |
-| Specs / stories / ADRs | `docs/specs/`, `docs/stories/`, `docs/adr/` |
+| Status / agent / ADR | `README.md`, `CHANGELOG.md`, `docs/AGENT-SURFACE.md`, `docs/adr/` |
 | Verification | `verify.sh` |
 | Tests | `tests/` |
 
 ## See also
 
-- `PROJECT.md` — current status and v0.2 list.
+- `README.md` — current status and shipped surface.
+- `CHANGELOG.md` — history and still-unimplemented work.
 - `docs/AGENT-SURFACE.md` — agent tool / policy spec.
+- `docs/adr/ADR-001-react-tauri-primary.md` — primary frontend path.
 - `docs/references/prior-art.md` — prior art.
-- `docs/specs/` — product specs.
-- `docs/stories/` — user stories.
-- `docs/adr/` — architecture decision records.
 
 ## Native AppKit shell
 
