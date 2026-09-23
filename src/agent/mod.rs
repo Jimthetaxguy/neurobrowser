@@ -171,9 +171,38 @@ impl ReActAgent {
                     });
                 };
 
+                let definition = tool.definition();
+
+                // A call that omits a required argument never runs, and it is
+                // not dropped either: an empty `tool_calls` list would complete
+                // the run. Record the failure so the model sees it next turn.
+                let missing = definition.missing_required_arguments(&tool_call.arguments);
+                if !missing.is_empty() {
+                    let result = format!(
+                        "Error: missing required argument(s): {}",
+                        missing.join(", ")
+                    );
+                    events.push(AgentRunEvent::ToolCallResult {
+                        run_id: run_id.clone(),
+                        tool: tool_call.name.clone(),
+                        result: result.clone(),
+                        success: false,
+                    });
+                    {
+                        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+                        state.tool_results.push(ToolResult {
+                            tool_name: tool_call.name.clone(),
+                            result,
+                            success: false,
+                        });
+                        state.iterations = iteration + 1;
+                    }
+                    continue;
+                }
+
                 let decision = policy.evaluate(
                     &tool_call.name,
-                    &tool.definition().risk,
+                    &definition.risk,
                     &tool_call.arguments,
                     &snapshot,
                 );

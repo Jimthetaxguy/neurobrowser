@@ -182,6 +182,13 @@ impl ToolRegistry {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
+
+    /// Every registered tool's definition, sorted by name.
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions: Vec<_> = self.tools.values().map(|tool| tool.definition()).collect();
+        definitions.sort_by(|left, right| left.name.cmp(&right.name));
+        definitions
+    }
 }
 
 impl Default for ToolRegistry {

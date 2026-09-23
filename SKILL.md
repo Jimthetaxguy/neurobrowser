@@ -103,6 +103,15 @@ tools are registered by `default_tool_registry_with_memory()` /
 `ReActAgent::with_memory`. Browser arguments are CSS selectors (or pixels /
 a key), not element refs.
 
+Call format is `ToolCall: {"name":"tool_name","arguments":{"key":"value"}}`.
+The model's tool list is built from each tool's `ToolDefinition`. The two
+memory tools appear only when memory is attached.
+
+A call to a registered tool that omits a required argument (or sets it to
+`""`) does not run. The agent records
+`Error: missing required argument(s): …` and shows it to the model on the
+next turn. That turn does not complete the run.
+
 | Tool | Args | Purpose |
 |---|---|---|
 | `navigate` | `url` | Fetch / open a URL |
