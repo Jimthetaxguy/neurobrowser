@@ -132,10 +132,6 @@ impl AiProvider for ScriptedProvider {
             .pop_front()
             .expect("scripted response"))
     }
-
-    fn provider_name(&self) -> &str {
-        "scripted"
-    }
 }
 
 fn tool_response(name: &str, args: &[(&str, &str)]) -> AiResponse {

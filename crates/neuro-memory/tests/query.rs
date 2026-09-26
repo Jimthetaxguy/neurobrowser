@@ -51,7 +51,7 @@ fn assert_score_close(left: f32, right: f32) {
 }
 
 #[test]
-fn search_ranks_committed_text_and_leaves_explain_empty() {
+fn search_ranks_committed_text() {
     let dir = tempfile::tempdir().expect("temp dir");
     let guide = page(
         "https://example.com/docs?topic=install",
@@ -85,7 +85,6 @@ fn search_ranks_committed_text_and_leaves_explain_empty() {
 
     let hits = search(&index, &request("uniquealpha", 10)).expect("search");
     assert_eq!(hits.len(), 2, "both guide blocks mention uniquealpha");
-    assert!(hits.iter().all(|hit| hit.explain.is_none()));
     assert!(hits.iter().all(|hit| hit.score > 0.0));
     assert!(hits[0].score >= hits[1].score);
     assert!(
