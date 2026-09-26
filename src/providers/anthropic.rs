@@ -18,36 +18,33 @@ impl AnthropicProvider {
         Self { config, client }
     }
 
-    /// Build the single user-message content, folding in any tool results.
-    fn build_user_content(&self, prompt: &str, context: &AiContext) -> String {
-        if context.tool_results.is_empty() {
-            prompt.to_string()
-        } else {
-            let tool_results_str = context
-                .tool_results
-                .iter()
-                .map(|r| format!("{}: {}", r.tool_name, r.result))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("{prompt}\n\nTool results:\n{tool_results_str}")
-        }
-    }
-
     /// Build the JSON body for the Messages API.
     ///
     /// The system prompt MUST go in the top-level `system` field — the Anthropic
     /// Messages API rejects a `{"role": "system"}` entry inside `messages` with a
     /// 400. `messages` therefore carries only `user`/`assistant` turns.
+    ///
+    /// `temperature` is included only when explicitly configured. Current
+    /// Claude models (e.g. the default `claude-sonnet-5`) reject any
+    /// `temperature` value with a 400 ("temperature is deprecated for this
+    /// model"), so defaulting it here would break the common case; a caller
+    /// pointed at an older model that still accepts it can opt in via
+    /// `ProviderConfig::temperature`.
     fn build_request_body(&self, prompt: &str, context: &AiContext) -> serde_json::Value {
-        serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.config.model,
             "system": build_system_prompt(context),
             "messages": [
-                { "role": "user", "content": self.build_user_content(prompt, context) }
+                { "role": "user", "content": prompt }
             ],
             "max_tokens": self.config.max_tokens.unwrap_or(4096),
-            "temperature": self.config.temperature.unwrap_or(0.3),
-        })
+        });
+
+        if let Some(temperature) = self.config.temperature {
+            body["temperature"] = serde_json::json!(temperature);
+        }
+
+        body
     }
 
     /// Concatenate the text of every `text`-typed content block in a Messages API
@@ -145,7 +142,7 @@ mod tests {
 
     fn provider() -> AnthropicProvider {
         let config = ProviderConfig {
-            model: "claude-3-5-sonnet".to_string(),
+            model: "claude-sonnet-5".to_string(),
             ..Default::default()
         };
         AnthropicProvider::new(config)
@@ -168,6 +165,46 @@ mod tests {
             messages.iter().all(|m| m["role"] != "system"),
             "no message may carry the system role (the Messages API rejects it)"
         );
+    }
+
+    #[test]
+    fn request_body_omits_temperature_when_not_configured() {
+        let config = ProviderConfig {
+            model: "claude-sonnet-5".to_string(),
+            temperature: None,
+            ..Default::default()
+        };
+        let body = AnthropicProvider::new(config).build_request_body("do the thing", &ctx());
+        assert!(
+            body.get("temperature").is_none(),
+            "temperature must be omitted when not configured — current Claude \
+             models reject any temperature value with a 400"
+        );
+    }
+
+    #[test]
+    fn request_body_includes_temperature_when_configured() {
+        let config = ProviderConfig {
+            model: "claude-sonnet-5".to_string(),
+            temperature: Some(0.5),
+            ..Default::default()
+        };
+        let body = AnthropicProvider::new(config).build_request_body("do the thing", &ctx());
+        assert_eq!(body["temperature"], 0.5);
+    }
+
+    #[test]
+    fn user_turn_sends_prompt_only_when_tool_results_exist() {
+        let mut context = ctx();
+        context.tool_results.push(crate::tools::ToolResult::success(
+            "get_text",
+            "hello".to_string(),
+        ));
+        let body = provider().build_request_body("do the thing", &context);
+        // Tool results reach the model once, through the shared system prompt.
+        assert_eq!(body["messages"][0]["content"], "do the thing");
+        let system = body["system"].as_str().expect("system prompt");
+        assert!(system.contains("Recent tool results:\n- get_text: hello\n"));
     }
 
     #[test]

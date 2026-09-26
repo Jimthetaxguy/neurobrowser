@@ -83,6 +83,16 @@ impl Default for ProviderConfig {
     }
 }
 
+/// Parse `ToolCall: {json}` lines and legacy `Action: tool(args)` lines.
+///
+/// A recognized call is kept even when it omits a required argument.
+/// `ReActAgent` checks it against the tool that would run it and reports the
+/// failure to the model. Dropping it here would leave `tool_calls` empty,
+/// which the agent treats as a final answer.
+///
+/// A legacy line must end with `)`. A truncated `back(` or
+/// `navigate(https://ex` is not a call. A legacy call with no arguments, such
+/// as `wait()`, counts only when it names a known tool.
 pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
     let mut calls = Vec::new();
 
@@ -99,14 +109,16 @@ pub fn parse_tool_calls(content: &str) -> Vec<ToolCall> {
         if line.starts_with("Action:") {
             let action_part = line.strip_prefix("Action:").unwrap().trim();
 
-            if let Some((name, args_str)) = action_part.split_once('(') {
+            if let Some((name, args_str)) = action_part
+                .split_once('(')
+                .filter(|(_, args_str)| args_str.ends_with(')'))
+            {
                 let name = name.trim();
                 let args_str = args_str.trim_end_matches(')').trim();
 
                 let arguments = parse_arguments(name, args_str);
 
-                // Empty argument maps are valid (`wait()`, `inspect_active_page()`).
-                if !name.is_empty() {
+                if !arguments.is_empty() || is_known_tool(name) {
                     calls.push(ToolCall {
                         name: name.to_string(),
                         arguments,
@@ -123,12 +135,15 @@ fn parse_structured_tool_call(json_part: &str) -> Option<ToolCall> {
     #[derive(Deserialize)]
     struct RawToolCall {
         name: String,
-        arguments: HashMap<String, serde_json::Value>,
+        /// Absent or `null` means no arguments, so `{"name":"navigate"}` is
+        /// kept for the agent to report instead of failing to parse.
+        arguments: Option<HashMap<String, serde_json::Value>>,
     }
 
     let parsed: RawToolCall = serde_json::from_str(json_part).ok()?;
     let arguments = parsed
         .arguments
+        .unwrap_or_default()
         .into_iter()
         .map(|(key, value)| {
             let value = match value {
@@ -199,9 +214,7 @@ fn positional_argument_names(tool_name: &str) -> Vec<String> {
     if let Some(names) = crate::tools::memory_tools::positional_argument_names(tool_name) {
         return names;
     }
-    static REGISTRY: std::sync::OnceLock<crate::tools::ToolRegistry> = std::sync::OnceLock::new();
-    REGISTRY
-        .get_or_init(crate::browser::default_tool_registry)
+    browser_tool_registry()
         .get(tool_name)
         .map(|tool| {
             tool.definition()
@@ -211,6 +224,12 @@ fn positional_argument_names(tool_name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// True for the 17 browser tools and the two memory tools.
+fn is_known_tool(tool_name: &str) -> bool {
+    crate::tools::memory_tools::positional_argument_names(tool_name).is_some()
+        || browser_tool_registry().get(tool_name).is_some()
 }
 
 fn split_arguments(args_str: &str) -> Vec<String> {
@@ -257,6 +276,28 @@ fn split_arguments(args_str: &str) -> Vec<String> {
     args
 }
 
+/// The 17 browser tools, built once. The legacy positional parser and the
+/// prompt's tool catalog both read this registry.
+fn browser_tool_registry() -> &'static crate::tools::ToolRegistry {
+    static REGISTRY: std::sync::OnceLock<crate::tools::ToolRegistry> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(crate::browser::default_tool_registry)
+}
+
+/// One catalog entry: the tool, then one line per argument.
+fn push_tool_definition(prompt: &mut String, definition: &crate::tools::ToolDefinition) {
+    prompt.push_str(&format!(
+        "- {}: {}\n",
+        definition.name, definition.description
+    ));
+    for argument in &definition.arguments {
+        let required = if argument.required { " (required)" } else { "" };
+        prompt.push_str(&format!(
+            "  - {}{required}: {}\n",
+            argument.name, argument.description
+        ));
+    }
+}
+
 pub fn build_system_prompt(context: &AiContext) -> String {
     let mut prompt = String::from("You are an intelligent browser assistant. ");
     prompt.push_str(&format!("Current URL: {}\n", context.current_url));
@@ -265,15 +306,17 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     if !context.tool_results.is_empty() {
         prompt.push_str("Recent tool results:\n");
         for result in &context.tool_results {
-            prompt.push_str(&format!(
-                "- {}: {}\n",
-                result.tool_name,
-                if result.success {
-                    &result.result
-                } else {
-                    "Error"
-                }
-            ));
+            if result.success {
+                prompt.push_str(&format!("- {}: {}\n", result.tool_name, result.result));
+            } else {
+                // Keep the reason so the model can correct the call. The agent
+                // stores failures as "Error: <reason>"; tools return the bare reason.
+                let reason = result
+                    .result
+                    .strip_prefix("Error: ")
+                    .unwrap_or(&result.result);
+                prompt.push_str(&format!("- {}: Error: {reason}\n", result.tool_name));
+            }
         }
         prompt.push('\n');
     }
@@ -281,30 +324,13 @@ pub fn build_system_prompt(context: &AiContext) -> String {
     prompt.push_str("Use structured browser tool calls when an action is needed:\n");
     prompt.push_str("ToolCall: {\"name\":\"tool_name\",\"arguments\":{\"key\":\"value\"}}\n\n");
     prompt.push_str("Available tools:\n");
-    prompt.push_str("- navigate(url): Navigate to an HTTP(S) URL\n");
-    prompt.push_str("- wait(): Wait for page readiness\n");
-    prompt.push_str("- query_dom(selector): Query DOM elements by CSS selector\n");
-    prompt.push_str("- get_text(selector): Get text content of element\n");
-    prompt.push_str("- click(selector): Click an element\n");
-    prompt.push_str("- type(selector, text): Type text into input\n");
-    prompt.push_str("- keypress(key): Send a keypress to the focused element\n");
-    prompt.push_str("- scroll_to(selector): Scroll element into view\n");
-    prompt.push_str("- scroll_by(x, y): Scroll by pixels\n");
-    prompt.push_str("- submit_form(selector): Submit a form\n");
-    prompt.push_str("- screenshot(): registered; this runtime errors\n");
-    prompt.push_str("- back(): Browser history back\n");
-    prompt.push_str("- forward(): Browser history forward\n");
-    prompt.push_str("- reload(): Reload page\n");
-    prompt.push_str("- get_links(): Get all links on page\n");
-    prompt.push_str("- get_prices(): Extract price information\n");
-    prompt.push_str("- get_tables(): Table N: H headers, R rows per table\n");
+    for definition in browser_tool_registry().definitions() {
+        push_tool_definition(&mut prompt, &definition);
+    }
     if context.personal_memory {
-        prompt.push_str(
-            "- search_personal_memory(query): Search persistent personal page memory (MemoryService, not the in-run agent log)\n",
-        );
-        prompt.push_str(
-            "- inspect_active_page(): Read captured personal-memory content for the current page URL\n",
-        );
+        for definition in crate::tools::memory_tools::definitions() {
+            push_tool_definition(&mut prompt, &definition);
+        }
     }
 
     prompt
@@ -351,10 +377,132 @@ pub fn create_provider(config: &ProviderConfig) -> Arc<dyn AiProvider> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_tool_calls, resolve_endpoint};
+    use super::{build_system_prompt, parse_tool_calls, resolve_endpoint, AiContext, ToolResult};
+    use crate::tools::ToolDefinition;
+
+    fn empty_context() -> AiContext {
+        AiContext {
+            current_url: "https://example.com".to_string(),
+            page_title: "Example".to_string(),
+            tool_results: Vec::new(),
+            personal_memory: false,
+        }
+    }
+
+    fn assert_lists(prompt: &str, definition: &ToolDefinition) {
+        assert!(
+            prompt.contains(&format!(
+                "- {}: {}\n",
+                definition.name, definition.description
+            )),
+            "missing tool {}",
+            definition.name
+        );
+        for argument in &definition.arguments {
+            let required = if argument.required { " (required)" } else { "" };
+            assert!(
+                prompt.contains(&format!(
+                    "  - {}{required}: {}\n",
+                    argument.name, argument.description
+                )),
+                "missing argument {} of {}",
+                argument.name,
+                definition.name
+            );
+        }
+    }
 
     #[test]
-    fn parse_tool_calls_keeps_zero_argument_legacy_actions() {
+    fn system_prompt_is_driven_by_the_tool_registry() {
+        let prompt = build_system_prompt(&empty_context());
+        assert!(prompt.contains("ToolCall:"));
+        assert!(!prompt.contains("Action:"));
+        // The hand-maintained catalog is gone.
+        assert!(!prompt.contains("navigate(url)"));
+        assert!(!prompt.contains("Navigate to an HTTP(S) URL"));
+
+        let browser = crate::browser::default_tool_registry().definitions();
+        assert_eq!(browser.len(), 17);
+        for definition in &browser {
+            assert_lists(&prompt, definition);
+        }
+        for definition in crate::tools::memory_tools::definitions() {
+            assert!(
+                !prompt.contains(&definition.name),
+                "{} listed without personal memory",
+                definition.name
+            );
+        }
+
+        let with_memory = build_system_prompt(&AiContext {
+            personal_memory: true,
+            ..empty_context()
+        });
+        for definition in browser
+            .iter()
+            .chain(&crate::tools::memory_tools::definitions())
+        {
+            assert_lists(&with_memory, definition);
+        }
+    }
+
+    #[test]
+    fn failed_tool_results_reach_the_prompt_with_their_reason() {
+        let context = AiContext {
+            tool_results: vec![
+                ToolResult::success("get_text", "hello".to_string()),
+                // Shape the agent stores after a failed or invalid call.
+                ToolResult::error(
+                    "navigate",
+                    "Error: missing required argument(s): url".to_string(),
+                ),
+                // Shape a tool returns directly.
+                ToolResult::error("click", "no element matches '#go'".to_string()),
+            ],
+            ..empty_context()
+        };
+        let prompt = build_system_prompt(&context);
+        assert!(prompt.contains("- get_text: hello\n"), "{prompt}");
+        assert!(
+            prompt.contains("- navigate: Error: missing required argument(s): url\n"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("- click: Error: no element matches '#go'\n"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("Error: Error:"), "{prompt}");
+    }
+
+    #[test]
+    fn parse_tool_calls_keeps_calls_with_missing_required_arguments() {
+        // The agent reports these to the model. Dropping them would end the run.
+        let calls = parse_tool_calls(r#"ToolCall: {"name":"navigate","arguments":{}}"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "navigate");
+        assert!(calls[0].arguments.is_empty());
+
+        let calls = parse_tool_calls(r#"ToolCall: {"name":"navigate","arguments":{"url":"   "}}"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].arguments.get("url").map(String::as_str),
+            Some("   ")
+        );
+
+        // An omitted or null `arguments` object is an empty one.
+        for line in [
+            r#"ToolCall: {"name":"navigate"}"#,
+            r#"ToolCall: {"name":"navigate","arguments":null}"#,
+        ] {
+            let calls = parse_tool_calls(line);
+            assert_eq!(calls.len(), 1, "{line}");
+            assert_eq!(calls[0].name, "navigate");
+            assert!(calls[0].arguments.is_empty(), "{line}");
+        }
+    }
+
+    #[test]
+    fn parse_tool_calls_keeps_registered_zero_argument_legacy_actions() {
         for name in [
             "wait",
             "inspect_active_page",
@@ -378,6 +526,10 @@ mod tests {
         assert!(
             parse_tool_calls("Action: ()").is_empty(),
             "an empty tool name is not a call"
+        );
+        assert!(
+            parse_tool_calls("Action: unknown_tool()").is_empty(),
+            "an unknown empty-argument tool should not become a call"
         );
     }
 

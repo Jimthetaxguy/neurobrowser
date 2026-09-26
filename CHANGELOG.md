@@ -6,6 +6,31 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ## Unreleased — maintenance through 2026-09-14
 
+### Changed
+
+- The system prompt's tool list is generated from each tool's
+  `ToolDefinition` (memory tools only when attached) instead of a
+  hand-maintained list.
+- Anthropic user turns carry only the prompt. Tool results reach the model
+  once, through the system prompt.
+- Ollama builds its endpoint with the shared `base_url` helper, like OpenAI and
+  Anthropic. A trailing slash is trimmed and a blank value falls back to the
+  default.
+- Tool calls that omit a required argument (absent or `""`) no longer run.
+  Before this change they ran with empty defaults or reached the approval gate.
+  The agent now records `Error: missing required argument(s): …` and returns it
+  to the model. That turn does not complete the run. A `ToolCall` with no
+  `arguments` object is read as an empty one and checked the same way. So is
+  a legacy `Action:` call to a known tool with empty parentheses: `navigate()`
+  is reported, and `wait()` now runs instead of being dropped. A legacy line
+  must end with `)`. A truncated `back(` or `navigate(https://ex` is dropped;
+  before, it ran.
+- The prompt shows each failed tool result with its message, not a bare
+  `Error`.
+- `BrowserTool::definition()` is required. Before, a tool that did not
+  override it defaulted to `Read` risk, which `Assisted` allows without
+  approval. The registry keys each tool by `definition().name`.
+
 ### Fixed
 
 - Removed the unused `futures` dependency from both library and desktop
@@ -30,6 +55,10 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ### Removed
 
+- `BrowserTool::name()` / `description()` (the strings live in
+  `definition()`) and `ToolRegistry`'s `Default` impl, which built an empty
+  registry. Use `ToolRegistry::new()` and `register`, or
+  `default_tool_registry()`.
 - Unread tool-result echo fields: `ToolResult.arguments` (kept raw `type`
   values after the result string was de-leaked), unused
   `ToolArgumentDefinition.sensitive`, and constant snapshot `selector` fields

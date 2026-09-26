@@ -31,12 +31,21 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     return value.trim().slice(0, max);
   };
 
+  // Shared definition of "this input's value is a secret" so the structured
+  // (attrsToObject/collectForms) and raw-HTML (serializeSanitizedHtml)
+  // redaction paths cannot drift apart.
+  const isSecretInputType = (type) => type === 'password' || type === 'hidden';
+
   const attrsToObject = (element) => {
     const attrs = {};
     if (!element || !element.attributes) {
       return attrs;
     }
+    const type = ((element.getAttribute && element.getAttribute('type')) || '').toLowerCase();
     for (const attr of Array.from(element.attributes)) {
+      if (isSecretInputType(type) && attr.name.toLowerCase() === 'value') {
+        continue;
+      }
       attrs[attr.name] = attr.value;
     }
     return attrs;
@@ -58,12 +67,17 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       selector: 'form',
       inputs: Array.from(form.querySelectorAll('input, textarea, select, button'))
         .slice(0, 80)
-        .map((input) => ({
-          name: input.getAttribute('name') || '',
-          input_type: input.getAttribute('type') || input.tagName.toLowerCase(),
-          selector: input.tagName.toLowerCase(),
-          value: typeof input.value === 'string' ? limitText(input.value, 200) : null
-        }))
+        .map((input) => {
+          const inputType = (input.getAttribute('type') || input.tagName.toLowerCase()).toLowerCase();
+          return {
+            name: input.getAttribute('name') || '',
+            input_type: input.getAttribute('type') || input.tagName.toLowerCase(),
+            selector: input.tagName.toLowerCase(),
+            value: isSecretInputType(inputType)
+              ? null
+              : (typeof input.value === 'string' ? limitText(input.value, 200) : null)
+          };
+        })
     }));
 
   const collectTables = () =>
@@ -74,6 +88,174 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       ).filter((row) => row.length > 0),
       selector: 'table'
     }));
+
+  // HTML void elements: the HTML fragment serialization algorithm gives
+  // these no end tag and no children, regardless of what the DOM holds.
+  const VOID_ELEMENTS = new Set([
+    'area', 'base', 'basefont', 'bgsound', 'br', 'col', 'embed', 'frame',
+    'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source',
+    'track', 'wbr'
+  ]);
+
+  // Elements whose text children the serialization algorithm emits
+  // verbatim (unescaped), matching outerHTML. `noscript` is spec-listed
+  // too, but is handled separately below — its content is dropped
+  // entirely rather than classified as raw-or-escaped — so it does not
+  // need an entry here; see the `tag === 'noscript'` branch for why.
+  const RAW_TEXT_PARENTS = new Set([
+    'style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext'
+  ]);
+
+  const ESCAPES = { '&': '&amp;', '\u00a0': '&nbsp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+  const escapeChar = (ch) => ESCAPES[ch];
+  // Text nodes: & < > nbsp. Attribute values: & " nbsp, but not < or > —
+  // this engine's own outerHTML leaves those two literal in attributes.
+  const escapeText = (data) => String(data).replace(/[&\u00a0<>]/g, escapeChar);
+  const escapeAttrValue = (data) => String(data).replace(/[&\u00a0"]/g, escapeChar);
+
+  const isSecretInput = (element) => {
+    if (element.localName !== 'input') {
+      return false;
+    }
+    const type = ((element.getAttribute && element.getAttribute('type')) || '').toLowerCase();
+    return isSecretInputType(type);
+  };
+
+  // Serializes `root` for the HTML snapshot without leaking credentials or
+  // running page code: a hand-written, read-only walk of the *live* tree,
+  // built from scratch rather than parsing a string or cloning a node.
+  //
+  // Three rounds of "parse or clone a copy, then mutate it" each turned up
+  // a new gap: `root.cloneNode(true)` re-invokes custom element
+  // constructors (real side effects — network calls, thrown exceptions —
+  // from a mere snapshot request); `DOMParser.parseFromString` is a
+  // TrustedHTML sink, so it throws outright on a page whose CSP sets
+  // `require-trusted-types-for 'script'` without a default policy; and
+  // `iframe[srcdoc]` is an opaque attribute string that both of those
+  // leave untouched, since it is not part of the descendant tree
+  // `querySelectorAll` or cloning ever reaches. A read-only serializer
+  // has none of these problems by construction: it never feeds a string
+  // into HTML (no DOMParser / innerHTML / createContextualFragment /
+  // document.write — nothing a Trusted Types policy can object to, and
+  // nothing that would need its own recursive sanitization pass for
+  // srcdoc) and never clones, imports, or otherwise constructs a node (no
+  // custom element reactions), because it only ever *reads* an element's
+  // existing attributes and children and appends to a string.
+  //
+  // `iframe[srcdoc]` is omitted outright rather than sanitized: doing the
+  // latter would mean parsing that srcdoc string into HTML, the exact
+  // TrustedHTML sink this function exists to avoid. That is a fail-closed
+  // choice — the frame's markup (and any secret inside it) is dropped
+  // entirely instead of risked.
+  //
+  // The walk uses an explicit stack instead of recursion so a very deep
+  // page cannot overflow the call stack, and stops once the output has
+  // already passed `max` characters, since limitText truncates to `max`
+  // anyway — the stopping point yields the same prefix limitText would
+  // keep from a full, untruncated serialization.
+  const serializeSanitizedHtml = (root, max) => {
+    if (!root) {
+      return null;
+    }
+
+    const parts = [];
+    let length = 0;
+    const emit = (str) => {
+      parts.push(str);
+      length += str.length;
+    };
+
+    // Each stack frame is either a node still to be visited (`open`) or an
+    // end tag to emit once that node's children are done (`close`); that
+    // pairing is what lets one iterative loop reproduce the same
+    // open-tag / children / end-tag order a recursive walk would produce.
+    const stack = [{ open: root }];
+
+    while (stack.length > 0 && length < max) {
+      const frame = stack.pop();
+
+      if (frame.close) {
+        emit(`</${frame.close}>`);
+        continue;
+      }
+
+      const node = frame.open;
+      switch (node.nodeType) {
+        case 1: { // Element
+          const tag = node.localName;
+          const secretInput = isSecretInput(node);
+          const isIframe = tag === 'iframe';
+
+          let open = `<${tag}`;
+          for (const attr of Array.from(node.attributes)) {
+            if (secretInput && attr.name === 'value') {
+              continue; // password/hidden value — see isSecretInputType
+            }
+            if (isIframe && attr.name === 'srcdoc') {
+              continue; // opaque HTML string; omitted, see comment above
+            }
+            open += ` ${attr.name}="${escapeAttrValue(attr.value)}"`;
+          }
+          open += '>';
+          emit(open);
+
+          if (VOID_ELEMENTS.has(tag)) {
+            continue;
+          }
+
+          stack.push({ close: tag });
+
+          if (tag === 'noscript') {
+            // Fail closed instead of trusting this engine's parse shape.
+            // WKWebView/WebView2 run with scripting enabled, and their
+            // HTML parser stores noscript's content as ONE raw text node
+            // holding the literal source markup — the same way script's
+            // content is stored. Treating that text node as ordinary
+            // text (escaping it) does not redact it: escaping only
+            // changes how <, >, & display, so a credential's own
+            // characters survive untouched inside the escaped string.
+            // jsdom instead parses noscript's markup into real child
+            // elements, which is a different shape again. Rather than
+            // classify which shape a given engine produced and redact
+            // within it, drop noscript's content outright: the target
+            // runtimes always run JS, so noscript content never renders
+            // in them either way, and dropping it costs nothing. Its own
+            // attributes are unaffected — only children are skipped.
+            continue;
+          }
+
+          // A <template>'s children live in its own inert `content`
+          // DocumentFragment, not in its own childNodes. Substituting
+          // that fragment's children here, uniformly at every depth, is
+          // what makes templates nested inside templates fall out for
+          // free — no separate recursive helper needed.
+          const kids = tag === 'template' && node.content ? node.content.childNodes : node.childNodes;
+          for (let i = kids.length - 1; i >= 0; i -= 1) {
+            stack.push({ open: kids[i] });
+          }
+          continue;
+        }
+        case 3: { // Text
+          const parent = node.parentElement;
+          const raw = parent && RAW_TEXT_PARENTS.has(parent.localName);
+          emit(raw ? node.data : escapeText(node.data));
+          continue;
+        }
+        case 8: // Comment
+          emit(`<!--${node.data}-->`);
+          continue;
+        case 7: // ProcessingInstruction
+          emit(`<?${node.target} ${node.data}?>`);
+          continue;
+        default:
+          // Other node types (e.g. a doctype) do not occur as descendants
+          // of an element root; nothing to serialize.
+          continue;
+      }
+    }
+
+    return limitText(parts.join(''), max);
+  };
 
   const runtime = {
     dispatch(pageId, requestId, producer) {
@@ -109,7 +291,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       return {
         url: window.location.href,
         title: document.title || '',
-        html: root ? limitText(root.outerHTML || '', 250000) : null,
+        html: serializeSanitizedHtml(root, 250000),
         text: document.body ? limitText(document.body.innerText || document.body.textContent || '', 50000) : null,
         viewport_width: window.innerWidth || 0,
         viewport_height: window.innerHeight || 0,

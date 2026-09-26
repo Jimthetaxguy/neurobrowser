@@ -53,10 +53,16 @@ Arguments are `HashMap<String, String>`. Results are `ToolResult`
 (`tool_name`, `result`, `success`).
 
 `ToolDefinition` exposes `name`, `description`, `arguments`, and `risk`.
+Every `BrowserTool` must implement `definition()`; there is no default risk.
+The registry keys each tool by `definition().name`.
 `ToolRisk` contains the action category plus the `sensitive` and
 `externally_visible` flags; both flags default to `false`. There is no
 risk-level or tool-version field. The catalog below names each action and
 identifies the two tools that set a flag.
+
+The system prompt's tool list is rendered from these definitions: name,
+description, and each argument with a `(required)` flag. The two memory tools
+are listed only when `AiContext::personal_memory` is set.
 
 On `BrowserEngine`, click / type / submit / scroll / keypress fail with an
 honest static-engine error (no live DOM). `back` / `forward` / `reload` /
@@ -153,7 +159,7 @@ Action: `Read`. Same registration as `search_personal_memory`.
 
 ## Headless JSON-RPC
 
-`src-tauri/src/bin/headless.rs` (`--features headless`). Newline-delimited
+`src-tauri/src/headless_bin/main.rs` (`--features headless`). Newline-delimited
 `{id, method, params}` → `{id, ok, result|error}`.
 
 | Method | What it does |
@@ -205,6 +211,14 @@ Tauri: `get_action_policy` / `set_action_policy`. Daemon: `policy.get` /
 ## Error shape
 
 Crate tools return `ToolResult { success: false, result: "<message>" }`.
+The next system prompt lists each failure as `- <tool>: Error: <message>`.
+
+A model call to a registered tool that omits a required argument (or sets it
+to `""`) is not dropped and does not run. `ReActAgent` emits
+`ToolCallResult { success: false }` with
+`Error: missing required argument(s): <names>` and the model sees it on the
+next turn. Whitespace counts as a value; the tool decides whether it is valid.
+
 Daemon errors:
 
 ```json

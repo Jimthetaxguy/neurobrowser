@@ -35,15 +35,9 @@ impl ToolResult {
 
 #[async_trait]
 pub trait BrowserTool: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            self.description(),
-            ToolRisk::new(ToolAction::Read),
-        )
-    }
+    /// Required: a new tool that forgets this is a compile error, not a
+    /// silent Read-risk allow under Assisted.
+    fn definition(&self) -> ToolDefinition;
     async fn execute(
         &self,
         args: HashMap<String, String>,
@@ -161,6 +155,10 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Empty map. No `Default` impl: that constructor silently evaluated as
+    /// “no tools.” Callers must `register` after `new()`, or use
+    /// `default_tool_registry()`.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
@@ -168,7 +166,7 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, tool: Arc<dyn BrowserTool>) {
-        self.tools.insert(tool.name().to_string(), tool);
+        self.tools.insert(tool.definition().name, tool);
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BrowserTool>> {
@@ -182,10 +180,11 @@ impl ToolRegistry {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
-}
 
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
+    /// Every registered tool's definition, sorted by name.
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions: Vec<_> = self.tools.values().map(|tool| tool.definition()).collect();
+        definitions.sort_by(|left, right| left.name.cmp(&right.name));
+        definitions
     }
 }

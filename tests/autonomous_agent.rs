@@ -218,6 +218,167 @@ impl AiProvider for RecordingProvider {
     }
 }
 
+/// A provider that records every `AiContext` it is handed.
+struct ContextRecordingProvider {
+    responses: Mutex<VecDeque<AiResponse>>,
+    contexts: Arc<Mutex<Vec<AiContext>>>,
+}
+
+#[async_trait]
+impl AiProvider for ContextRecordingProvider {
+    async fn complete(&self, _prompt: &str, context: &AiContext) -> ProviderResult<AiResponse> {
+        self.contexts.lock().unwrap().push(context.clone());
+        Ok(self
+            .responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("context recording provider response"))
+    }
+    fn provider_name(&self) -> &str {
+        "context-recording"
+    }
+}
+
+/// Run two turns of `invalid`, a `navigate` call without its required `url`,
+/// and check that the run fails closed and the model is told why.
+async fn assert_missing_url_reaches_model(invalid: &str) {
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(ContextRecordingProvider {
+        responses: Mutex::new(
+            vec![real_shaped_response(invalid), real_shaped_response(invalid)].into(),
+        ),
+        contexts: contexts.clone(),
+    });
+    let browser = MutBrowser::new("https://before.example");
+    let config = AgentConfig {
+        max_iterations: 2,
+        ..AgentConfig::default()
+    };
+    let agent = neurobrowser::ReActAgent::new(config, provider);
+
+    let run = agent
+        .execute_with_policy("open the page", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    assert_ne!(run.status, AgentRunStatus::Completed);
+    assert_eq!(run.status, AgentRunStatus::Failed);
+    assert_eq!(
+        run.final_response.as_deref(),
+        Some("Max iterations reached")
+    );
+    assert!(!run
+        .events
+        .iter()
+        .any(|event| matches!(event, AgentRunEvent::RunDone { .. })));
+
+    // Fail closed: the call is reported, never started, and never navigates.
+    assert!(!run
+        .events
+        .iter()
+        .any(|event| matches!(event, AgentRunEvent::ToolCallStarted { .. })));
+    let failures: Vec<&str> = run
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            AgentRunEvent::ToolCallResult {
+                tool,
+                result,
+                success: false,
+                ..
+            } if tool == "navigate" => Some(result.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failures,
+        vec!["Error: missing required argument(s): url"; 2],
+        "{:?}",
+        run.events
+    );
+    assert_eq!(
+        browser.snapshot().await.unwrap().url,
+        "https://before.example"
+    );
+
+    // The model's next turn carries the failure and the reason.
+    let contexts = contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 2, "the model must be asked again");
+    let feedback = &contexts[1];
+    assert!(
+        feedback
+            .tool_results
+            .iter()
+            .any(|result| result.tool_name == "navigate" && !result.success),
+        "{:?}",
+        feedback.tool_results
+    );
+    let prompt = neurobrowser::providers::build_system_prompt(feedback);
+    assert!(
+        prompt.contains("- navigate: Error: missing required argument(s): url\n"),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn invalid_tool_call_reports_error_to_model_instead_of_completing() {
+    // `navigate` is a real tool, but this call omits its required `url`.
+    // Before the fix the parser dropped it, `tool_calls` came back empty, and
+    // the run reported Completed with the raw tool-call text.
+    assert_missing_url_reaches_model(r#"ToolCall: {"name":"navigate","arguments":{}}"#).await;
+}
+
+#[tokio::test]
+async fn argument_less_legacy_call_reports_error_to_model_instead_of_completing() {
+    // Same guarantee for the legacy syntax: `navigate()` has no arguments.
+    assert_missing_url_reaches_model("Action: navigate()").await;
+}
+
+#[tokio::test]
+async fn argument_less_legacy_wait_passes_policy_and_runs() {
+    // `wait` has no required arguments, so `wait()` is a complete call.
+    assert!(neurobrowser::default_tool_registry()
+        .get("wait")
+        .expect("wait is registered")
+        .definition()
+        .arguments
+        .iter()
+        .all(|argument| !argument.required));
+    let browser = TestBrowser::new("https://form.example", "ready");
+    let provider = Arc::new(FakeProvider::new(vec![
+        real_shaped_response("Action: wait()"),
+        real_shaped_response("Final Answer: ready"),
+    ]));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+
+    let run = agent
+        .execute_with_policy("wait for the page", &browser, &ActionPolicy::default())
+        .await
+        .unwrap();
+
+    // `ToolCallStarted` is emitted only after the policy allows the call.
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, AgentRunEvent::ToolCallStarted { tool, .. } if tool == "wait")
+        ),
+        "{:?}",
+        run.events
+    );
+    assert!(
+        run.events.iter().any(|event| matches!(
+            event,
+            AgentRunEvent::ToolCallResult { tool, result, success: true, .. }
+                if tool == "wait" && result == "Page is ready"
+        )),
+        "{:?}",
+        run.events
+    );
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(run.final_response.as_deref(), Some("ready"));
+    assert_eq!(run.iterations, 2);
+}
+
 #[tokio::test]
 async fn post_navigation_url_reaches_model_next_iteration() {
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -395,6 +556,50 @@ async fn zero_arg_action_wait_reaches_the_tool_path() {
         ),
         "parsed Action: wait() must dispatch"
     );
+}
+
+#[test]
+fn parses_argument_less_legacy_calls_to_known_tools() {
+    // Kept so the agent can run `wait()` and report `navigate()`.
+    let calls = neurobrowser::providers::parse_tool_calls("Action: navigate()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "navigate");
+    assert!(calls[0].arguments.is_empty());
+
+    let calls = neurobrowser::providers::parse_tool_calls("Action: wait()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "wait");
+    assert!(calls[0].arguments.is_empty());
+
+    // Memory tools are known names too; the agent decides if they are attached.
+    let calls = neurobrowser::providers::parse_tool_calls("Action: inspect_active_page()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "inspect_active_page");
+
+    // An unknown name still needs arguments to count as a call.
+    assert!(neurobrowser::providers::parse_tool_calls("Action: frobnicate()").is_empty());
+}
+
+#[test]
+fn drops_truncated_legacy_calls() {
+    // A legacy call must end with `)`. Without it the model output was cut
+    // off, so nothing runs, even for a tool that needs no arguments.
+    for truncated in [
+        "Action: back(",
+        "Action: reload(",
+        "Action: navigate(https://ex",
+        "Action: type(#q, hel",
+    ] {
+        assert!(
+            neurobrowser::providers::parse_tool_calls(truncated).is_empty(),
+            "{truncated}"
+        );
+    }
+
+    let calls = neurobrowser::providers::parse_tool_calls("Action: back()");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "back");
+    assert!(calls[0].arguments.is_empty());
 }
 
 #[test]
