@@ -96,11 +96,12 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
     }
 
     /// Bundled control `file://` under the control directory.
-    /// The unbuilt-bundle `loadHTMLString` fallback has no locked directory and a nil or non-file URL; that load is allowed.
+    /// The unbuilt-bundle `loadHTMLString` fallback has no locked directory and uses a nil URL or `about:blank`.
     /// Page http(s) and any other navigation that leaves the control directory stay out of this privileged webview.
     private static func allowsControlFileNavigation(_ url: URL?, under allowedDirectory: URL?) -> Bool {
         guard let allowedDirectory else {
-            return url == nil || url?.isFileURL == false
+            guard let url else { return true }
+            return url.absoluteString == "about:blank"
         }
         guard let url, url.isFileURL else { return false }
         let filePath = url.resolvingSymlinksInPath().path
