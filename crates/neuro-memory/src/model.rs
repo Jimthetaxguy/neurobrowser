@@ -20,10 +20,6 @@ pub fn now_millis() -> u64 {
 /// Failure from [`crate::MemoryService`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MemoryError {
-    /// Scaffold stub. `task` names the milestone that replaces it.
-    #[error("{task} is not implemented")]
-    NotImplemented { task: &'static str },
-
     /// [`crate::CapturePolicy`] refused this page. The store and index are unchanged.
     #[error("capture denied: {reason}")]
     Denied { reason: String },
@@ -91,8 +87,6 @@ pub struct SearchResult {
     pub text: String,
     pub score: f32,
     pub captured_at: u64,
-    /// Score breakdown and matched snippets. Empty until explain runs (M1.6).
-    pub explain: Option<SearchExplain>,
 }
 
 /// Why a hit scored the way it did.

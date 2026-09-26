@@ -1053,7 +1053,6 @@ dependencies = [
 name = "neuro-memory"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "scraper",
  "serde",
  "serde_json",

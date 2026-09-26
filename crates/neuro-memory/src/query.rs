@@ -48,10 +48,9 @@ pub enum QueryError {
 
 /// Hits for `request`, highest score first.
 ///
-/// Only committed blocks are visible. Each hit leaves [`SearchResult::explain`]
-/// empty; call [`explain`] for the breakdown and snippets. `limit == 0` or a
-/// blank query returns no hits. A query that Tantivy rejects is
-/// [`QueryError::Parse`].
+/// Only committed blocks are visible. Call [`explain`] for the breakdown and
+/// snippets. `limit == 0` or a blank query returns no hits. A query that
+/// Tantivy rejects is [`QueryError::Parse`].
 pub fn search(
     index: &BlockIndex,
     request: &SearchRequest,
@@ -73,7 +72,6 @@ pub fn search(
             text: block.text,
             score,
             captured_at: block.captured_at,
-            explain: None,
         });
     }
     Ok(results)

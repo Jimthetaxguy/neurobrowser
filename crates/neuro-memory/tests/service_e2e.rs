@@ -76,7 +76,6 @@ async fn capture_search_forget_removes_the_page_and_tombstones_the_domain() {
         .expect("blocks for captured url");
     assert_eq!(blocks.len(), 1, "{blocks:?}");
     assert!(blocks[0].text.contains("zephyrquartz"), "{blocks:?}");
-    assert!(hits[0].explain.is_none());
 
     let explained = service.explain(&query, &hits[0]).await.expect("explain");
     assert!(

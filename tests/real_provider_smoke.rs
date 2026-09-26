@@ -52,7 +52,6 @@ async fn anthropic_real_call_smoke() {
         .await
         .expect("real Anthropic API call failed");
 
-    println!("[anthropic] provider_name={}", provider.provider_name());
     println!("[anthropic] response_content={:?}", response.content);
     assert!(
         !response.content.trim().is_empty(),
@@ -81,7 +80,6 @@ async fn openai_real_call_smoke() {
         .await
         .expect("real OpenAI API call failed");
 
-    println!("[openai] provider_name={}", provider.provider_name());
     println!("[openai] response_content={:?}", response.content);
     assert!(
         !response.content.trim().is_empty(),
