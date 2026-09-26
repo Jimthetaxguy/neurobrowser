@@ -33,13 +33,3 @@ The headless policy protocol does not construct either browser runtime.
 comes from the OS webview).
 
 **Repo:** https://github.com/wilsonzlin/fastrender
-
-## Real systems
-
-Integrations use real backing systems:
-- **OpenAI** (API key via env)
-- **Anthropic** (API key via env)
-- **Ollama** (local daemon)
-- **Tauri child webview** (macOS WKWebView)
-
-No mock browser page on product paths.
