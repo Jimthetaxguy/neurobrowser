@@ -129,9 +129,15 @@ fn provider_config_for(provider_type: ProviderType) -> ProviderConfig {
             api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
             base_url: None,
             model: std::env::var("ANTHROPIC_MODEL")
-                .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string()),
+                .unwrap_or_else(|_| "claude-sonnet-5".to_string()),
             max_tokens: Some(4096),
-            temperature: Some(0.3),
+            // Current Claude models (including the default above) reject an
+            // explicit `temperature` with a 400 ("temperature is deprecated
+            // for this model"). Leave unset by default; `build_request_body`
+            // only sends the field when it is `Some`, so a caller who points
+            // ANTHROPIC_MODEL at an older model that still accepts it can
+            // opt back in without a code change here.
+            temperature: None,
         },
         ProviderType::Ollama => ProviderConfig {
             provider_type: ProviderType::Ollama,

@@ -2,6 +2,11 @@
 name = "neurobrowser-tauri"
 version = "0.1.0"
 edition = "2021"
+# Without this, `tauri-cli` (and the macOS bundler, which scans `src/bin/*.rs`
+# and ignores `required-features`) picks the first bin in cargo-metadata
+# order — which can be `neurobrowser-headless` — and bundles/launches that
+# instead of the Tauri app.
+default-run = "neurobrowser-tauri"
 
 [features]
 default = []
@@ -14,7 +19,7 @@ devtools = ["tauri/devtools"]
 
 [[bin]]
 name = "neurobrowser-headless"
-path = "src/bin/headless.rs"
+path = "src/headless_bin/main.rs"
 required-features = ["headless"]
 
 [dependencies]
