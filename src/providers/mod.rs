@@ -502,6 +502,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_tool_calls_keeps_registered_zero_argument_legacy_actions() {
+        for name in [
+            "wait",
+            "inspect_active_page",
+            "get_links",
+            "get_prices",
+            "get_tables",
+            "screenshot",
+            "back",
+            "forward",
+            "reload",
+        ] {
+            let calls = parse_tool_calls(&format!("Action: {name}()"));
+            assert_eq!(calls.len(), 1, "{name} was dropped");
+            assert_eq!(calls[0].name, name);
+            assert!(
+                calls[0].arguments.is_empty(),
+                "{name} should keep an empty argument map"
+            );
+        }
+
+        assert!(
+            parse_tool_calls("Action: ()").is_empty(),
+            "an empty tool name is not a call"
+        );
+        assert!(
+            parse_tool_calls("Action: unknown_tool()").is_empty(),
+            "an unknown empty-argument tool should not become a call"
+        );
+    }
+
+    #[test]
     fn resolve_endpoint_uses_default_origin_when_unset() {
         assert_eq!(
             resolve_endpoint(None, "https://api.openai.com", "/v1/chat/completions"),
