@@ -5,7 +5,21 @@ protocol ReactControlSurfaceDelegate: AnyObject {
     func controlSurface(_ controlSurface: ReactControlSurfaceViewController, didReceiveCommand command: String, payload: [String: Any])
 }
 
-final class ReactControlSurfaceViewController: NSViewController, WKScriptMessageHandler {
+/// `WKUserContentController` retains its script handler. Forwarding through a weak
+/// owner lets `deinit` reach `removeScriptMessageHandler`.
+private final class WeakScriptMessageForwarder: NSObject, WKScriptMessageHandler {
+    weak var handler: WKScriptMessageHandler?
+
+    init(handler: WKScriptMessageHandler) {
+        self.handler = handler
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        handler?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+final class ReactControlSurfaceViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
     weak var delegate: ReactControlSurfaceDelegate?
 
     private var webView: WKWebView!
@@ -13,13 +27,13 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
 
     override func loadView() {
         let configuration = WKWebViewConfiguration()
-        configuration.processPool = WKProcessPool()
         configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         let userContentController = WKUserContentController()
-        userContentController.add(self, name: "neurobrowser")
+        userContentController.add(WeakScriptMessageForwarder(handler: self), name: "neurobrowser")
         configuration.userContentController = userContentController
 
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
         self.view = webView
     }
@@ -81,9 +95,15 @@ final class ReactControlSurfaceViewController: NSViewController, WKScriptMessage
         decisionHandler(Self.allowsControlFileNavigation(navigationAction.request.url, under: allowedControlDirectory) ? .allow : .cancel)
     }
 
-    /// Bundled control `file://` only. Page http(s) and other schemes stay out of this privileged webview.
+    /// Bundled control `file://` under the control directory.
+    /// The unbuilt-bundle `loadHTMLString` fallback has no locked directory and uses a nil URL or `about:blank`.
+    /// Page http(s) and any other navigation that leaves the control directory stay out of this privileged webview.
     private static func allowsControlFileNavigation(_ url: URL?, under allowedDirectory: URL?) -> Bool {
-        guard let url, url.isFileURL, let allowedDirectory else { return false }
+        guard let allowedDirectory else {
+            guard let url else { return true }
+            return url.absoluteString == "about:blank"
+        }
+        guard let url, url.isFileURL else { return false }
         let filePath = url.resolvingSymlinksInPath().path
         let directoryPath = allowedDirectory.resolvingSymlinksInPath().path
         return filePath == directoryPath || filePath.hasPrefix(directoryPath + "/")
