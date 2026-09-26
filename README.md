@@ -12,7 +12,7 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 
 ## Tech Stack
 
-- **Two crates, no workspace:** `neurobrowser` (`src/`) and `neurobrowser-tauri` (`src-tauri/`)
+- **Three path crates, no workspace:** `neurobrowser` (`src/`), `neurobrowser-tauri` (`src-tauri/`), and `neuro-memory` (`crates/neuro-memory/`)
 - **Desktop (macOS only):** React + Vite shell, Tauri v2 commands, OS child webview per page
 - **Library:** Tokio, reqwest, `scraper` HTML parsing, serde, thiserror v2
 - **Headless protocol stub:** Tokio policy evaluation and a hardcoded snapshot
@@ -52,7 +52,7 @@ Shipped run/policy surface:
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned
   as a structured run event
-- default autonomy is Assisted: reads, snapshots, scrolling, and same-domain
+- default autonomy is Assisted: reads, scrolling, and same-domain
   navigation can run; typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
 - headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /

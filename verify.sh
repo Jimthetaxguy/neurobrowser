@@ -8,8 +8,10 @@ echo "→ cargo clippy..."
 cargo clippy --all-targets -- -D warnings
 echo "→ cargo test..."
 cargo test --all-targets
-echo "→ Tauri frontend build..."
-(cd src-tauri && npm ci && npm run build)
+echo "→ neuro-memory cargo test..."
+cargo test --manifest-path crates/neuro-memory/Cargo.toml
+echo "→ Tauri frontend tests and build..."
+(cd src-tauri && npm ci && npm test && npm run build)
 echo "→ Tauri cargo check..."
 cargo check --manifest-path src-tauri/Cargo.toml --locked
 echo "→ Headless check and tests..."

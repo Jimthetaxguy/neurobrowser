@@ -6,6 +6,11 @@ remain 0.1.0 until an actual version bump and release tag.
 
 ## Unreleased — maintenance through 2026-09-14
 
+### Added
+
+- Persistent personal memory (`neuro-memory`) and the memory IPC commands in
+  `tauri::generate_handler!`.
+
 ### Changed
 
 - The system prompt's tool list is generated from each tool's
@@ -68,7 +73,9 @@ remain 0.1.0 until an actual version bump and release tag.
   never shipped.
 - The unused Tauri shell plugin and unused IPC commands (`get_page_info`,
   `list_sessions`, `list_workers`, `get_worker`, `ask`). The command manifest and
-  generated permissions now cover the 18 actual commands.
+  generated permissions cover the 22 commands in `tauri::generate_handler!`.
+- Episodic LLM/tool-call records, request/tool/error metrics, and bounded
+  conversation history. Those 0.1.1 records are not in the shipped agent.
 - The redundant headless `policy.snapshot` method; `policy.get` reads policy.
 - Obsolete status dumps and misleading architectural claims. README, the agent
   surface, ADR-001, and the skill describe the maintained boundaries.

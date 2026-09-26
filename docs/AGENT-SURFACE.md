@@ -167,7 +167,7 @@ Action: `Read`. Same registration as `search_personal_memory`.
 | `ping` | `{ "pong": true }` |
 | `policy.get` | Current `ActionPolicy` |
 | `policy.set` | Replace `ActionPolicy` |
-| `policy.evaluate` | Gate a tool name + args (no execution) |
+| `policy.evaluate` | Gate a tool name + args (no execution). Unknown names, including memory tools absent from the 17-tool risk catalog, fall back to `Destructive` |
 | `snapshot` | Hardcoded `about:blank` stub — not a crate `PageSnapshot` |
 
 Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
