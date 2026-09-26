@@ -76,7 +76,7 @@ Integration tests live in `tests/`:
 
 ## Tauri IPC
 
-The desktop app exposes 22 commands (`tauri::generate_handler!` in
+The desktop app exposes 20 commands (`tauri::generate_handler!` in
 `src-tauri/src/main.rs`). From the React frontend:
 
 ```javascript

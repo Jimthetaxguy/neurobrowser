@@ -207,12 +207,6 @@
           "markdownDescription": "Enables the cancel_agent_run command without any pre-configured scope."
         },
         {
-          "description": "Enables the capture_page command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-capture-page",
-          "markdownDescription": "Enables the capture_page command without any pre-configured scope."
-        },
-        {
           "description": "Enables the close_page command without any pre-configured scope.",
           "type": "string",
           "const": "allow-close-page",
@@ -247,12 +241,6 @@
           "type": "string",
           "const": "allow-get-action-policy",
           "markdownDescription": "Enables the get_action_policy command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the get_memory_stats command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-memory-stats",
-          "markdownDescription": "Enables the get_memory_stats command without any pre-configured scope."
         },
         {
           "description": "Enables the get_page_snapshot command without any pre-configured scope.",
@@ -339,12 +327,6 @@
           "markdownDescription": "Denies the cancel_agent_run command without any pre-configured scope."
         },
         {
-          "description": "Denies the capture_page command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-capture-page",
-          "markdownDescription": "Denies the capture_page command without any pre-configured scope."
-        },
-        {
           "description": "Denies the close_page command without any pre-configured scope.",
           "type": "string",
           "const": "deny-close-page",
@@ -379,12 +361,6 @@
           "type": "string",
           "const": "deny-get-action-policy",
           "markdownDescription": "Denies the get_action_policy command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the get_memory_stats command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-memory-stats",
-          "markdownDescription": "Denies the get_memory_stats command without any pre-configured scope."
         },
         {
           "description": "Denies the get_page_snapshot command without any pre-configured scope.",
