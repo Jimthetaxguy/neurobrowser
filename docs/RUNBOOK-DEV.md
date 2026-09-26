@@ -69,7 +69,7 @@ Integration tests live in `tests/`:
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
 - `agent_memory_metrics.rs` — memory + metrics.
-- Headless argument and policy tests live in `src-tauri/src/bin/headless.rs`
+- Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
   and run explicitly with the `headless` feature.
 
 ## Tauri IPC
@@ -125,7 +125,7 @@ commands (including provider changes and approval submission).
 | `OPENAI_API_KEY` | `set_provider("openai")` | (none — required) |
 | `OPENAI_MODEL` | `set_provider("openai")` | `gpt-4o` |
 | `ANTHROPIC_API_KEY` | `set_provider("anthropic")` | (none — required) |
-| `ANTHROPIC_MODEL` | `set_provider("anthropic")` | `claude-3-5-sonnet-latest` |
+| `ANTHROPIC_MODEL` | `set_provider("anthropic")` | `claude-sonnet-5` |
 | `OLLAMA_BASE_URL` | `set_provider("ollama")` | `http://localhost:11434` |
 | `OLLAMA_MODEL` | `set_provider("ollama")` | `llama3.2` |
 | `CUSTOM_PROVIDER_API_KEY` | `set_provider("custom")` | falls back to `OPENAI_API_KEY` |
