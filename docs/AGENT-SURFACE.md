@@ -159,7 +159,7 @@ Action: `Read`. Same registration as `search_personal_memory`.
 
 ## Headless JSON-RPC
 
-`src-tauri/src/bin/headless.rs` (`--features headless`). Newline-delimited
+`src-tauri/src/headless_bin/main.rs` (`--features headless`). Newline-delimited
 `{id, method, params}` → `{id, ok, result|error}`.
 
 | Method | What it does |
