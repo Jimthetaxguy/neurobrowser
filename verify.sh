@@ -14,6 +14,8 @@ echo "→ Tauri frontend tests and build..."
 (cd src-tauri && npm ci && npm test && npm run build)
 echo "→ Tauri cargo check..."
 cargo check --manifest-path src-tauri/Cargo.toml --locked
+echo "→ Tauri binary tests..."
+cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri
 echo "→ Headless check and tests..."
 cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
 cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
