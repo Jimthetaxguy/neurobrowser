@@ -138,8 +138,6 @@ commands (including provider changes and approval submission).
 | `RUST_LOG` | desktop tracing (`src-tauri/src/main.rs`) | `neurobrowser=info` |
 | `RUST_LOG` | headless tracing | `neurobrowser=info,headless=info` |
 
-Local keys go in a gitignored `.env`.
-
 ## Where things live
 
 | Layer | Path |
