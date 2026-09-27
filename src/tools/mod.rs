@@ -141,7 +141,6 @@ pub struct FormInputInfo {
 pub struct PriceInfo {
     pub value: String,
     pub currency: String,
-    pub context: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
