@@ -145,7 +145,7 @@ the Tauri runtime overrides it.
 | Level | Auto-allow | Gate |
 |---|---|---|
 | `ReadOnly` | Read, wait, scroll | Other actions, including navigate, `Block` |
-| `Assisted` (default) | Read, wait, scroll, same-domain navigate | otherwise `RequireApproval` |
+| `Assisted` (default) | Read, wait, scroll, navigate that is not cross-domain; a hostless current page (`about:blank`, empty URL) is not cross-domain | otherwise `RequireApproval` |
 | `HighAutonomy` | Remaining non-high-impact actions | Submit / purchase / auth / upload / message / destructive → `RequireApproval` |
 
 The mode table applies after the common gates below. Sensitive inputs and
@@ -160,7 +160,7 @@ Same order as `ActionPolicy::evaluate`; first match wins:
 1. `denied_tools` → `Block`.
 2. Prompt-injection on the page → `Block`.
 3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
-4. `denied_domains` / non-empty `allowed_domains` → `Block`.
+4. Block a resolved host that is on `denied_domains`, or that misses a non-empty allowlist. A rule matches that host or a subdomain (`example.com` matches `a.example.com`). If no host is resolved, this gate is skipped.
 5. Sensitive keys or sensitive tool metadata → `RequireApproval`.
 6. `approval_required_tools` → `RequireApproval`.
 7. Mode table.
