@@ -65,7 +65,6 @@ impl Default for PageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageState {
     pub url: String,
-    pub title: String,
     pub html: String,
     pub text: String,
     pub scroll_x: f32,
@@ -76,7 +75,6 @@ pub struct PageState {
 }
 
 pub struct BrowserEngine {
-    config: PageConfig,
     state: Mutex<PageState>,
     http_client: reqwest::Client,
 }
@@ -103,7 +101,6 @@ impl BrowserEngine {
         Self {
             state: Mutex::new(PageState {
                 url: String::new(),
-                title: String::new(),
                 html: String::new(),
                 text: String::new(),
                 scroll_x: 0.0,
@@ -113,7 +110,6 @@ impl BrowserEngine {
                 interactive_ready: false,
             }),
             http_client,
-            config,
         }
     }
 }
@@ -145,24 +141,9 @@ impl BrowserInterface for BrowserEngine {
             format!("Failed to read response: {}", e)
         })?;
 
-        let snapshot = snapshot_from_html(
-            url,
-            &html,
-            self.config.viewport_width,
-            self.config.viewport_height,
-            false,
-        );
-
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.url = snapshot.url.clone();
-        state.title = snapshot.title.clone();
+        state.url = url.to_string();
         state.html = html;
-        state.text = snapshot.text.clone().unwrap_or_default();
-        state.scroll_x = snapshot.scroll_x;
-        state.scroll_y = snapshot.scroll_y;
-        state.viewport_width = snapshot.viewport_width;
-        state.viewport_height = snapshot.viewport_height;
-        state.interactive_ready = snapshot.interactive_ready;
 
         tracing::info!("Navigated to: {}", url);
         Ok(())
@@ -220,7 +201,6 @@ impl BrowserInterface for BrowserEngine {
             state.viewport_height,
             state.interactive_ready,
         );
-        snapshot.title = state.title;
         snapshot.scroll_x = state.scroll_x;
         snapshot.scroll_y = state.scroll_y;
         Ok(snapshot)
