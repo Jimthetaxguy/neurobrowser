@@ -141,6 +141,8 @@ pub struct FormInputInfo {
 pub struct PriceInfo {
     pub value: String,
     pub currency: String,
+    /// Nearby page text around the detected price.
+    pub context: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

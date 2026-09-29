@@ -416,9 +416,24 @@ fn extract_prices(source_text: &str) -> Vec<PriceInfo> {
     get_price_regex()
         .find_iter(source_text)
         .take(50)
-        .map(|price_match| PriceInfo {
-            value: price_match.as_str().to_string(),
-            currency: "USD".to_string(),
+        .map(|price_match| {
+            let context_start = source_text[..price_match.start()]
+                .char_indices()
+                .rev()
+                .nth(31)
+                .map(|(index, _)| index)
+                .unwrap_or(0);
+            let context_end = source_text[price_match.end()..]
+                .char_indices()
+                .nth(31)
+                .map(|(index, character)| price_match.end() + index + character.len_utf8())
+                .unwrap_or(source_text.len());
+
+            PriceInfo {
+                value: price_match.as_str().to_string(),
+                currency: "USD".to_string(),
+                context: limit_text(&source_text[context_start..context_end], 80),
+            }
         })
         .collect()
 }
@@ -989,6 +1004,23 @@ mod tests {
 
         assert_eq!(snapshot.prices.len(), 1);
         assert_eq!(snapshot.prices[0].value, "$42.50");
+    }
+
+    #[test]
+    fn price_context_preserves_serialized_field_and_unicode_boundaries() {
+        let side = format!("{}é", "a".repeat(31));
+        let text = format!("{side}$2{side}");
+        let mut snapshot = PageSnapshot {
+            text: Some(text),
+            ..PageSnapshot::default()
+        };
+
+        enrich_snapshot(&mut snapshot);
+
+        assert_eq!(snapshot.prices[0].value, "$2");
+        assert!(snapshot.prices[0].context.contains("$2"));
+        let serialized = serde_json::to_value(&snapshot.prices[0]).expect("serialize price");
+        assert!(serialized.get("context").is_some());
     }
 
     #[test]
