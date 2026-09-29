@@ -200,7 +200,7 @@ Sensitive tool metadata does not redact unrelated keys such as plain `text`.
 1. `denied_tools` → `Block`.
 2. Prompt-injection on the page → `Block`.
 3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
-4. Block a resolved host that is on `denied_domains`, or that misses a non-empty allowlist. A rule matches that host or a subdomain (`example.com` matches `a.example.com`). If no host is resolved, this gate is skipped.
+4. If the URL has a parsed host, block it when it appears in `denied_domains` or misses a non-empty allowlist. A rule matches that host or its subdomains (`example.com` matches `a.example.com`). If the URL has no parsed host, skip this gate.
 5. Sensitive argument keys or sensitive tool metadata → `RequireApproval`.
 6. `approval_required_tools` → `RequireApproval`.
 7. Mode table.
