@@ -1,6 +1,6 @@
 # neurobrowser
 
-**v0.1.1** — AI-native desktop browser: Rust library + Tauri/React shell.
+AI-native desktop browser: Rust library + Tauri/React shell.
 The desktop drives a real OS webview through `ActionPolicy`-gated tools.
 The Rust library also supplies an HTTP scraper. The headless daemon is a
 policy JSON-RPC protocol stub: its `about:blank` snapshot is hardcoded and
@@ -22,7 +22,7 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 
 ```bash
 cargo build                # Library crate (neurobrowser)
-cargo test                 # Unit + integration tests
+cargo test                 # root library tests
 cargo clippy --all-targets # Lint
 cargo check --manifest-path src-tauri/Cargo.toml # Desktop crate type-check
 cargo build --release      # Library release (LTO + strip + abort)
@@ -52,8 +52,9 @@ Shipped run/policy surface:
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned
   as a structured run event
-- default autonomy is Assisted: reads, scrolling, and same-domain
-  navigation can run; typing, form submission, high-impact actions, denylisted
+- default autonomy is Assisted: reads, scrolling, and navigate that is not
+  cross-domain can run; a hostless current page (`about:blank`, empty URL) is
+  not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
 - headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /
   `snapshot`

@@ -32,10 +32,6 @@ impl SessionManager {
     }
 
     pub fn create_page(&self, session_id: &str) -> Result<PageHandle, String> {
-        // Allocate the page id *before* taking the sessions lock. Acquiring
-        // page_counter while holding sessions would deadlock if any other
-        // call path acquires sessions first and then page_counter (e.g. a
-        // future parallel-create helper or a test).
         let page_id = {
             let mut counter = self.page_counter.lock().unwrap();
             let id = *counter;

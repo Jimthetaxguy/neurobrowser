@@ -63,18 +63,13 @@ impl Default for PageConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PageState {
+struct PageState {
     pub url: String,
     pub html: String,
-    pub text: String,
-    pub scroll_x: f32,
-    pub scroll_y: f32,
-    pub viewport_width: u32,
-    pub viewport_height: u32,
-    pub interactive_ready: bool,
 }
 
 pub struct BrowserEngine {
+    config: PageConfig,
     state: Mutex<PageState>,
     http_client: reqwest::Client,
 }
@@ -99,15 +94,10 @@ impl BrowserEngine {
             .expect("failed to create HTTP client");
 
         Self {
+            config,
             state: Mutex::new(PageState {
                 url: String::new(),
                 html: String::new(),
-                text: String::new(),
-                scroll_x: 0.0,
-                scroll_y: 0.0,
-                viewport_width: config.viewport_width,
-                viewport_height: config.viewport_height,
-                interactive_ready: false,
             }),
             http_client,
         }
@@ -194,15 +184,13 @@ impl BrowserInterface for BrowserEngine {
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
         let state = self.state.lock().map_err(|e| e.to_string())?.clone();
-        let mut snapshot = snapshot_from_html(
+        let snapshot = snapshot_from_html(
             &state.url,
             &state.html,
-            state.viewport_width,
-            state.viewport_height,
-            state.interactive_ready,
+            self.config.viewport_width,
+            self.config.viewport_height,
+            false,
         );
-        snapshot.scroll_x = state.scroll_x;
-        snapshot.scroll_y = state.scroll_y;
         Ok(snapshot)
     }
 }
@@ -417,12 +405,22 @@ fn extract_prices(source_text: &str) -> Vec<PriceInfo> {
         .find_iter(source_text)
         .take(50)
         .map(|price_match| {
-            let start = price_match.start().saturating_sub(32);
-            let end = (price_match.end() + 32).min(source_text.len());
+            let context_start = source_text[..price_match.start()]
+                .char_indices()
+                .rev()
+                .nth(31)
+                .map(|(index, _)| index)
+                .unwrap_or(0);
+            let context_end = source_text[price_match.end()..]
+                .char_indices()
+                .nth(31)
+                .map(|(index, character)| price_match.end() + index + character.len_utf8())
+                .unwrap_or(source_text.len());
+
             PriceInfo {
                 value: price_match.as_str().to_string(),
                 currency: "USD".to_string(),
-                context: limit_text(&source_text[start..end], 80),
+                context: limit_text(&source_text[context_start..context_end], 80),
             }
         })
         .collect()
@@ -744,10 +742,6 @@ impl BrowserTool for TypeTool {
         let selector = args.get("selector").cloned().unwrap_or_default();
         let text = args.get("text").cloned().unwrap_or_default();
         match browser.type_text(&selector, &text).await {
-            // Never echo the raw typed value back into the result string,
-            // since it flows unredacted into ToolCallResult, result_preview,
-            // and stored session context. Report a length-based confirmation
-            // instead.
             Ok(()) => crate::tools::ToolResult::success(
                 "type",
                 format!("Typed {} characters successfully", text.chars().count()),
@@ -998,6 +992,23 @@ mod tests {
 
         assert_eq!(snapshot.prices.len(), 1);
         assert_eq!(snapshot.prices[0].value, "$42.50");
+    }
+
+    #[test]
+    fn price_context_preserves_serialized_field_and_unicode_boundaries() {
+        let side = format!("{}é", "a".repeat(31));
+        let text = format!("{side}$2{side}");
+        let mut snapshot = PageSnapshot {
+            text: Some(text),
+            ..PageSnapshot::default()
+        };
+
+        enrich_snapshot(&mut snapshot);
+
+        assert_eq!(snapshot.prices[0].value, "$2");
+        assert!(snapshot.prices[0].context.contains("$2"));
+        let serialized = serde_json::to_value(&snapshot.prices[0]).expect("serialize price");
+        assert!(serialized.get("context").is_some());
     }
 
     #[test]
