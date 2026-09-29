@@ -48,7 +48,6 @@ pub struct AiContext {
 #[async_trait]
 pub trait AiProvider: Send + Sync {
     async fn complete(&self, prompt: &str, context: &AiContext) -> ProviderResult<AiResponse>;
-    fn provider_name(&self) -> &str;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,7 +63,7 @@ impl Default for PageConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PageState {
+struct PageState {
     pub url: String,
     pub title: String,
     pub html: String,
