@@ -566,6 +566,7 @@ export default function App({ adapter, lane }) {
   }, [adapter, compact, setActivePageId]);
 
   useEffect(() => {
+    if (typeof adapter.onHostEvent !== "function") return undefined;
     const unsubscribe = adapter.onHostEvent((event) => {
       if (!event) return;
       if (compact) {
@@ -576,8 +577,6 @@ export default function App({ adapter, lane }) {
           if ("url" in updates) setUrl(updates.url);
         }
         if (updates.snapshot) updateSnapshot(event.pageId, updates.snapshot);
-      } else if (event.type === "snapshot" && event.pageId === currentPageIdRef.current) {
-        updateSnapshot(event.pageId, event.snapshot);
       }
       if (event.type === "status") {
         setStatus(event.message);

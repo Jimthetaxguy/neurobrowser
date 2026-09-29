@@ -573,23 +573,6 @@ fn captured_page_from_snapshot(snapshot: PageSnapshot) -> Result<CapturedPage, S
     })
 }
 
-fn stored_page_count(data_dir: &std::path::Path) -> Result<usize, String> {
-    let pages_dir = data_dir.join("pages");
-    let entries = match std::fs::read_dir(&pages_dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(err) => return Err(format!("{}: {err}", pages_dir.display())),
-    };
-    let mut count = 0usize;
-    for entry in entries {
-        let entry = entry.map_err(|err| format!("{}: {err}", pages_dir.display()))?;
-        if entry.path().extension().is_some_and(|ext| ext == "json") {
-            count += 1;
-        }
-    }
-    Ok(count)
-}
-
 /// Store `snapshot` when [`CapturePolicy::evaluate`] allows its URL.
 ///
 /// The policy lock is held across the write so a concurrent [`forget_memory`]
@@ -634,29 +617,6 @@ fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
         .join("memory");
     MemoryService::open(&data_dir)
         .map(Arc::new)
-        .map_err(|err| err.to_string())
-}
-
-#[derive(Serialize)]
-struct MemoryStats {
-    page_count: usize,
-    data_dir: String,
-    capture_enabled: bool,
-    allowed_domains: Vec<String>,
-    denied_domains: Vec<String>,
-}
-
-#[tauri::command]
-async fn capture_page(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    page_id: usize,
-) -> Result<(), String> {
-    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    let snapshot = browser.snapshot().await?;
-    capture_snapshot(state.inner(), snapshot)
-        .await
         .map_err(|err| err.to_string())
 }
 
@@ -706,18 +666,6 @@ async fn forget_memory(state: State<'_, AppState>, page_url: String) -> Result<(
         .forget(&page_url, &mut policy)
         .await
         .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-async fn get_memory_stats(state: State<'_, AppState>) -> Result<MemoryStats, String> {
-    let policy = state.capture_policy.lock().await.clone();
-    Ok(MemoryStats {
-        page_count: stored_page_count(state.memory.data_dir())?,
-        data_dir: state.memory.data_dir().display().to_string(),
-        capture_enabled: policy.enabled,
-        allowed_domains: policy.allowed_domains,
-        denied_domains: policy.denied_domains,
-    })
 }
 
 #[tauri::command]
@@ -779,14 +727,12 @@ fn main() {
             browser_reload,
             browser_runtime_report,
             cancel_agent_run,
-            capture_page,
             close_page,
             create_page,
             create_session,
             explain_memory_result,
             forget_memory,
             get_action_policy,
-            get_memory_stats,
             get_page_snapshot,
             navigate,
             search_local_memory,
