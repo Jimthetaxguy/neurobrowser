@@ -102,8 +102,4 @@ impl AiProvider for OpenAiProvider {
             tool_calls,
         })
     }
-
-    fn provider_name(&self) -> &str {
-        "openai"
-    }
 }
