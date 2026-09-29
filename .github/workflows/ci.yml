@@ -72,6 +72,9 @@ jobs:
       - name: cargo check tauri
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 
+      - name: cargo test tauri
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri
+
       - name: cargo check tauri (headless)
         run: cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
 

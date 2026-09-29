@@ -96,10 +96,6 @@ impl AiProvider for FakeProvider {
             .pop_front()
             .expect("fake provider response"))
     }
-
-    fn provider_name(&self) -> &str {
-        "fake"
-    }
 }
 
 fn response(content: &str, tool_calls: Vec<ToolCall>) -> AiResponse {
@@ -213,9 +209,6 @@ impl AiProvider for RecordingProvider {
             .pop_front()
             .expect("recording provider response"))
     }
-    fn provider_name(&self) -> &str {
-        "recording"
-    }
 }
 
 /// A provider that records every `AiContext` it is handed.
@@ -234,9 +227,6 @@ impl AiProvider for ContextRecordingProvider {
             .unwrap()
             .pop_front()
             .expect("context recording provider response"))
-    }
-    fn provider_name(&self) -> &str {
-        "context-recording"
     }
 }
 
