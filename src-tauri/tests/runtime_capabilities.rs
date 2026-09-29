@@ -40,13 +40,18 @@ fn page_webviews_never_inherit_control_commands() {
     let authority = context.runtime_authority_mut();
     let manifests: serde_json::Value =
         serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json")).unwrap();
-    let permissions = manifests["__app-acl__"]["permissions"].as_object().unwrap();
-    let commands: Vec<_> = permissions
-        .values()
-        .flat_map(|p| p["commands"]["allow"].as_array().unwrap())
-        .map(|c| c.as_str().unwrap())
-        .filter(|c| *c != "browser_runtime_report")
-        .collect();
+    let main_capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+    let permissions = main_capability["permissions"].as_array().unwrap();
+    let mut commands = Vec::new();
+    for permission in permissions {
+        let permission = permission.as_str().unwrap();
+        let allowed = manifests["__app-acl__"]["permissions"][permission]["commands"]["allow"]
+            .as_array()
+            .unwrap();
+        commands.extend(allowed.iter().map(|command| command.as_str().unwrap()));
+    }
+    commands.retain(|command| *command != "browser_runtime_report");
     assert!(commands.contains(&"submit_approval"));
     assert!(commands.contains(&"set_provider"));
     for command in commands {
