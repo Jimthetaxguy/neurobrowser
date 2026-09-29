@@ -121,10 +121,6 @@ impl AiProvider for AnthropicProvider {
             tool_calls,
         })
     }
-
-    fn provider_name(&self) -> &str {
-        "anthropic"
-    }
 }
 
 #[cfg(test)]

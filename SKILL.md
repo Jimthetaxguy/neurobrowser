@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 19 tools (17 CSS-selector browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
+description: Drive NeuroBrowser from a Rust agent via the crate's 19 tools (17 browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -15,7 +15,7 @@ drive it in two ways:
    `policy.evaluate`, and `snapshot`. `snapshot` is a hardcoded
    `about:blank` stub. The daemon does not execute browser tools.
 
-The shipped agent surface is **19 tools**. Seventeen are CSS-selector browser
+The shipped agent surface is **19 tools**. Seventeen are browser
 tools from `default_tool_registry()`. `search_personal_memory` and
 `inspect_active_page` are added by `default_tool_registry_with_memory()` and
 `ReActAgent::with_memory`. `ReActAgent::new` stays at the 17 browser tools.
@@ -164,6 +164,11 @@ Same order as `ActionPolicy::evaluate`; first match wins:
 5. Sensitive keys or sensitive tool metadata → `RequireApproval`.
 6. `approval_required_tools` → `RequireApproval`.
 7. Mode table.
+
+Headless `policy.evaluate` builds an empty `PageSnapshot` (no URL, HTML, or
+text) before calling evaluate, so prompt-injection cannot fire,
+`is_cross_domain` is false with no host, and non-navigate tools never get a
+domain; allow/deny lists still apply to `navigate` via the argument URL.
 
 Credential tokens (`password`, `token`, `secret`, `api_key`, `authorization`,
 and related) are `[REDACTED]` in the decision. `type` is marked sensitive;
