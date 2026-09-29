@@ -71,9 +71,6 @@ export function createTauriHostAdapter() {
     async setProvider(provider) {
       return invoke("set_provider", { provider });
     },
-    async capturePage(sessionId, pageId) {
-      return invoke("capture_page", { sessionId, pageId });
-    },
     async searchLocalMemory(query, limit = 8) {
       return invoke("search_local_memory", { query, limit });
     },
@@ -82,12 +79,6 @@ export function createTauriHostAdapter() {
     },
     async forgetMemory(pageUrl) {
       return invoke("forget_memory", { pageUrl });
-    },
-    async getMemoryStats() {
-      return invoke("get_memory_stats");
-    },
-    onHostEvent() {
-      return () => {};
     },
   };
 }
@@ -132,7 +123,6 @@ export function createAppKitHostAdapter() {
     async setActivePage(activeSessionId, pageId) {
       await send("set_active_page", { sessionId: activeSessionId, pageId });
     },
-    async syncBrowserViewport() {},
     async navigate(activeSessionId, pageId, url) {
       await send("navigate", { sessionId: activeSessionId, pageId, url });
     },
@@ -141,23 +131,6 @@ export function createAppKitHostAdapter() {
     },
     async browserAction(command, activeSessionId, pageId) {
       await send(command, { sessionId: activeSessionId, pageId });
-    },
-    async capturePage() {},
-    async searchLocalMemory() {
-      return [];
-    },
-    async explainMemoryResult() {
-      return { breakdown: [], snippets: [] };
-    },
-    async forgetMemory() {},
-    async getMemoryStats() {
-      return {
-        page_count: 0,
-        data_dir: "",
-        capture_enabled: false,
-        allowed_domains: [],
-        denied_domains: [],
-      };
     },
     onHostEvent(callback) {
       const handler = (event) => {
