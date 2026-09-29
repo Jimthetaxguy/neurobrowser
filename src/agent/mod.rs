@@ -26,7 +26,7 @@ impl Default for AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentState {
+struct AgentState {
     pub current_url: String,
     pub page_title: String,
     pub tool_results: Vec<ToolResult>,
