@@ -652,8 +652,7 @@ impl BrowserInterface for TauriBrowserRuntime {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.click({selector_json})"))
             .await?;
-        let _ = self.wait_for_navigation().await;
-        Ok(())
+        self.wait_for_navigation().await
     }
 
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
@@ -667,8 +666,7 @@ impl BrowserInterface for TauriBrowserRuntime {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.submitForm({selector_json})"))
             .await?;
-        let _ = self.wait_for_navigation().await;
-        Ok(())
+        self.wait_for_navigation().await
     }
 
     async fn scroll_to(&self, selector: &str) -> Result<(), String> {
@@ -686,8 +684,7 @@ impl BrowserInterface for TauriBrowserRuntime {
         let key_json = serde_json::to_string(key).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.keypress({key_json})"))
             .await?;
-        let _ = self.wait_for_navigation().await;
-        Ok(())
+        self.wait_for_navigation().await
     }
 
     async fn browser_back(&self) -> Result<(), String> {
@@ -707,8 +704,7 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn browser_reload(&self) -> Result<(), String> {
         self.registry.set_loading(self.page_id, true);
         self.webview()?.reload().map_err(|e| e.to_string())?;
-        let _ = self.wait_for_navigation().await;
-        Ok(())
+        self.wait_for_navigation().await
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {

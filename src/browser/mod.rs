@@ -453,10 +453,7 @@ impl BrowserTool for NavigateTool {
     ) -> crate::tools::ToolResult {
         let url = args.get("url").cloned().unwrap_or_default();
         match browser.navigate(&url).await {
-            Ok(()) => {
-                let _ = browser.wait_for_navigation().await;
-                crate::tools::ToolResult::success("navigate", format!("Navigated to {url}"))
-            }
+            Ok(()) => crate::tools::ToolResult::success("navigate", format!("Navigated to {url}")),
             Err(error) => crate::tools::ToolResult::error("navigate", error),
         }
     }
