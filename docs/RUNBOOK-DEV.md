@@ -28,9 +28,10 @@ This is the verification chain in `verify.sh`:
 4. `cargo test --manifest-path crates/neuro-memory/Cargo.toml`
 5. `cd src-tauri && npm ci && npm test && npm run build`
 6. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
-7. Locked headless check and binary tests with `--features headless`
-8. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
-9. `cargo build --release` (library crate)
+7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri`
+8. Locked headless check and binary tests with `--features headless`
+9. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
+10. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
