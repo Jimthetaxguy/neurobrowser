@@ -65,13 +65,10 @@ class ContentViewController: NSViewController {
         
         tabBar = NSSegmentedControl()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
-        tabBar.segmentCount = 1
-        tabBar.setLabel("+", forSegment: 0)
-        tabBar.setWidth(100, forSegment: 0)
-        tabBar.selectedSegment = -1
         tabBar.target = self
         tabBar.action = #selector(tabBarChanged)
         tabBar.segmentStyle = .rounded
+        rebuildTabSegments()
         view.addSubview(tabBar)
         
         webViewContainer = NSView()
@@ -142,15 +139,8 @@ class ContentViewController: NSViewController {
             nextNativePageId -= 1
         }
         
-        let newIndex = webViews.count - 1
-        tabBar.segmentCount = webViews.count + 1
-        tabBar.setLabel("Tab \(newIndex + 1)", forSegment: newIndex)
-        tabBar.setWidth(80, forSegment: newIndex)
-        
-        tabBar.setLabel("+", forSegment: webViews.count)
-        
-        tabBar.selectedSegment = newIndex
-        currentTabIndex = newIndex
+        currentTabIndex = webViews.count - 1
+        rebuildTabSegments()
         
         webView.frame = webViewContainer.bounds
         webView.autoresizingMask = [.width, .height]
@@ -179,9 +169,7 @@ class ContentViewController: NSViewController {
             currentTabIndex = min(index, webViews.count - 1)
         }
 
-        tabBar.segmentCount = webViews.count + 1
-        tabBar.setLabel("+", forSegment: webViews.count)
-        tabBar.selectedSegment = currentTabIndex
+        rebuildTabSegments()
 
         showCurrentTab()
         updateNavigationButtons()
@@ -230,6 +218,29 @@ class ContentViewController: NSViewController {
             emitTabs()
             emitSnapshot()
         }
+    }
+
+    /// `NSSegmentedControl` removes segments from the end when `segmentCount`
+    /// shrinks, so incremental label edits leave the wrong title on a page.
+    /// Paint every segment from `pageIds` / `webViews`, with `+` last.
+    private func rebuildTabSegments() {
+        let pages = Array(zip(pageIds, webViews))
+        tabBar.segmentCount = pages.count + 1
+        for (index, (_, webView)) in pages.enumerated() {
+            tabBar.setLabel(segmentLabel(for: webView, index: index), forSegment: index)
+            tabBar.setWidth(80, forSegment: index)
+        }
+        tabBar.setLabel("+", forSegment: pages.count)
+        tabBar.setWidth(pages.isEmpty ? 100 : 80, forSegment: pages.count)
+        tabBar.selectedSegment = pages.indices.contains(currentTabIndex) ? currentTabIndex : -1
+    }
+
+    private func segmentLabel(for webView: WKWebView, index: Int) -> String {
+        let title = webView.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty {
+            return title
+        }
+        return "Tab \(index + 1)"
     }
 
     private func emitTabs() {
@@ -380,6 +391,7 @@ extension ContentViewController: WKNavigationDelegate {
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         emitTabs()
+        rebuildTabSegments()
         guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         if let url = webView.url {
             urlBar.stringValue = url.absoluteString
