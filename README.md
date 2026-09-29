@@ -52,8 +52,9 @@ Shipped run/policy surface:
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned
   as a structured run event
-- default autonomy is Assisted: reads, scrolling, and same-domain
-  navigation can run; typing, form submission, high-impact actions, denylisted
+- default autonomy is Assisted: reads, scrolling, and navigate that is not
+  cross-domain can run; a hostless current page (`about:blank`, empty URL) is
+  not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
 - headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /
   `snapshot`

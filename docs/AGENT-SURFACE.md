@@ -179,7 +179,7 @@ Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 | Level | Auto-allow | Otherwise |
 |---|---|---|
 | `ReadOnly` | `Read`, `Wait`, `Scroll` | `Block`, including `Navigate` |
-| `Assisted` | `Read`, `Wait`, `Scroll`, same-domain `Navigate` | `RequireApproval` |
+| `Assisted` | `Read`, `Wait`, `Scroll`, `Navigate` that is not cross-domain; a hostless current page (`about:blank`, empty URL) is not cross-domain | `RequireApproval` |
 | `HighAutonomy` | remaining non-high-impact actions | submit / purchase / auth / upload / message / destructive require approval |
 
 This table applies only after the common gates. Denied tools/domains, off-list
@@ -200,7 +200,7 @@ Sensitive tool metadata does not redact unrelated keys such as plain `text`.
 1. `denied_tools` → `Block`.
 2. Prompt-injection on the page → `Block`.
 3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
-4. `denied_domains` / non-empty `allowed_domains` → `Block`.
+4. If the URL has a parsed host, block it when it appears in `denied_domains` or misses a non-empty allowlist. A rule matches that host or its subdomains (`example.com` matches `a.example.com`). If the URL has no parsed host, skip this gate.
 5. Sensitive argument keys or sensitive tool metadata → `RequireApproval`.
 6. `approval_required_tools` → `RequireApproval`.
 7. Mode table.
