@@ -79,8 +79,4 @@ impl AiProvider for OllamaProvider {
             tool_calls,
         })
     }
-
-    fn provider_name(&self) -> &str {
-        "ollama"
-    }
 }

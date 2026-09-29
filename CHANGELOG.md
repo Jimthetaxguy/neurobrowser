@@ -1,10 +1,10 @@
 # Changelog
 
 All notable changes to NeuroBrowser are recorded here. Dates are UTC.
-The 0.1.1 heading is a documentation/release label; both Rust package versions
-remain 0.1.0 until an actual version bump and release tag.
+The 0.1.1 heading is a documentation/release label; the three Rust package
+versions remain 0.1.0 until an actual version bump and release tag.
 
-## Unreleased — maintenance through 2026-09-14
+## Unreleased — maintenance
 
 ### Added
 
@@ -57,6 +57,8 @@ remain 0.1.0 until an actual version bump and release tag.
   navigate or run history commands on another tab. Background tab updates preserve
   URL edits, and native selection/snapshot bursts use the new active page.
 - Frontend dependency lockfile updated within the existing package constraints.
+- The release bundle picks `neurobrowser-tauri`. The Anthropic default sends no
+  `temperature`.
 
 ### Removed
 

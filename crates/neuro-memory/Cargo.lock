@@ -748,7 +748,6 @@ checksum = "2195bf6aa996a481483b29d62a7663eed3fe39600c460e323f8ff41e90bdd89b"
 name = "neuro-memory"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "scraper",
  "serde",
  "serde_json",

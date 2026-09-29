@@ -64,7 +64,6 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     Array.from(document.querySelectorAll('form')).slice(0, 40).map((form) => ({
       action: form.getAttribute('action') || '',
       method: form.getAttribute('method') || 'get',
-      selector: 'form',
       inputs: Array.from(form.querySelectorAll('input, textarea, select, button'))
         .slice(0, 80)
         .map((input) => {
@@ -72,7 +71,6 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
           return {
             name: input.getAttribute('name') || '',
             input_type: input.getAttribute('type') || input.tagName.toLowerCase(),
-            selector: input.tagName.toLowerCase(),
             value: isSecretInputType(inputType)
               ? null
               : (typeof input.value === 'string' ? limitText(input.value, 200) : null)
@@ -85,8 +83,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       headers: Array.from(table.querySelectorAll('th')).slice(0, 32).map((cell) => limitText(cell.innerText || cell.textContent || '', 120)),
       rows: Array.from(table.querySelectorAll('tr')).slice(0, 64).map((row) =>
         Array.from(row.querySelectorAll('td')).slice(0, 24).map((cell) => limitText(cell.innerText || cell.textContent || '', 120))
-      ).filter((row) => row.length > 0),
-      selector: 'table'
+      ).filter((row) => row.length > 0)
     }));
 
   // HTML void elements: the HTML fragment serialization algorithm gives
@@ -300,8 +297,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         interactive_ready: document.readyState === 'interactive' || document.readyState === 'complete',
         links: Array.from(document.querySelectorAll('a[href]')).slice(0, 200).map((link) => ({
           href: link.href || '',
-          text: limitText(link.innerText || link.textContent || '', 160),
-          selector: 'a[href]'
+          text: limitText(link.innerText || link.textContent || '', 160)
         })),
         images: Array.from(document.querySelectorAll('img')).slice(0, 200).map((image) => ({
           src: image.currentSrc || image.src || '',

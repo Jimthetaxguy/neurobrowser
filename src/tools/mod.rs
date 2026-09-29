@@ -141,6 +141,7 @@ pub struct FormInputInfo {
 pub struct PriceInfo {
     pub value: String,
     pub currency: String,
+    /// Nearby page text around the detected price.
     pub context: String,
 }
 
@@ -173,12 +174,9 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.tools.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
     }
 
     /// Every registered tool's definition, sorted by name.

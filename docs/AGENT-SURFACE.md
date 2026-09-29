@@ -167,7 +167,7 @@ Action: `Read`. Same registration as `search_personal_memory`.
 | `ping` | `{ "pong": true }` |
 | `policy.get` | Current `ActionPolicy` |
 | `policy.set` | Replace `ActionPolicy` |
-| `policy.evaluate` | Gate a tool name + args (no execution). Unknown names, including memory tools absent from the 17-tool risk catalog, fall back to `Destructive` |
+| `policy.evaluate` | Gate a tool name + args (no execution). Unknown names, including memory tools absent from the 17-tool risk catalog, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
 | `snapshot` | Hardcoded `about:blank` stub — not a crate `PageSnapshot` |
 
 Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
