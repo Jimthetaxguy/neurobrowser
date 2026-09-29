@@ -65,7 +65,6 @@ impl Default for PageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PageState {
     pub url: String,
-    pub title: String,
     pub html: String,
 }
 
@@ -95,13 +94,12 @@ impl BrowserEngine {
             .expect("failed to create HTTP client");
 
         Self {
+            config,
             state: Mutex::new(PageState {
                 url: String::new(),
-                title: String::new(),
                 html: String::new(),
             }),
             http_client,
-            config,
         }
     }
 }
@@ -133,17 +131,8 @@ impl BrowserInterface for BrowserEngine {
             format!("Failed to read response: {}", e)
         })?;
 
-        let snapshot = snapshot_from_html(
-            url,
-            &html,
-            self.config.viewport_width,
-            self.config.viewport_height,
-            false,
-        );
-
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.url = snapshot.url.clone();
-        state.title = snapshot.title.clone();
+        state.url = url.to_string();
         state.html = html;
 
         tracing::info!("Navigated to: {}", url);
@@ -195,14 +184,13 @@ impl BrowserInterface for BrowserEngine {
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
         let state = self.state.lock().map_err(|e| e.to_string())?.clone();
-        let mut snapshot = snapshot_from_html(
+        let snapshot = snapshot_from_html(
             &state.url,
             &state.html,
             self.config.viewport_width,
             self.config.viewport_height,
             false,
         );
-        snapshot.title = state.title;
         Ok(snapshot)
     }
 }
