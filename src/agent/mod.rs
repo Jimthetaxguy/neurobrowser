@@ -30,7 +30,6 @@ struct AgentState {
     pub current_url: String,
     pub page_title: String,
     pub tool_results: Vec<ToolResult>,
-    pub iterations: usize,
 }
 
 pub struct ReActAgent {
@@ -76,7 +75,6 @@ impl ReActAgent {
                 current_url: String::new(),
                 page_title: String::new(),
                 tool_results: Vec::new(),
-                iterations: 0,
             }),
             personal_memory,
         }
@@ -106,7 +104,6 @@ impl ReActAgent {
             let mut state = self.state.lock().map_err(|e| e.to_string())?;
             state.current_url = page_info.url.clone();
             state.page_title = page_info.title.clone();
-            state.iterations = 0;
             state.tool_results.clear();
         }
 
@@ -195,7 +192,6 @@ impl ReActAgent {
                             result,
                             success: false,
                         });
-                        state.iterations = iteration + 1;
                     }
                     continue;
                 }
@@ -313,7 +309,6 @@ impl ReActAgent {
                         state.current_url = snapshot.url;
                         state.page_title = snapshot.title;
                     }
-                    state.iterations = iteration + 1;
                 }
             }
         }
