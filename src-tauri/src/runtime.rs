@@ -563,7 +563,11 @@ impl TauriBrowserRuntime {
             .ok_or_else(|| format!("Webview '{}' not found", self.runtime_id))
     }
 
-    async fn request_json<T>(&self, script_expression: &str) -> Result<T, String>
+    async fn request_json<T>(
+        &self,
+        script_expression: &str,
+        action_request: bool,
+    ) -> Result<T, String>
     where
         T: DeserializeOwned,
     {
@@ -580,14 +584,17 @@ impl TauriBrowserRuntime {
         }
 
         let value = match tokio::time::timeout(REQUEST_TIMEOUT, receiver).await {
-            Ok(result) => {
-                result.map_err(|_| "Browser runtime response channel closed".to_string())??
-            }
+            Ok(result) => result.map_err(|_| {
+                missing_runtime_response("Browser runtime response channel closed", action_request)
+            })??,
             Err(_) => {
                 self.registry.cancel_request(&request_id);
-                return Err(format!(
-                    "Timed out waiting for browser runtime response for page {}",
-                    self.page_id
+                return Err(missing_runtime_response(
+                    &format!(
+                        "Timed out waiting for browser runtime response for page {}",
+                        self.page_id
+                    ),
+                    action_request,
                 ));
             }
         };
@@ -596,7 +603,7 @@ impl TauriBrowserRuntime {
     }
 
     async fn execute_action(&self, script_expression: &str) -> Result<(), String> {
-        let _: Value = self.request_json(script_expression).await?;
+        let _: Value = self.request_json(script_expression, true).await?;
         sleep(Duration::from_millis(120)).await;
         Ok(())
     }
@@ -621,6 +628,38 @@ impl TauriBrowserRuntime {
 /// as an error the agent can act on rather than an indefinite hang.
 const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
 
+fn missing_runtime_response(error: &str, action_request: bool) -> String {
+    if action_request {
+        format!(
+            "Action outcome is unknown: {error}. The action may have executed. \
+             Do not repeat it automatically; inspect the page before continuing."
+        )
+    } else {
+        error.to_string()
+    }
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::missing_runtime_response;
+
+    #[test]
+    fn missing_action_acknowledgment_warns_of_unknown_outcome() {
+        for error in [
+            "Timed out waiting for browser runtime response for page 1",
+            "Browser runtime response channel closed",
+        ] {
+            let message = missing_runtime_response(error, true);
+            assert!(message.contains("Action outcome is unknown"));
+            assert!(message.contains("may have executed"));
+            assert!(message.contains("Do not repeat it automatically"));
+            assert!(message.contains(error));
+            assert!(!message.contains("Action executed,"));
+            assert_eq!(missing_runtime_response(error, false), error);
+        }
+    }
+}
+
 #[async_trait]
 impl BrowserInterface for TauriBrowserRuntime {
     async fn navigate(&self, url: &str) -> Result<(), String> {
@@ -638,21 +677,20 @@ impl BrowserInterface for TauriBrowserRuntime {
 
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.request_json(&format!("runtime.querySelector({selector_json})"))
+        self.request_json(&format!("runtime.querySelector({selector_json})"), false)
             .await
     }
 
     async fn get_text(&self, selector: &str) -> Result<String, String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.request_json(&format!("runtime.getText({selector_json})"))
+        self.request_json(&format!("runtime.getText({selector_json})"), false)
             .await
     }
 
     async fn click(&self, selector: &str) -> Result<(), String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.click({selector_json})"))
-            .await?;
-        self.wait_for_navigation().await
+            .await
     }
 
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
@@ -665,8 +703,7 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn submit_form(&self, selector: &str) -> Result<(), String> {
         let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.submitForm({selector_json})"))
-            .await?;
-        self.wait_for_navigation().await
+            .await
     }
 
     async fn scroll_to(&self, selector: &str) -> Result<(), String> {
@@ -683,8 +720,7 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn keypress(&self, key: &str) -> Result<(), String> {
         let key_json = serde_json::to_string(key).map_err(|e| e.to_string())?;
         self.execute_action(&format!("runtime.keypress({key_json})"))
-            .await?;
-        self.wait_for_navigation().await
+            .await
     }
 
     async fn browser_back(&self) -> Result<(), String> {
@@ -703,12 +739,11 @@ impl BrowserInterface for TauriBrowserRuntime {
 
     async fn browser_reload(&self) -> Result<(), String> {
         self.registry.set_loading(self.page_id, true);
-        self.webview()?.reload().map_err(|e| e.to_string())?;
-        self.wait_for_navigation().await
+        self.webview()?.reload().map_err(|e| e.to_string())
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
-        let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()").await?;
+        let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()", false).await?;
         enrich_snapshot(&mut snapshot);
         Ok(snapshot)
     }
