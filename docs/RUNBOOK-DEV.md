@@ -35,6 +35,8 @@ This is the verification chain in `verify.sh`:
 
 Expected output ends with `=== All checks passed ===`.
 
+That line is the end of `verify.sh` only. A green CI run also requires the `guards` job, which rejects mock crates, conflict markers, and iCloud duplicate names.
+
 ## Desktop app
 
 ```bash

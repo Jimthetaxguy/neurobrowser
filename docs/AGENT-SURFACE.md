@@ -11,8 +11,9 @@ with this file.
 - CSS selectors (or pixels / a key). There is no `ref_map`
   (`PageSnapshot` has no such field).
 - Autonomy: `ReadOnly` / `Assisted` / `HighAutonomy` via `ActionPolicy`.
-- Headless JSON-RPC is `ping` / `policy.*` / `snapshot` (hardcoded stub), not
-  a live WKWebView session.
+- Headless JSON-RPC is `ping` / `policy.*` / `snapshot`. `snapshot` returns a
+  hardcoded stub (`url`, `title`, `viewport`, `tree: ""`), not a crate
+  `PageSnapshot` and not a live WKWebView session.
 
 Desktop is macOS WKWebView. The separate library `BrowserEngine` uses
 reqwest+scraper. The headless daemon does not construct either browser.
@@ -64,10 +65,10 @@ The system prompt's tool list is rendered from these definitions: name,
 description, and each argument with a `(required)` flag. The two memory tools
 are listed only when `AiContext::personal_memory` is set.
 
-On `BrowserEngine`, click / type / submit / scroll / keypress fail with an
-honest static-engine error (no live DOM). `back` / `forward` / `reload` /
-`screenshot` use the `BrowserInterface` defaults (error) unless a runtime
-overrides them. The Tauri runtime does not override `screenshot`.
+On `BrowserEngine`, click / type / submit / scroll fail with an
+honest static-engine error (no live DOM). `keypress` / `back` / `forward` /
+`reload` / `screenshot` use the `BrowserInterface` defaults (error) unless a
+runtime overrides them. The Tauri runtime does not override `screenshot`.
 
 ### 1. `navigate` — `url`
 
@@ -166,9 +167,9 @@ Action: `Read`. Same registration as `search_personal_memory`.
 |---|---|
 | `ping` | `{ "pong": true }` |
 | `policy.get` | Current `ActionPolicy` |
-| `policy.set` | Replace `ActionPolicy` |
-| `policy.evaluate` | Gate a tool name + args (no execution). Unknown names, including memory tools absent from the 17-tool risk catalog, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
-| `snapshot` | Hardcoded `about:blank` stub — not a crate `PageSnapshot` |
+| `policy.set` | Replace the stored policy by deserializing `params` as an `ActionPolicy` object |
+| `policy.evaluate` | Reads `params.tool` and `params.arguments`, then gates that call (no execution). Unknown names, including memory tools absent from the 17-tool risk catalog, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
+| `snapshot` | Ignores `params`. Hardcoded stub `{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }` — not a crate `PageSnapshot` |
 
 Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 
