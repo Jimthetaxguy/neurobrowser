@@ -453,10 +453,7 @@ impl BrowserTool for NavigateTool {
     ) -> crate::tools::ToolResult {
         let url = args.get("url").cloned().unwrap_or_default();
         match browser.navigate(&url).await {
-            Ok(()) => {
-                let _ = browser.wait_for_navigation().await;
-                crate::tools::ToolResult::success("navigate", format!("Navigated to {url}"))
-            }
+            Ok(()) => crate::tools::ToolResult::success("navigate", format!("Navigated to {url}")),
             Err(error) => crate::tools::ToolResult::error("navigate", error),
         }
     }
@@ -687,6 +684,28 @@ impl BrowserTool for GetTablesTool {
     }
 }
 
+// Clicks, submissions, keys, and reloads can have external effects when a
+// subsequent load times out. Keep execution success and readiness distinct
+// so the agent does not retry an action merely to recover from a slow page.
+async fn action_result_with_readiness(
+    tool_name: &str,
+    message: String,
+    action_result: Result<(), String>,
+    browser: &dyn BrowserInterface,
+) -> crate::tools::ToolResult {
+    if let Err(error) = action_result {
+        return crate::tools::ToolResult::error(tool_name, error);
+    }
+    let message = match browser.wait_for_navigation().await {
+        Ok(()) => message,
+        Err(error) => format!(
+            "{message}. Action executed, but page readiness is unconfirmed: {error}. \
+             Do not repeat the action automatically; use wait or inspect the page."
+        ),
+    };
+    crate::tools::ToolResult::success(tool_name, message)
+}
+
 struct ClickTool;
 
 #[async_trait]
@@ -709,12 +728,13 @@ impl BrowserTool for ClickTool {
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         let selector = args.get("selector").cloned().unwrap_or_default();
-        match browser.click(&selector).await {
-            Ok(()) => {
-                crate::tools::ToolResult::success("click", "Clicked successfully".to_string())
-            }
-            Err(error) => crate::tools::ToolResult::error("click", error),
-        }
+        action_result_with_readiness(
+            "click",
+            "Clicked successfully".to_string(),
+            browser.click(&selector).await,
+            browser,
+        )
+        .await
     }
 }
 
@@ -842,13 +862,13 @@ impl BrowserTool for SubmitFormTool {
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         let selector = args.get("selector").cloned().unwrap_or_default();
-        match browser.submit_form(&selector).await {
-            Ok(()) => crate::tools::ToolResult::success(
-                "submit_form",
-                "Form submitted successfully".to_string(),
-            ),
-            Err(error) => crate::tools::ToolResult::error("submit_form", error),
-        }
+        action_result_with_readiness(
+            "submit_form",
+            "Form submission dispatched".to_string(),
+            browser.submit_form(&selector).await,
+            browser,
+        )
+        .await
     }
 }
 
@@ -874,10 +894,13 @@ impl BrowserTool for KeypressTool {
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
         let key = args.get("key").cloned().unwrap_or_default();
-        match browser.keypress(&key).await {
-            Ok(()) => crate::tools::ToolResult::success("keypress", format!("Pressed {key}")),
-            Err(error) => crate::tools::ToolResult::error("keypress", error),
-        }
+        action_result_with_readiness(
+            "keypress",
+            format!("Pressed {key}"),
+            browser.keypress(&key).await,
+            browser,
+        )
+        .await
     }
 }
 
@@ -970,12 +993,19 @@ impl BrowserTool for ReloadTool {
         _args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
-        match browser.browser_reload().await {
-            Ok(()) => crate::tools::ToolResult::success("reload", "Reloaded page".to_string()),
-            Err(error) => crate::tools::ToolResult::error("reload", error),
-        }
+        action_result_with_readiness(
+            "reload",
+            "Reload dispatched".to_string(),
+            browser.browser_reload().await,
+            browser,
+        )
+        .await
     }
 }
+
+#[cfg(test)]
+#[path = "action_readiness.test.rs"]
+mod action_readiness_tests;
 
 #[cfg(test)]
 mod tests {
