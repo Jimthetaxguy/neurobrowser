@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { presentAgentRun } from "./agentRunPresentation.js";
+import { applyPresentedRun } from "./agentRunPresentation.js";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { nativePageUpdates } from "./nativePageEvents.js";
 
@@ -27,13 +27,6 @@ const EMPTY_COUNTS = {
 function messageText(error) {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-function applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus }) {
-  const presentation = presentAgentRun(result);
-  setPendingApproval(presentation.pendingApproval);
-  appendMessage("assistant", presentation.message);
-  setStatus(presentation.status);
 }
 
 function countValue(snapshot, key) {
@@ -445,8 +438,7 @@ export default function App({ adapter, lane }) {
       const result = await adapter.startAgentRun(sessionId, currentPageId, trimmed);
       const events = result.events || [];
       setActionEvents((items) => [...items, ...events]);
-      applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus });
-      await refreshSnapshot();
+      await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
     } catch (error) {
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
       setStatus("Agent request failed");
@@ -462,8 +454,7 @@ export default function App({ adapter, lane }) {
       try {
         const result = await adapter.submitApproval(pendingApproval.run_id, approved);
         setActionEvents((items) => [...items, ...(result.events || [])]);
-        applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus });
-        await refreshSnapshot();
+        await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
       } catch (error) {
         appendMessage("assistant", `Approval failed: ${messageText(error)}`);
         setStatus("Approval failed");

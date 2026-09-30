@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { presentAgentRun } from "./agentRunPresentation.js";
+import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 
 test("awaiting_approval keeps the run so a follow-up approval card can show", () => {
   const result = {
@@ -47,4 +47,54 @@ test("completed and failed are terminal and clear the card", () => {
   const empty = presentAgentRun({ status: "completed", final_response: null });
   assert.equal(empty.pendingApproval, null);
   assert.equal(empty.message, "");
+});
+
+for (const [runStatus, expectedStatus] of [
+  ["awaiting_approval", "Approval required"],
+  ["blocked", "Agent action blocked"],
+  ["cancelled", "Run cancelled"],
+  ["completed", "Ready"],
+  ["failed", "Ready"],
+]) {
+  for (const snapshotStatus of ["Loaded: Receipt", "Ready"]) {
+    test(`${runStatus} survives snapshot status ${snapshotStatus}`, async () => {
+      const result = { run_id: "next-run", status: runStatus, final_response: "Run response" };
+      let status = "Agent is working...";
+      let pendingApproval = { run_id: "previous-run" };
+      let refreshes = 0;
+      const messages = [];
+      await applyPresentedRun(result, {
+        appendMessage: (role, message) => messages.push({ role, message }),
+        setPendingApproval: (value) => { pendingApproval = value; },
+        setStatus: (value) => { status = value; },
+        refreshSnapshot: async () => {
+          refreshes += 1;
+          await Promise.resolve();
+          status = snapshotStatus;
+        },
+      });
+      assert.equal(status, expectedStatus);
+      assert.equal(pendingApproval, runStatus === "awaiting_approval" ? result : null);
+      assert.equal(refreshes, 1);
+      assert.deepEqual(messages, [{ role: "assistant", message: "Run response" }]);
+    });
+  }
+}
+
+test("a failed snapshot read preserves the completed action without another approval", async () => {
+  let pendingApproval = { run_id: "previous-run" };
+  let status = "Agent is working...";
+  const messages = [];
+  await applyPresentedRun({ status: "completed", final_response: "Form submission dispatched" }, {
+    appendMessage: (role, message) => messages.push({ role, message }),
+    setPendingApproval: (value) => { pendingApproval = value; },
+    setStatus: (value) => { status = value; },
+    refreshSnapshot: async () => { throw new Error("Browser runtime read timed out"); },
+  });
+  assert.equal(status, "Ready");
+  assert.equal(pendingApproval, null);
+  assert.deepEqual(messages, [
+    { role: "assistant", message: "Form submission dispatched" },
+    { role: "assistant", message: "Page refresh failed: Browser runtime read timed out" },
+  ]);
 });
