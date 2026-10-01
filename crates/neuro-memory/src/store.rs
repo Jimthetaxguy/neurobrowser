@@ -1,7 +1,7 @@
 //! Content-addressed JSON store for [`CapturedPage`] values.
 //!
 //! [`PageStore::open`] takes the memory data directory and writes one document
-//! per page at `{data_dir}/pages/{content_hash}.json`. [`content_hash`] is the
+//! per page at `{data_dir}/pages/{content_hash}.json`. `content_hash` is the
 //! lowercase SHA-256 hex of a compact JSON object with keys `url`, `title`,
 //! `html`, `text`, and `captured_at`, in that order. The `content_hash` field
 //! is not part of that body, so [`PageStore::put`] computes it and stores the
@@ -91,7 +91,7 @@ impl PageStore {
 
     /// Load the page named by `hash`.
     ///
-    /// `hash` is a [`content_hash`] value. Returns `Ok(None)` when no page is
+    /// `hash` is a `content_hash` value. Returns `Ok(None)` when no page is
     /// stored there. A stored page whose body or recorded hash does not match
     /// `hash` is [`StoreError::HashMismatch`].
     pub async fn get(&self, hash: &str) -> Result<Option<CapturedPage>, StoreError> {
