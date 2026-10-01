@@ -9,8 +9,7 @@
 //!
 //! A put writes a temporary file in `pages/` and renames it into place, so a
 //! reader never observes a half-written document. A get checks that the file
-//! still hashes to its name. Delete is idempotent. [`crate::MemoryService`]
-//! does not call this module yet (M1.7).
+//! still hashes to its name. Delete is idempotent.
 
 use crate::model::CapturedPage;
 use serde::Serialize;
@@ -19,6 +18,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
+use url::Url;
 
 const PAGES_DIR: &str = "pages";
 
@@ -123,6 +123,42 @@ impl PageStore {
         }
     }
 
+    /// Remove every stored page whose URL equals `page_url`.
+    ///
+    /// Only `{content_hash}.json` files are considered. A page that disappears
+    /// between the listing and the delete is left alone.
+    pub async fn delete_by_url(&self, page_url: &Url) -> Result<(), StoreError> {
+        let mut hashes = Vec::new();
+        let mut dir = tokio::fs::read_dir(&self.pages_dir)
+            .await
+            .map_err(|err| StoreError::io(&self.pages_dir, err))?;
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(|err| StoreError::io(&self.pages_dir, err))?
+        {
+            let Some(name) = entry.file_name().into_string().ok() else {
+                continue;
+            };
+            let Some(hash) = name.strip_suffix(".json") else {
+                continue;
+            };
+            if is_content_hash(hash) {
+                hashes.push(hash.to_string());
+            }
+        }
+
+        for hash in hashes {
+            let Some(page) = self.get(&hash).await? else {
+                continue;
+            };
+            if page.url == *page_url {
+                self.delete(&hash).await?;
+            }
+        }
+        Ok(())
+    }
+
     fn page_path(&self, content_hash: &str) -> Result<PathBuf, StoreError> {
         if !is_content_hash(content_hash) {
             return Err(StoreError::InvalidContentHash);
@@ -135,7 +171,7 @@ impl PageStore {
 ///
 /// The body is compact JSON (`url`, `title`, `html`, `text`, `captured_at`).
 /// [`CapturedPage::content_hash`] is not an input.
-pub fn content_hash(page: &CapturedPage) -> String {
+fn content_hash(page: &CapturedPage) -> String {
     let body = canonical_body(page);
     hex_encode(Sha256::digest(&body).as_slice())
 }

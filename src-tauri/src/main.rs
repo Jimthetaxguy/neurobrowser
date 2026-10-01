@@ -21,8 +21,8 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 struct AppState {
     session_manager: SessionManager,
     runtimes: Arc<BrowserRuntimeRegistry>,
-    /// Persistent page memory (`neuro_memory::MemoryService`), not in-run
-    /// `agent::memory::AgentMemory`. Opened at `app_data_dir()/memory/`.
+    /// Persistent page memory (`neuro_memory::MemoryService`). Opened at
+    /// `app_data_dir()/memory/`.
     memory: Arc<MemoryService>,
     action_policy: Mutex<ActionPolicy>,
     /// Caller-owned capture rules. `MemoryService::forget` tombstones a host
