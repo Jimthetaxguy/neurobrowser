@@ -41,29 +41,25 @@ function Message({ item }) {
 }
 
 function TabStrip({ tabs, currentPageId, onActivate, onClose }) {
+  const canClose = tabs.length > 1;
   return (
     <div className="tabs" aria-label="Open tabs">
       {tabs.map((tab) => (
-        <button
-          className={`tab${tab.id === currentPageId ? " active" : ""}`}
-          key={tab.id}
-          onClick={() => onActivate(tab.id)}
-          type="button"
-        >
-          <span className="tab-title">{tab.title || "New Tab"}</span>
-          <span
-            aria-label={`Close ${tab.title || "tab"}`}
-            className="tab-close"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose(tab.id);
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            x
-          </span>
-        </button>
+        <div className={`tab${tab.id === currentPageId ? " active" : ""}`} key={tab.id}>
+          <button className="tab-title" onClick={() => onActivate(tab.id)} type="button">
+            {tab.title || "New Tab"}
+          </button>
+          {canClose ? (
+            <button
+              aria-label={`Close ${tab.title || "tab"}`}
+              className="tab-close"
+              onClick={() => onClose(tab.id)}
+              type="button"
+            >
+              x
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   );
@@ -387,12 +383,18 @@ export default function App({ adapter, lane }) {
           setActivePageId(nextTab.id);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
+          try {
+            const nextSnapshot = await adapter.getPageSnapshot(sessionId, nextTab.id);
+            updateSnapshot(nextTab.id, nextSnapshot);
+          } catch (error) {
+            console.warn("snapshot refresh failed", messageText(error));
+          }
         }
       } catch (error) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs]
+    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
 
   const navigateCurrentPage = useCallback(async (nextUrl) => {
