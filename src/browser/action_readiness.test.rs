@@ -172,7 +172,7 @@ async fn explicit_wait_still_reports_readiness_failure() {
 
 #[tokio::test]
 async fn real_post_is_not_reported_failed_when_receipt_loading_times_out() {
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
     use std::time::{Duration, Instant};
 
@@ -197,12 +197,26 @@ async fn real_post_is_not_reported_failed_when_receipt_loading_times_out() {
                     Err(error) => panic!("HTTP accept failed: {error}"),
                 }
             };
+            // macOS accepts inherit the listener's nonblocking mode. Only
+            // accept is polled; each request read must wait for its bytes.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
-            let mut bytes = [0_u8; 4096];
-            let len = stream.read(&mut bytes).unwrap();
-            let request = std::str::from_utf8(&bytes[..len]).unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut request = String::new();
+            loop {
+                let mut line = String::new();
+                assert_ne!(
+                    reader.read_line(&mut line).unwrap(),
+                    0,
+                    "Incomplete HTTP request"
+                );
+                request.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
             assert!(request.starts_with(expected), "{request}");
             if expected.starts_with("POST") {
                 server_posts.fetch_add(1, Ordering::SeqCst);
