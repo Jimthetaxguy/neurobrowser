@@ -1,12 +1,6 @@
 //! Persistent page memory for NeuroBrowser.
 //!
-//! [`MemoryService`] is durable page memory. It is separate from in-run agent
-//! memory (`neurobrowser::agent::memory::AgentMemory`).
-//!
-//! M1.1 scaffolded the types. M1.2 adds [`CapturePolicy`]. M1.3 adds
-//! [`extract_blocks`]. M1.4 adds the page store ([`store::PageStore`]). M1.5
-//! adds the Tantivy block index ([`index::BlockIndex`]). M1.6 adds [`search`]
-//! and [`explain`]. M1.7 wires those pieces into [`MemoryService`].
+//! [`MemoryService`] is durable page memory.
 //! [`MemoryService::blocks_for_url`] reads the blocks committed for one page.
 //! This crate is not a Cargo workspace member. The root and `src-tauri` crates
 //! depend on it by path.
@@ -35,9 +29,7 @@ use url::Url;
 
 /// Durable page memory rooted at a data directory.
 ///
-/// `neuro_memory::MemoryService` keeps captured pages on disk. In-run agent
-/// memory lives in `neurobrowser::agent::memory::AgentMemory`.
-///
+/// `neuro_memory::MemoryService` keeps captured pages on disk.
 /// The app passes `app_data_dir()/memory/`. [`MemoryService::open`] creates that
 /// directory and opens `{data_dir}/pages` plus `{data_dir}/index`.
 #[derive(Debug)]
@@ -131,7 +123,10 @@ impl MemoryService {
         tombstone_host(policy, page_url);
         self.index.remove_by_url(page_url).map_err(index_error)?;
         self.index.commit().map_err(index_error)?;
-        remove_stored_pages(&self.store, page_url).await?;
+        self.store
+            .delete_by_url(page_url)
+            .await
+            .map_err(store_error)?;
         Ok(())
     }
 }
@@ -171,43 +166,4 @@ fn tombstone_host(policy: &mut CapturePolicy, page_url: &Url) {
     if !already {
         policy.denied_domains.push(host);
     }
-}
-
-async fn remove_stored_pages(store: &PageStore, page_url: &Url) -> Result<(), MemoryError> {
-    let mut hashes = Vec::new();
-    let mut dir = tokio::fs::read_dir(store.pages_dir())
-        .await
-        .map_err(|err| MemoryError::Store {
-            message: format!("read {}: {err}", store.pages_dir().display()),
-        })?;
-    while let Some(entry) = dir.next_entry().await.map_err(|err| MemoryError::Store {
-        message: format!("read {}: {err}", store.pages_dir().display()),
-    })? {
-        let Some(name) = entry.file_name().into_string().ok() else {
-            continue;
-        };
-        let Some(hash) = name.strip_suffix(".json") else {
-            continue;
-        };
-        if is_page_hash(hash) {
-            hashes.push(hash.to_string());
-        }
-    }
-
-    for hash in hashes {
-        let Some(page) = store.get(&hash).await.map_err(store_error)? else {
-            continue;
-        };
-        if page.url == *page_url {
-            store.delete(&hash).await.map_err(store_error)?;
-        }
-    }
-    Ok(())
-}
-
-fn is_page_hash(hash: &str) -> bool {
-    hash.len() == 64
-        && hash
-            .bytes()
-            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
