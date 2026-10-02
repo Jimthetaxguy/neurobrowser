@@ -5,7 +5,7 @@ How to build, run, and test NeuroBrowser locally.
 ## Prerequisites
 
 - **Rust** stable toolchain.
-- **Node.js** + **npm** (Vite frontend under `src-tauri/`).
+- **Node.js** + **npm** (Vite frontend under `src-tauri/`). CI pins Node 22 on the `tauri` job.
 - **macOS** for the desktop app (icon set + CSP are macOS-flavored).
   Windows/Linux desktop builds are not shipped. The library crate builds
   without a display or the Tauri toolchain. `neurobrowser-headless` is a
@@ -37,7 +37,13 @@ This is the verification chain in `verify.sh`:
 
 Expected output ends with `=== All checks passed ===`.
 
-That line is the end of `verify.sh` only. A green CI run also requires the `guards` job, which rejects mock crates, conflict markers, and iCloud duplicate names.
+That line is the end of `verify.sh` only.
+
+- `cargo fmt`, `cargo clippy`, the root `cargo test`, and `cargo build --release` cover the root crate. There is no Cargo workspace, so those commands leave out `neuro-memory` and `src-tauri`.
+- `neuro-memory` is tested (`cargo test --manifest-path crates/neuro-memory/Cargo.toml`) and is not clippy-checked.
+- The CI `tauri` job is macOS check and test (frontend, desktop bin, headless, and `runtime_capabilities`). It does not run clippy.
+- CI also runs a `guards` job that `verify.sh` does not. That job rejects mock crates, conflict markers, and iCloud duplicate names.
+- CI pins Node 22 on the `tauri` job. Local `verify.sh` uses the `node` and `npm` on `PATH`.
 
 ## Desktop app
 
@@ -94,6 +100,12 @@ await invoke("navigate", { sessionId, pageId, url: "https://example.com" });
 const snapshot = await invoke("get_page_snapshot", { sessionId, pageId });
 const result = await invoke("start_agent_run", { sessionId, pageId, prompt: "Summarize this page" });
 ```
+
+`get_page_snapshot` returns `url`, `title`, and count fields (`link_count`, `image_count`, `form_count`, `price_count`, `table_count`). That payload is not the fuller crate `PageSnapshot` (`html`, `text`, viewport, and the element lists).
+
+`start_agent_run` events keep `tool`, `success`, `reasons`, and `redacted_arguments`. Tool result text, policy `outcome`, `risk_flags`, and `approval_id` stay off the wire.
+
+Memory IPC commands are `search_local_memory`, `explain_memory_result`, and `forget_memory`. The IPC search default limit is 8 (`search_local_memory`; `explain_memory_result` uses the same default when `limit` is omitted). Crate tools `search_personal_memory` and `inspect_active_page` remain as documented in `docs/AGENT-SURFACE.md`, with their own defaults.
 
 Typed wrappers: `src-tauri/src/hostAdapters.js` (`createTauriHostAdapter()`).
 
