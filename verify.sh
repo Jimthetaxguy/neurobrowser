@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NeuroBrowser verify chain. Tauri cargo check needs macOS or GTK/WebKit on Linux.
+# NeuroBrowser verify chain. src-tauri cargo steps need macOS or GTK/WebKit on Linux; desktop and headless check/test are the same package.
 set -euo pipefail
 echo "=== NeuroBrowser Verify Chain ==="
 echo "→ cargo fmt --check..."
