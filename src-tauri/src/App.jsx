@@ -46,7 +46,13 @@ function TabStrip({ tabs, currentPageId, onActivate, onClose }) {
   return (
     <div className="tabs" aria-label="Open tabs">
       {tabs.map((tab) => (
-        <div className={`tab${tab.id === currentPageId ? " active" : ""}`} key={tab.id}>
+        <div
+          className={`tab${tab.id === currentPageId ? " active" : ""}`}
+          key={tab.id}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) onActivate(tab.id);
+          }}
+        >
           <button className="tab-title" onClick={() => onActivate(tab.id)} type="button">
             {tab.title || "New Tab"}
           </button>

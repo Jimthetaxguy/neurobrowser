@@ -88,6 +88,18 @@ test("the last tab has no close control, and multiple tabs use sibling buttons",
   });
 });
 
+test("chip padding activates a tab, while title clicks activate it only once", async () => {
+  await withApp(async ({ calls, click, document }) => {
+    await click(document.querySelector(".header > button"));
+    await click(document.querySelector(".tab"));
+    assert.deepEqual(calls, [["activate", "session", 0], ["snapshot", "session", 0]]);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 0");
+    calls.length = 0;
+    await click(document.querySelectorAll(".tab-title")[1]);
+    assert.deepEqual(calls, [["activate", "session", 1], ["snapshot", "session", 1]]);
+  });
+});
+
 test("closing the active tab refreshes the survivor URL, title, and statistics", async () => {
   await withApp(async ({ calls, click, document }) => {
     await click(document.querySelector(".header > button"));
