@@ -113,25 +113,7 @@ impl SessionState {
         name: &str,
         args: &HashMap<String, String>,
     ) -> Response {
-        // Construct a minimal PageSnapshot for the policy's prompt-injection
-        // check. Headless mode has no live page; we hand-build the safest
-        // shape (empty URL, empty text) so the eval doesn't false-positive.
-        let snapshot = PageSnapshot {
-            url: String::new(),
-            title: String::new(),
-            html: None,
-            text: None,
-            links: Vec::new(),
-            images: Vec::new(),
-            forms: Vec::new(),
-            prices: Vec::new(),
-            tables: Vec::new(),
-            viewport_width: 0,
-            viewport_height: 0,
-            scroll_x: 0.0,
-            scroll_y: 0.0,
-            interactive_ready: true,
-        };
+        let snapshot = PageSnapshot::default();
 
         // Registered tools use their real `ToolRisk`. Unknown names fall
         // back to Destructive so they are not treated as reads.

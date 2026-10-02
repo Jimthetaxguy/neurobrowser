@@ -10,9 +10,8 @@
 //! `#[ignore]`d by default (costs money, needs network + real credentials).
 //! Run explicitly, from the repo root, with keys injected by Infisical:
 //!
-//!   cd ~/code && infisical run --env=dev --silent -- \
-//!     cargo test --manifest-path <repo>/Cargo.toml \
-//!       --test real_provider_smoke -- --ignored --nocapture
+//!   infisical run --env=dev --silent -- \
+//!     cargo test --test real_provider_smoke -- --ignored --nocapture
 //!
 //! Never prints API key values — only response content/lengths.
 

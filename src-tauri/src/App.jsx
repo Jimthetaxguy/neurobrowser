@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { applyPresentedRun } from "./agentRunPresentation.js";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { nativePageUpdates } from "./nativePageEvents.js";
 
@@ -439,21 +440,7 @@ export default function App({ adapter, lane }) {
       const result = await adapter.startAgentRun(sessionId, currentPageId, trimmed);
       const events = result.events || [];
       setActionEvents((items) => [...items, ...events]);
-      if (result.status === "awaiting_approval") {
-        setPendingApproval(result);
-        appendMessage("assistant", result.final_response || "Approval required before continuing.");
-        setStatus("Approval required");
-      } else if (result.status === "blocked") {
-        appendMessage("assistant", result.final_response || "Blocked by action policy.");
-        setStatus("Agent action blocked");
-      } else if (result.status === "cancelled") {
-        appendMessage("assistant", result.final_response || "Run cancelled.");
-        setStatus("Run cancelled");
-      } else {
-        appendMessage("assistant", result.final_response ?? "");
-        setStatus("Ready");
-      }
-      await refreshSnapshot();
+      await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
     } catch (error) {
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
       setStatus("Agent request failed");
@@ -469,10 +456,7 @@ export default function App({ adapter, lane }) {
       try {
         const result = await adapter.submitApproval(pendingApproval.run_id, approved);
         setActionEvents((items) => [...items, ...(result.events || [])]);
-        setPendingApproval(null);
-        appendMessage("assistant", result.final_response || (approved ? "Approved action ran." : "Approval denied."));
-        await refreshSnapshot();
-        setStatus(result.status === "completed" ? "Ready" : "Run cancelled");
+        await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
       } catch (error) {
         appendMessage("assistant", `Approval failed: ${messageText(error)}`);
         setStatus("Approval failed");
