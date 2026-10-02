@@ -120,22 +120,26 @@ impl BrowserInterface for BrowserEngine {
             format!("Failed to fetch URL: {}", e)
         })?;
 
+        // `response.url()` is the post-redirect URL. The redirect policy already
+        // judged each hop, so the snapshot should name the page that was fetched.
+        let final_url = response.url().to_string();
+
         if !response.status().is_success() {
             let status = response.status();
-            tracing::error!("HTTP error {} for {}", status, url);
+            tracing::error!("HTTP error {} for {}", status, final_url);
             return Err(format!("HTTP error: {}", status));
         }
 
         let html = response.text().await.map_err(|e| {
-            tracing::error!("Failed to read response body for {}: {}", url, e);
+            tracing::error!("Failed to read response body for {}: {}", final_url, e);
             format!("Failed to read response: {}", e)
         })?;
 
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.url = url.to_string();
+        state.url = final_url;
         state.html = html;
 
-        tracing::info!("Navigated to: {}", url);
+        tracing::info!("Navigated to: {}", state.url);
         Ok(())
     }
 
@@ -823,14 +827,14 @@ impl BrowserTool for ScrollByTool {
         args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> crate::tools::ToolResult {
-        let x = args
-            .get("x")
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0.0);
-        let y = args
-            .get("y")
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0.0);
+        let x = match scroll_delta(&args, "x") {
+            Ok(value) => value,
+            Err(error) => return crate::tools::ToolResult::error("scroll_by", error),
+        };
+        let y = match scroll_delta(&args, "y") {
+            Ok(value) => value,
+            Err(error) => return crate::tools::ToolResult::error("scroll_by", error),
+        };
         match browser.scroll_by(x, y).await {
             Ok(()) => {
                 crate::tools::ToolResult::success("scroll_by", format!("Scrolled by {}, {}", x, y))
@@ -838,6 +842,17 @@ impl BrowserTool for ScrollByTool {
             Err(error) => crate::tools::ToolResult::error("scroll_by", error),
         }
     }
+}
+
+/// Parse a scroll delta. A missing key is `0.0`. A present value that is not a
+/// number is an error — it must not be coerced to `0.0` and reported as success.
+fn scroll_delta(args: &HashMap<String, String>, name: &str) -> Result<f32, String> {
+    let Some(value) = args.get(name) else {
+        return Ok(0.0);
+    };
+    value
+        .parse::<f32>()
+        .map_err(|_| format!("scroll_by {name} must be a number, got {value:?}"))
 }
 
 struct SubmitFormTool;
@@ -1149,6 +1164,73 @@ mod tests {
             "type tool result leaked the raw sensitive text: {}",
             result.result
         );
+    }
+
+    struct CountingScroll {
+        calls: Mutex<u32>,
+    }
+
+    #[async_trait]
+    impl BrowserInterface for CountingScroll {
+        async fn navigate(&self, _url: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn query_selector(&self, _selector: &str) -> Result<Vec<ElementInfo>, String> {
+            Ok(Vec::new())
+        }
+        async fn get_text(&self, _selector: &str) -> Result<String, String> {
+            Ok(String::new())
+        }
+        async fn click(&self, _selector: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn type_text(&self, _selector: &str, _text: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn submit_form(&self, _selector: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn scroll_to(&self, _selector: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn scroll_by(&self, _x: f32, _y: f32) -> Result<(), String> {
+            *self.calls.lock().expect("scroll count") += 1;
+            Ok(())
+        }
+        async fn snapshot(&self) -> Result<PageSnapshot, String> {
+            Ok(PageSnapshot::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn scroll_by_rejects_non_numeric_deltas() {
+        let browser = CountingScroll {
+            calls: Mutex::new(0),
+        };
+
+        let mut bad_x = HashMap::new();
+        bad_x.insert("x".to_string(), "sideways".to_string());
+        bad_x.insert("y".to_string(), "12".to_string());
+        let result = ScrollByTool.execute(bad_x, &browser).await;
+        assert!(!result.success, "{result:?}");
+        assert!(result.result.contains("x must be a number"), "{result:?}");
+        assert!(!result.result.contains("Scrolled by"), "{result:?}");
+
+        let mut bad_y = HashMap::new();
+        bad_y.insert("x".to_string(), "4".to_string());
+        bad_y.insert("y".to_string(), "down".to_string());
+        let result = ScrollByTool.execute(bad_y, &browser).await;
+        assert!(!result.success, "{result:?}");
+        assert!(result.result.contains("y must be a number"), "{result:?}");
+        assert_eq!(*browser.calls.lock().expect("scroll count"), 0);
+
+        let mut ok = HashMap::new();
+        ok.insert("x".to_string(), "4".to_string());
+        ok.insert("y".to_string(), "-8.5".to_string());
+        let result = ScrollByTool.execute(ok, &browser).await;
+        assert!(result.success, "{result:?}");
+        assert_eq!(result.result, "Scrolled by 4, -8.5");
+        assert_eq!(*browser.calls.lock().expect("scroll count"), 1);
     }
 
     #[test]

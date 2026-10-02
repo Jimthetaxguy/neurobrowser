@@ -67,7 +67,9 @@ impl MemoryService {
     /// is written to the store (which assigns [`CapturedPage::content_hash`]),
     /// blocks are extracted from that stored page, and those blocks replace any
     /// previously indexed blocks for the same URL. The index commit makes the
-    /// new blocks searchable.
+    /// new blocks searchable. Other stored page files for that URL are then
+    /// removed; the file for this capture's content hash is kept. `content_hash`
+    /// includes `captured_at`, so a later capture of the same URL is a new file.
     pub async fn capture(
         &self,
         page: CapturedPage,
@@ -84,6 +86,10 @@ impl MemoryService {
             self.index.add_block(block).map_err(index_error)?;
         }
         self.index.commit().map_err(index_error)?;
+        self.store
+            .delete_by_url_except(&stored.url, &stored.content_hash)
+            .await
+            .map_err(store_error)?;
         Ok(())
     }
 

@@ -178,3 +178,85 @@ async fn capture_search_forget_removes_the_page_and_tombstones_the_domain() {
         1
     );
 }
+
+#[tokio::test]
+async fn recapture_drops_older_page_files_for_the_same_url() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let service = MemoryService::open(dir.path()).expect("open");
+    let policy = CapturePolicy::default();
+
+    let mut first = page(
+        "https://example.com/docs",
+        "<h1>Notes</h1><p>firsthashbody stays only until recapture.</p>",
+        "firsthashbody stays only until recapture.",
+    );
+    first.captured_at = 1_700_000_000_000;
+    let mut second = page(
+        "https://example.com/docs",
+        "<h1>Notes</h1><p>secondhashbody is the page that remains.</p>",
+        "secondhashbody is the page that remains.",
+    );
+    second.captured_at = 1_700_000_000_001;
+    let mut third = page(
+        "https://example.com/docs",
+        "<h1>Notes</h1><p>thirdhashbody is the latest capture.</p>",
+        "thirdhashbody is the latest capture.",
+    );
+    third.captured_at = 1_700_000_000_002;
+    let other = page(
+        "https://other.test/notes",
+        "<h1>Other</h1><p>otherhostfile stays on disk.</p>",
+        "otherhostfile stays on disk.",
+    );
+
+    service
+        .capture(first, &policy)
+        .await
+        .expect("first capture");
+    service
+        .capture(second, &policy)
+        .await
+        .expect("second capture");
+    service.capture(other, &policy).await.expect("other url");
+    service.capture(third, &policy).await.expect("recapture");
+
+    let remaining = json_files(dir.path());
+    assert_eq!(remaining.len(), 2, "{remaining:?}");
+    let bodies: Vec<String> = remaining
+        .iter()
+        .map(|name| {
+            std::fs::read_to_string(dir.path().join("pages").join(name)).expect("read page")
+        })
+        .collect();
+    let joined = bodies.join("\n");
+    assert!(
+        joined.contains("thirdhashbody"),
+        "latest hash must remain: {joined}"
+    );
+    assert!(
+        !joined.contains("firsthashbody") && !joined.contains("secondhashbody"),
+        "older hashes for the same URL must be deleted: {joined}"
+    );
+    assert!(
+        joined.contains("https://other.test/notes"),
+        "a different URL must be kept: {joined}"
+    );
+    assert!(joined.contains("\"captured_at\": 1700000000002"));
+
+    let blocks = service
+        .blocks_for_url(&url("https://example.com/docs"))
+        .await
+        .expect("blocks");
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block.text.contains("thirdhashbody")),
+        "{blocks:?}"
+    );
+    assert!(
+        blocks
+            .iter()
+            .all(|block| !block.text.contains("firsthashbody")),
+        "{blocks:?}"
+    );
+}

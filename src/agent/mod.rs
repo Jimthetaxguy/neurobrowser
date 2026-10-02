@@ -274,32 +274,15 @@ impl ReActAgent {
                 // url/title the model sees on the next iteration. The pre-execution
                 // `snapshot` (used above for policy evaluation) is stale here after
                 // a navigate. Taken outside the state lock to avoid holding it
-                // across `.await`.
-                // A post-tool snapshot may legitimately fail transiently: on the
-                // desktop runtime it can land while the old document is unloading.
-                // Propagating that with `?` failed the ENTIRE otherwise-successful run
-                // over a timing artifact. Retry once, then degrade to keeping the
-                // previous url/title rather than discarding the run's work — the tool
-                // already succeeded, and a stale label is a smaller lie than a failed
-                // run that actually did its job.
+                // across `.await`. On failure, keep the previous url/title.
                 let post_snapshot = match browser.snapshot().await {
                     Ok(snapshot) => Some(snapshot),
-                    Err(first_err) => {
-                        tracing::debug!(
-                            error = %first_err,
-                            "post-tool snapshot failed; retrying once"
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            "post-tool snapshot failed; keeping previous url/title"
                         );
-                        match browser.snapshot().await {
-                            Ok(snapshot) => Some(snapshot),
-                            Err(second_err) => {
-                                tracing::warn!(
-                                    error = %second_err,
-                                    "post-tool snapshot failed twice; keeping previous \
-                                     url/title for this iteration"
-                                );
-                                None
-                            }
-                        }
+                        None
                     }
                 };
                 {
