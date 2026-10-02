@@ -7,10 +7,12 @@ How to build, run, and test NeuroBrowser locally.
 - **Rust** stable toolchain.
 - **Node.js** + **npm** (Vite frontend under `src-tauri/`).
 - **macOS** for the desktop app (icon set + CSP are macOS-flavored).
-  Windows/Linux desktop builds are not shipped. The library crate and
-  headless daemon build on Unix without a display. Full `./verify.sh` is
-  not a portable one-shot green on bare Ubuntu: the Tauri `cargo check`
-  steps need macOS or GTK/WebKit on Linux.
+  Windows/Linux desktop builds are not shipped. The library crate builds
+  without a display or the Tauri toolchain. `neurobrowser-headless` is a
+  bin in the `neurobrowser-tauri` package, so it shares that toolchain
+  (`tauri` / `tauri-build`: macOS SDK, or GTK/WebKit on Linux; a display
+  is not required). Full `./verify.sh` is not a portable one-shot green on
+  bare Ubuntu: the Tauri `cargo check` steps need macOS or GTK/WebKit on Linux.
 
 ## One-shot green build
 
@@ -142,8 +144,7 @@ commands (including provider changes and approval submission).
 | `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | `https://api.openai.com` (via `resolve_endpoint`) |
 | `CUSTOM_PROVIDER_MODEL` | `set_provider("custom")` | `gpt-4o` |
 | `NEUROBROWSER_SOCKET` | headless daemon | temp dir `neurobrowser-<pid>.sock` |
-| `RUST_LOG` | desktop tracing (`src-tauri/src/main.rs`) | `neurobrowser=info` |
-| `RUST_LOG` | headless tracing | `neurobrowser=info,headless=info` |
+| `RUST_LOG` | desktop (`src-tauri/src/main.rs`) and headless (`src-tauri/src/headless_bin/main.rs`). `neurobrowser` is the library crate; shell events are `neurobrowser_tauri`. The headless bin's crate root is `neurobrowser_headless` (no `headless` module). | `neurobrowser=info` (desktop); `neurobrowser=info,headless=info` (headless) |
 
 ## Where things live
 

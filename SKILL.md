@@ -41,7 +41,9 @@ Do not treat this as a Playwright ref-map driver. Interactive tools on
 `BrowserEngine` (reqwest+scraper) return honest errors; they do not click a
 live DOM.
 
-## Install
+## Checkout and verify
+
+There is no installed CLI. Check out the repo and run the verification chain:
 
 ```bash
 git clone https://github.com/Jimthetaxguy/neurobrowser.git
@@ -58,6 +60,11 @@ Headless daemon:
 NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
   cargo run --bin neurobrowser-headless --manifest-path src-tauri/Cargo.toml --features headless
 ```
+
+`neurobrowser-headless` is a bin in the `neurobrowser-tauri` package, so that
+command compiles `tauri` and runs `tauri-build` (macOS SDK, or GTK/WebKit on
+Linux). A display is not required. The root library crate does not need that
+toolchain.
 
 There is no `neurobrowser-cli`. Speak JSON-RPC on the socket.
 
