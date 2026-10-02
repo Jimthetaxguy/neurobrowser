@@ -494,7 +494,13 @@ async fn browser_reload(
     page_id: usize,
 ) -> Result<(), String> {
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.browser_reload().await
+    browser.browser_reload().await?;
+    browser.wait_for_navigation().await.map_err(|error| {
+        format!(
+            "Reload dispatched; page readiness is unconfirmed: {error}. \
+             Do not repeat the reload automatically; inspect the page."
+        )
+    })
 }
 
 #[tauri::command]
