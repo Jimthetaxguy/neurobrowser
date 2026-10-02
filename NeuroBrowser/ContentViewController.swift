@@ -277,7 +277,13 @@ class ContentViewController: NSViewController {
     func navigateCurrentTab(to input: String) {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, currentTabIndex < webViews.count else { return }
-        guard let url = Self.validatedNavigationURL(from: input) else { return }
+        guard let url = Self.validatedNavigationURL(from: input) else {
+            pageUpdateHandler?([
+                "type": "status",
+                "message": "Only http and https URLs can be opened"
+            ])
+            return
+        }
         urlBar.stringValue = url.absoluteString
         webViews[currentTabIndex].load(URLRequest(url: url))
     }
@@ -402,11 +408,13 @@ extension ContentViewController: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "↻"
         updateNavigationButtons()
     }
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "↻"
         updateNavigationButtons()
     }
