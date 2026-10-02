@@ -16,18 +16,12 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 - **Desktop (macOS only):** React + Vite shell, Tauri v2 commands, OS child webview per page
 - **Library:** Tokio, reqwest, `scraper` HTML parsing, serde, thiserror v2
 - **Headless protocol stub:** Tokio policy evaluation and a hardcoded snapshot
-- **Agent IPC:** Tauri commands + daemon socket
+- **Desktop IPC:** Tauri commands
+- **Policy socket:** JSON-RPC (`ping`, `policy.*`, stub `snapshot`)
 
 ## Quick Start
 
-```bash
-cargo build                # Library crate (neurobrowser)
-cargo test                 # root library tests
-cargo clippy --all-targets # Lint
-cargo check --manifest-path src-tauri/Cargo.toml # Desktop crate type-check
-cargo build --release      # Library release (LTO + strip + abort)
-./verify.sh                # Full verification chain
-```
+Run `./verify.sh`. The steps are in [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
 
 Desktop (`npx tauri dev` in `src-tauri/`) is macOS.
 
@@ -38,8 +32,13 @@ NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
   cargo run --manifest-path src-tauri/Cargo.toml --features headless --bin neurobrowser-headless
 ```
 
-It prints its Unix socket address (or a loopback TCP fallback if Unix bind
-fails). Send newline-delimited JSON such as
+`neurobrowser-headless` is a bin in the `neurobrowser-tauri` package, so that
+command compiles `tauri` and runs `tauri-build` (macOS SDK, or GTK/WebKit on
+Linux). A display is not required. The root library crate does not need that
+toolchain.
+
+The daemon prints its Unix socket address (or a loopback TCP fallback if Unix
+bind fails). Send newline-delimited JSON such as
 `{"id":"1","method":"ping","params":{}}`. This daemon does not browse.
 See [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md) for more build details.
 
@@ -56,8 +55,9 @@ Shipped run/policy surface:
   cross-domain can run; a hostless current page (`about:blank`, empty URL) is
   not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
-- headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /
-  `snapshot`
+- headless methods: `ping`, `policy.get` / `policy.set` (`params` is the
+  `ActionPolicy` object) / `policy.evaluate` (`params.tool` and
+  `params.arguments`) / `snapshot`
 
 React + Tauri is the primary frontend path
 ([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).
@@ -75,7 +75,9 @@ agent flows should run through the real Tauri runtime, not a mocked browser page
 
 ### Real-systems gap
 
-The headless `snapshot` response is a protocol fixture; it does not read a
-browser. Its migration requires attaching a real session/runtime, applying
-policy before tool execution, and testing that connection against real
-pages. Until then use the Tauri runtime for interactive browser work.
+The headless `snapshot` response is a hardcoded stub
+`{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }`,
+not a `PageSnapshot`. It does not read a browser. Its migration requires
+attaching a real session/runtime, applying policy before tool execution, and
+testing that connection against real pages. Until then use the Tauri runtime
+for interactive browser work.
