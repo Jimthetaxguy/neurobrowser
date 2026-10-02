@@ -50,12 +50,16 @@ pub trait BrowserInterface: Send + Sync {
     async fn navigate(&self, url: &str) -> Result<(), String>;
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String>;
     async fn get_text(&self, selector: &str) -> Result<String, String>;
+    /// Report action execution only; callers wait for page readiness separately.
+    /// A later loading timeout must not turn an executed action into a failure.
     async fn click(&self, selector: &str) -> Result<(), String>;
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), String>;
+    /// Report submission dispatch, independently of the response page loading.
     async fn submit_form(&self, selector: &str) -> Result<(), String>;
     async fn scroll_to(&self, selector: &str) -> Result<(), String>;
     async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String>;
     async fn snapshot(&self) -> Result<PageSnapshot, String>;
+    /// Report key dispatch; use `wait_for_navigation` for subsequent readiness.
     async fn keypress(&self, key: &str) -> Result<(), String> {
         Err(format!("keypress is not supported by this browser: {key}"))
     }
@@ -72,6 +76,7 @@ pub trait BrowserInterface: Send + Sync {
         Err("forward navigation is not supported by this browser".to_string())
     }
 
+    /// Report reload dispatch; callers wait for page readiness separately.
     async fn browser_reload(&self) -> Result<(), String> {
         Err("reload is not supported by this browser".to_string())
     }

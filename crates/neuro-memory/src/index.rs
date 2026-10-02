@@ -97,7 +97,7 @@ fn schema() -> Schema {
 
 /// On-disk Tantivy index of semantic blocks.
 ///
-/// `dir` is the index directory itself. M1.7 passes `data_dir.join("index")`.
+/// `dir` is the index directory itself.
 pub struct BlockIndex {
     index: Index,
     writer: Mutex<IndexWriter>,
@@ -193,8 +193,7 @@ impl BlockIndex {
 
     /// Blocks committed for `page_url`, in index order.
     ///
-    /// Uncommitted adds and deletes are omitted. This is an exact URL lookup,
-    /// not the M1.6 query parser.
+    /// Uncommitted adds and deletes are omitted. This is an exact URL lookup.
     pub fn blocks_for_url(&self, page_url: &Url) -> Result<Vec<SemanticBlock>, IndexError> {
         let reader = self
             .index
