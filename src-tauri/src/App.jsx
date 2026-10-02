@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { applyPresentedRun } from "./agentRunPresentation.js";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { nativePageUpdates } from "./nativePageEvents.js";
 
@@ -41,29 +42,31 @@ function Message({ item }) {
 }
 
 function TabStrip({ tabs, currentPageId, onActivate, onClose }) {
+  const canClose = tabs.length > 1;
   return (
     <div className="tabs" aria-label="Open tabs">
       {tabs.map((tab) => (
-        <button
+        <div
           className={`tab${tab.id === currentPageId ? " active" : ""}`}
           key={tab.id}
-          onClick={() => onActivate(tab.id)}
-          type="button"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) onActivate(tab.id);
+          }}
         >
-          <span className="tab-title">{tab.title || "New Tab"}</span>
-          <span
-            aria-label={`Close ${tab.title || "tab"}`}
-            className="tab-close"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose(tab.id);
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            x
-          </span>
-        </button>
+          <button className="tab-title" onClick={() => onActivate(tab.id)} type="button">
+            {tab.title || "New Tab"}
+          </button>
+          {canClose ? (
+            <button
+              aria-label={`Close ${tab.title || "tab"}`}
+              className="tab-close"
+              onClick={() => onClose(tab.id)}
+              type="button"
+            >
+              x
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   );
@@ -387,12 +390,18 @@ export default function App({ adapter, lane }) {
           setActivePageId(nextTab.id);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
+          try {
+            const nextSnapshot = await adapter.getPageSnapshot(sessionId, nextTab.id);
+            updateSnapshot(nextTab.id, nextSnapshot);
+          } catch (error) {
+            console.warn("snapshot refresh failed", messageText(error));
+          }
         }
       } catch (error) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs]
+    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
 
   const navigateCurrentPage = useCallback(async (nextUrl) => {
@@ -437,21 +446,7 @@ export default function App({ adapter, lane }) {
       const result = await adapter.startAgentRun(sessionId, currentPageId, trimmed);
       const events = result.events || [];
       setActionEvents((items) => [...items, ...events]);
-      if (result.status === "awaiting_approval") {
-        setPendingApproval(result);
-        appendMessage("assistant", result.final_response || "Approval required before continuing.");
-        setStatus("Approval required");
-      } else if (result.status === "blocked") {
-        appendMessage("assistant", result.final_response || "Blocked by action policy.");
-        setStatus("Agent action blocked");
-      } else if (result.status === "cancelled") {
-        appendMessage("assistant", result.final_response || "Run cancelled.");
-        setStatus("Run cancelled");
-      } else {
-        appendMessage("assistant", result.final_response ?? "");
-        setStatus("Ready");
-      }
-      await refreshSnapshot();
+      await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
     } catch (error) {
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
       setStatus("Agent request failed");
@@ -467,10 +462,7 @@ export default function App({ adapter, lane }) {
       try {
         const result = await adapter.submitApproval(pendingApproval.run_id, approved);
         setActionEvents((items) => [...items, ...(result.events || [])]);
-        setPendingApproval(null);
-        appendMessage("assistant", result.final_response || (approved ? "Approved action ran." : "Approval denied."));
-        await refreshSnapshot();
-        setStatus(result.status === "completed" ? "Ready" : "Run cancelled");
+        await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
       } catch (error) {
         appendMessage("assistant", `Approval failed: ${messageText(error)}`);
         setStatus("Approval failed");

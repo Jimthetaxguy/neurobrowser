@@ -21,8 +21,8 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 struct AppState {
     session_manager: SessionManager,
     runtimes: Arc<BrowserRuntimeRegistry>,
-    /// Persistent page memory (`neuro_memory::MemoryService`), not in-run
-    /// `agent::memory::AgentMemory`. Opened at `app_data_dir()/memory/`.
+    /// Persistent page memory (`neuro_memory::MemoryService`). Opened at
+    /// `app_data_dir()/memory/`.
     memory: Arc<MemoryService>,
     action_policy: Mutex<ActionPolicy>,
     /// Caller-owned capture rules. `MemoryService::forget` tombstones a host
@@ -449,7 +449,10 @@ async fn submit_approval(
 }
 
 #[tauri::command]
-fn cancel_agent_run(state: State<'_, AppState>, run_id: String) -> Result<AgentRunResult, String> {
+fn cancel_agent_run(
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<AgentRunResponse, String> {
     let removed = state
         .pending_approvals
         .lock()
@@ -461,7 +464,7 @@ fn cancel_agent_run(state: State<'_, AppState>, run_id: String) -> Result<AgentR
         "Run was not pending approval"
     }
     .to_string();
-    Ok(AgentRunResult {
+    Ok(agent_run_response(AgentRunResult {
         run_id: run_id.clone(),
         status: AgentRunStatus::Cancelled,
         final_response: Some(reason.clone()),
@@ -469,7 +472,7 @@ fn cancel_agent_run(state: State<'_, AppState>, run_id: String) -> Result<AgentR
         events: vec![AgentRunEvent::RunCancelled { run_id, reason }],
         pending_tool_call: None,
         approval_id: None,
-    })
+    }))
 }
 
 #[tauri::command]
@@ -491,7 +494,13 @@ async fn browser_reload(
     page_id: usize,
 ) -> Result<(), String> {
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.browser_reload().await
+    browser.browser_reload().await?;
+    browser.wait_for_navigation().await.map_err(|error| {
+        format!(
+            "Reload dispatched; page readiness is unconfirmed: {error}. \
+             Do not repeat the reload automatically; inspect the page."
+        )
+    })
 }
 
 #[tauri::command]

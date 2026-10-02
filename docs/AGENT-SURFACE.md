@@ -214,6 +214,16 @@ Tauri: `get_action_policy` / `set_action_policy`. Daemon: `policy.get` /
 Crate tools return `ToolResult { success: false, result: "<message>" }`.
 The next system prompt lists each failure as `- <tool>: Error: <message>`.
 
+`click`, `submit_form`, `keypress`, and `reload` distinguish execution from subsequent
+page readiness. After an executed action, a loading timeout keeps
+`success: true` and includes the readiness error in `result`, with guidance
+to wait or inspect the page before continuing. It does not imply the action
+failed or should be repeated. A submission dispatch is not confirmation
+that the server accepted it.
+If the action's runtime acknowledgment itself times out or its response
+channel closes, the tool keeps `success: false` and reports an unknown
+outcome: the action may have executed and must not be retried automatically.
+
 A model call to a registered tool that omits a required argument (or sets it
 to `""`) is not dropped and does not run. `ReActAgent` emits
 `ToolCallResult { success: false }` with
