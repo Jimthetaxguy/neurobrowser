@@ -12,8 +12,11 @@ drive it in two ways:
    `src/browser/mod.rs`).
 2. **Headless daemon** — newline-delimited JSON-RPC over a Unix socket (TCP
    fallback). Methods are `ping`, `policy.get`, `policy.set`,
-   `policy.evaluate`, and `snapshot`. `snapshot` is a hardcoded
-   `about:blank` stub. The daemon does not execute browser tools.
+   `policy.evaluate`, and `snapshot`. `policy.set` replaces the policy from
+   `params` as an `ActionPolicy` object. `policy.evaluate` reads `params.tool`
+   and `params.arguments`. `snapshot` ignores `params` and returns a hardcoded
+   stub (`url`, `title`, `viewport`, `tree: ""`), not a crate `PageSnapshot`.
+   The daemon does not execute browser tools.
 
 The shipped agent surface is **19 tools**. Seventeen are browser
 tools from `default_tool_registry()`. `search_personal_memory` and
@@ -48,10 +51,8 @@ cd neurobrowser
 ./verify.sh
 ```
 
-Full `./verify.sh` runs `cargo test --manifest-path crates/neuro-memory/Cargo.toml`,
-`npm test` (`src-tauri` `src/*.test.js`), and type-checks the Tauri crate
-(macOS, or GTK/WebKit on Linux). Library-only: `cargo test`. See
-`docs/RUNBOOK-DEV.md`.
+The numbered `./verify.sh` steps are in `docs/RUNBOOK-DEV.md` (One-shot green
+build). Library-only: `cargo test`.
 
 Headless daemon:
 
@@ -100,10 +101,15 @@ async fn summarize_page(
 ```json
 {"id":"1","method":"ping","params":{}}
 {"id":"2","method":"policy.get","params":{}}
-{"id":"3","method":"snapshot","params":{}}
+{"id":"3","method":"policy.evaluate","params":{"tool":"get_text","arguments":{"selector":"h1"}}}
+{"id":"4","method":"snapshot","params":{}}
 ```
 
-`snapshot` returns a hardcoded stub, not a `PageSnapshot` from the crate.
+`policy.set` sends `params` as the `ActionPolicy` object itself.
+`policy.evaluate` reads `params.tool` and `params.arguments`.
+`snapshot` ignores `params` and returns
+`{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }`,
+not a `PageSnapshot` from the crate.
 
 ## Tools
 
@@ -145,7 +151,9 @@ next turn. That turn does not complete the run.
 
 `screenshot` is registered. `BrowserInterface::screenshot` defaults to
 `"screenshot is not supported by this browser"`. Neither `BrowserEngine` nor
-the Tauri runtime overrides it.
+the Tauri runtime overrides it. `BrowserEngine` does not override `keypress`
+either; that call uses the `BrowserInterface` default error, as do `back`,
+`forward`, and `reload`.
 
 ## Autonomy
 
@@ -172,8 +180,9 @@ Same order as `ActionPolicy::evaluate`; first match wins:
 6. `approval_required_tools` → `RequireApproval`.
 7. Mode table.
 
-Headless `policy.evaluate` builds an empty `PageSnapshot` (no URL, HTML, or
-text) before calling evaluate, so prompt-injection cannot fire,
+Headless `policy.evaluate` reads `params.tool` and `params.arguments`, then
+builds an empty `PageSnapshot` (no URL, HTML, or text) before calling
+evaluate, so prompt-injection cannot fire,
 `is_cross_domain` is false with no host, and non-navigate tools never get a
 domain; allow/deny lists still apply to `navigate` via the argument URL.
 

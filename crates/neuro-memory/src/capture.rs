@@ -1,8 +1,7 @@
 //! Heading-bounded block extraction.
 //!
 //! [`extract_blocks`] reads [`CapturedPage::html`] with `scraper` and emits
-//! [`SemanticBlock`]s. [`CapturedPage`] already carries `url`, `html`, `text`,
-//! `content_hash`, and `captured_at`, so this milestone does not change `model`.
+//! [`SemanticBlock`]s.
 
 use crate::model::{CapturedPage, SemanticBlock};
 use scraper::{ElementRef, Html, Node, Selector};

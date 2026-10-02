@@ -37,6 +37,8 @@ This is the verification chain in `verify.sh`:
 
 Expected output ends with `=== All checks passed ===`.
 
+That line is the end of `verify.sh` only. A green CI run also requires the `guards` job, which rejects mock crates, conflict markers, and iCloud duplicate names.
+
 ## Desktop app
 
 ```bash
@@ -74,6 +76,7 @@ Integration tests live in `tests/`:
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
 - `memory_tools.rs` — personal-memory tools over `MemoryService`.
+- `real_provider_smoke.rs` — `#[ignore]` real HTTP; outside `verify.sh` and CI.
 - Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
   and run explicitly with the `headless` feature.
 
@@ -100,7 +103,8 @@ Adding a command:
 2. Add it to `tauri::generate_handler!`.
 3. Add the command name to the app manifest in `src-tauri/build.rs`.
 4. Add `allow-<command-name>` to `src-tauri/capabilities/main.json` (control webview only). Do not grant host commands to `page-runtime.json`.
-5. Add a wrapper in `src-tauri/src/hostAdapters.js`.
+5. Regenerate and commit `src-tauri/gen/schemas/` so the ACL files match the handler.
+6. Add a wrapper in `src-tauri/src/hostAdapters.js`.
 
 Do not add a wildcard capability permission.
 
@@ -121,7 +125,9 @@ commands (including provider changes and approval submission).
 | `cargo test --manifest-path crates/neuro-memory/Cargo.toml` | failed assertions | fix the memory crate test or the code |
 | `npm ci && npm test && npm run build` | node:test or Vite error | check `src-tauri/src/*.{jsx,js}` |
 | `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Tauri compile error | missing icon or capability |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri` | failed assertions | fix the desktop binary test or the code |
 | locked headless `cargo check` / `cargo test --bin neurobrowser-headless` | headless compile or binary test failure | fix the headless feature path |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities` | failed assertions | fix the webview capability test or the capability files |
 | `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
 
 ## Environment variables
