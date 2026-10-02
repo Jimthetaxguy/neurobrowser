@@ -74,8 +74,8 @@ versions remain 0.1.0 until an actual version bump and release tag.
   empty compatibility readers, and unused exports/tests. Worker execution was
   never shipped.
 - The unused Tauri shell plugin and unused IPC commands (`get_page_info`,
-  `list_sessions`, `list_workers`, `get_worker`, `ask`). The command manifest and
-  generated permissions cover the 22 commands in `tauri::generate_handler!`.
+  `list_sessions`, `list_workers`, `get_worker`, `ask`).
+- Unused IPC commands `capture_page` and `get_memory_stats`.
 - Episodic LLM/tool-call records, request/tool/error metrics, and bounded
   conversation history. Those 0.1.1 records are not in the shipped agent.
 - The redundant headless `policy.snapshot` method; `policy.get` reads policy.
