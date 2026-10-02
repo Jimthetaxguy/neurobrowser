@@ -56,8 +56,9 @@ Shipped run/policy surface:
   cross-domain can run; a hostless current page (`about:blank`, empty URL) is
   not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
-- headless methods: `ping`, `policy.get` / `policy.set` / `policy.evaluate` /
-  `snapshot`
+- headless methods: `ping`, `policy.get` / `policy.set` (`params` is the
+  `ActionPolicy` object) / `policy.evaluate` (`params.tool` and
+  `params.arguments`) / `snapshot`
 
 React + Tauri is the primary frontend path
 ([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).
@@ -75,7 +76,9 @@ agent flows should run through the real Tauri runtime, not a mocked browser page
 
 ### Real-systems gap
 
-The headless `snapshot` response is a protocol fixture; it does not read a
-browser. Its migration requires attaching a real session/runtime, applying
-policy before tool execution, and testing that connection against real
-pages. Until then use the Tauri runtime for interactive browser work.
+The headless `snapshot` response is a hardcoded stub
+`{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }`,
+not a `PageSnapshot`. It does not read a browser. Its migration requires
+attaching a real session/runtime, applying policy before tool execution, and
+testing that connection against real pages. Until then use the Tauri runtime
+for interactive browser work.
