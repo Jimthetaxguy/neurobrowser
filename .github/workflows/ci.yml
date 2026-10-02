@@ -38,7 +38,7 @@ jobs:
         run: cargo build --release
 
   tauri:
-    name: "Tauri: frontend build + cargo check"
+    name: "Tauri: frontend build + npm test + desktop and headless cargo check/test + runtime_capabilities"
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
