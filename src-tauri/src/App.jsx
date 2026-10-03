@@ -348,6 +348,22 @@ export default function App({ adapter, lane }) {
     return nextSnapshot;
   }, [adapter, currentPageId, sessionId, updateSnapshot]);
 
+  // A completed navigation or toolbar action must not look failed merely because
+  // the following page read failed. Same split as applyPresentedRun.
+  const performPageAction = useCallback(async (action, failureLabel) => {
+    try {
+      await action();
+    } catch (error) {
+      setStatus(`${failureLabel}: ${messageText(error)}`);
+      return;
+    }
+    try {
+      await refreshSnapshot();
+    } catch (error) {
+      setStatus(`Page refresh failed: ${messageText(error)}`);
+    }
+  }, [refreshSnapshot]);
+
   const activatePage = useCallback(
     async (pageId) => {
       if (pageId == null || !sessionId) return;
@@ -413,26 +429,24 @@ export default function App({ adapter, lane }) {
     setLoading(`Opening ${rawUrl}...`);
 
     try {
-      await adapter.navigate(sessionId, currentPageId, rawUrl);
-      await refreshSnapshot();
-    } catch (error) {
-      setStatus(`Navigation failed: ${messageText(error)}`);
+      await performPageAction(
+        () => adapter.navigate(sessionId, currentPageId, rawUrl),
+        "Navigation failed"
+      );
     } finally {
       setLoading(null);
     }
-  }, [adapter, currentPageId, refreshSnapshot, sessionId, url]);
+  }, [adapter, currentPageId, performPageAction, sessionId, url]);
 
   const runBrowserAction = useCallback(
     async (command) => {
       if (currentPageId == null || !sessionId) return;
-      try {
-        await adapter.browserAction(command, sessionId, currentPageId);
-        await refreshSnapshot();
-      } catch (error) {
-        setStatus(`Browser action failed: ${messageText(error)}`);
-      }
+      await performPageAction(
+        () => adapter.browserAction(command, sessionId, currentPageId),
+        "Browser action failed"
+      );
     },
-    [adapter, currentPageId, refreshSnapshot, sessionId]
+    [adapter, currentPageId, performPageAction, sessionId]
   );
 
   const askAssistant = useCallback(async () => {

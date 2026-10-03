@@ -279,9 +279,7 @@ fn set_active_page(
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
-    state
-        .session_manager
-        .set_active_page(&session_id, page_id)?;
+    state.session_manager.get_page(&session_id, page_id)?;
     set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 

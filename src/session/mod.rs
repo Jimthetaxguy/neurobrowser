@@ -67,16 +67,6 @@ impl SessionManager {
             .ok_or("Page not found".to_string())
     }
 
-    pub fn set_active_page(&self, session_id: &str, page_id: usize) -> Result<(), String> {
-        let sessions = self.sessions.lock().unwrap();
-        let session = sessions.get(session_id).ok_or("Session not found")?;
-        if session.pages.iter().any(|page| page.id == page_id) {
-            Ok(())
-        } else {
-            Err("Page not found".to_string())
-        }
-    }
-
     pub fn close_page(&self, session_id: &str, page_id: usize) -> Result<(), String> {
         let mut sessions = self.sessions.lock().unwrap();
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;

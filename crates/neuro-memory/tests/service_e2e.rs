@@ -178,3 +178,136 @@ async fn capture_search_forget_removes_the_page_and_tombstones_the_domain() {
         1
     );
 }
+
+#[tokio::test]
+async fn recapture_drops_older_page_files_for_the_same_url() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let service = MemoryService::open(dir.path()).expect("open");
+    let policy = CapturePolicy::default();
+
+    let mut first = page(
+        "https://example.com/docs",
+        "<h1>Notes</h1><p>firsthashbody stays only until recapture.</p>",
+        "firsthashbody stays only until recapture.",
+    );
+    first.captured_at = 1_700_000_000_000;
+    let mut second = page(
+        "https://example.com/docs",
+        "<h1>Notes</h1><p>secondhashbody is the page that remains.</p>",
+        "secondhashbody is the page that remains.",
+    );
+    second.captured_at = 1_700_000_000_001;
+    let mut third = page(
+        "https://example.com/docs",
+        "<h1>Notes</h1><p>thirdhashbody is the latest capture.</p>",
+        "thirdhashbody is the latest capture.",
+    );
+    third.captured_at = 1_700_000_000_002;
+    let other = page(
+        "https://other.test/notes",
+        "<h1>Other</h1><p>otherhostfile stays on disk.</p>",
+        "otherhostfile stays on disk.",
+    );
+
+    service
+        .capture(first, &policy)
+        .await
+        .expect("first capture");
+    service
+        .capture(second, &policy)
+        .await
+        .expect("second capture");
+    service.capture(other, &policy).await.expect("other url");
+    service.capture(third, &policy).await.expect("recapture");
+
+    let remaining = json_files(dir.path());
+    assert_eq!(remaining.len(), 2, "{remaining:?}");
+    let bodies: Vec<String> = remaining
+        .iter()
+        .map(|name| {
+            std::fs::read_to_string(dir.path().join("pages").join(name)).expect("read page")
+        })
+        .collect();
+    let joined = bodies.join("\n");
+    assert!(
+        joined.contains("thirdhashbody"),
+        "latest hash must remain: {joined}"
+    );
+    assert!(
+        !joined.contains("firsthashbody") && !joined.contains("secondhashbody"),
+        "older hashes for the same URL must be deleted: {joined}"
+    );
+    assert!(
+        joined.contains("https://other.test/notes"),
+        "a different URL must be kept: {joined}"
+    );
+    assert!(joined.contains("\"captured_at\": 1700000000002"));
+
+    let blocks = service
+        .blocks_for_url(&url("https://example.com/docs"))
+        .await
+        .expect("blocks");
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block.text.contains("thirdhashbody")),
+        "{blocks:?}"
+    );
+    assert!(
+        blocks
+            .iter()
+            .all(|block| !block.text.contains("firsthashbody")),
+        "{blocks:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_recaptures_keep_the_page_used_by_the_index() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let service = MemoryService::open(dir.path()).expect("open");
+    let policy = CapturePolicy::default();
+    let page_url = url("https://example.com/concurrent");
+
+    for round in 0..8 {
+        let mut first = page(
+            page_url.as_str(),
+            "<p>first concurrent capture</p>",
+            "first concurrent capture",
+        );
+        first.captured_at += round * 2;
+        let mut second = page(
+            page_url.as_str(),
+            "<p>second concurrent capture</p>",
+            "second concurrent capture",
+        );
+        second.captured_at += round * 2 + 1;
+        let (first, second) = tokio::join!(
+            service.capture(first, &policy),
+            service.capture(second, &policy),
+        );
+        first.expect("first capture");
+        second.expect("second capture");
+        let files = json_files(dir.path());
+        assert_eq!(
+            files.len(),
+            1,
+            "one complete capture must remain: {files:?}"
+        );
+        let stored: CapturedPage = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("pages").join(&files[0]))
+                .expect("stored page"),
+        )
+        .expect("captured page");
+        let blocks = service
+            .blocks_for_url(&page_url)
+            .await
+            .expect("committed blocks");
+        assert!(!blocks.is_empty(), "the remaining capture must be indexed");
+        assert!(
+            blocks
+                .iter()
+                .all(|block| block.captured_at == stored.captured_at),
+            "the index must refer to the retained page: {blocks:?}"
+        );
+    }
+}
