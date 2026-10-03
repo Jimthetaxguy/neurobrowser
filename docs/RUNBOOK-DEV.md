@@ -33,7 +33,8 @@ This is the verification chain in `verify.sh`:
 7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri`
 8. Locked headless check and binary tests with `--features headless`
 9. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
-10. `cargo build --release` (library crate)
+10. `./tests/run_appkit_navigation.sh` on macOS (native Reload/tab-switch regression)
+11. `cargo build --release` (library crate)
 
 Expected output ends with `=== All checks passed ===`.
 
@@ -41,7 +42,7 @@ That line is the end of `verify.sh` only.
 
 - `cargo fmt`, `cargo clippy`, the root `cargo test`, and `cargo build --release` cover the root crate. There is no Cargo workspace, so those commands leave out `neuro-memory` and `src-tauri`.
 - `neuro-memory` is tested (`cargo test --manifest-path crates/neuro-memory/Cargo.toml`) and is not clippy-checked.
-- The CI `tauri` job is macOS check and test (frontend, desktop bin, headless, and `runtime_capabilities`). It does not run clippy.
+- The CI `tauri` job is macOS check and test (frontend, desktop bin, headless, `runtime_capabilities`, and the native AppKit navigation regression). It does not run clippy.
 - CI also runs a `guards` job that `verify.sh` does not. That job rejects mock crates, conflict markers, and iCloud duplicate names.
 - CI pins Node 22 on the `tauri` job. Local `verify.sh` uses the `node` and `npm` on `PATH`.
 

@@ -111,7 +111,7 @@ async fn summarize_page(
 `ActionPolicy` fields have no serde defaults (`allowed_domains`,
 `denied_domains`, `denied_tools`, `approval_required_tools`,
 `block_prompt_injection`).
-`policy.evaluate` reads `params.tool` and `params.arguments`.
+`policy.evaluate` reads `params.tool` and `params.arguments`. `arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`.
 Daemon `policy.evaluate` outcomes are `Allow`, `RequireApproval`, and `Block`
 (Rust serde uses snake_case; this dispatcher formats enum names).
 `snapshot` ignores `params` and returns

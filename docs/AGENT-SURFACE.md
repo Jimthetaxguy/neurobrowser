@@ -246,7 +246,7 @@ in `result`; approval and blocking are decision outcomes, not transport errors:
 
 The daemon outcomes are `Allow`, `RequireApproval`, and `Block` (the Rust
 serde representation uses snake_case, but this dispatcher formats enum names).
-This method only evaluates a proposed call; it does not execute it.
+This method only evaluates a proposed call; it does not execute it. `params.arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`.
 
 `policy.set` deserializes `params` as an `ActionPolicy`. `autonomy_level` is
 snake_case: `read_only` | `assisted` | `high_autonomy`. `ActionPolicy` fields
