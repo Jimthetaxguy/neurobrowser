@@ -246,7 +246,16 @@ in `result`; approval and blocking are decision outcomes, not transport errors:
 
 The daemon outcomes are `Allow`, `RequireApproval`, and `Block` (the Rust
 serde representation uses snake_case, but this dispatcher formats enum names).
-This method only evaluates a proposed call; it does not execute it.
+This method only evaluates a proposed call; it does not execute it. `params.arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`.
+
+`policy.set` deserializes `params` as an `ActionPolicy`. `autonomy_level` is
+snake_case: `read_only` | `assisted` | `high_autonomy`. `ActionPolicy` fields
+have no serde defaults, so `allowed_domains`, `denied_domains`, `denied_tools`,
+`approval_required_tools`, and `block_prompt_injection` must be present:
+
+```json
+{"id":"5","method":"policy.set","params":{"autonomy_level":"read_only","allowed_domains":["example.com"],"denied_domains":[],"denied_tools":[],"approval_required_tools":[],"block_prompt_injection":true}}
+```
 
 ## See also
 

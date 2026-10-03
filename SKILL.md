@@ -103,10 +103,17 @@ async fn summarize_page(
 {"id":"2","method":"policy.get","params":{}}
 {"id":"3","method":"policy.evaluate","params":{"tool":"get_text","arguments":{"selector":"h1"}}}
 {"id":"4","method":"snapshot","params":{}}
+{"id":"5","method":"policy.set","params":{"autonomy_level":"read_only","allowed_domains":["example.com"],"denied_domains":[],"denied_tools":[],"approval_required_tools":[],"block_prompt_injection":true}}
 ```
 
 `policy.set` sends `params` as the `ActionPolicy` object itself.
-`policy.evaluate` reads `params.tool` and `params.arguments`.
+`autonomy_level` is snake_case: `read_only` | `assisted` | `high_autonomy`.
+`ActionPolicy` fields have no serde defaults (`allowed_domains`,
+`denied_domains`, `denied_tools`, `approval_required_tools`,
+`block_prompt_injection`).
+`policy.evaluate` reads `params.tool` and `params.arguments`. `arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`.
+Daemon `policy.evaluate` outcomes are `Allow`, `RequireApproval`, and `Block`
+(Rust serde uses snake_case; this dispatcher formats enum names).
 `snapshot` ignores `params` and returns
 `{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }`,
 not a `PageSnapshot` from the crate.
