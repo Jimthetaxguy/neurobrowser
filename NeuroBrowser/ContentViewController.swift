@@ -296,9 +296,9 @@ class ContentViewController: NSViewController {
         return scheme == "http" || scheme == "https"
     }
 
-    private static func validatedNavigationURL(from input: String) -> URL? {
+    static func validatedNavigationURL(from input: String) -> URL? {
         let normalized: String
-        if input.contains("://") {
+        if input.range(of: #"^[A-Za-z][A-Za-z0-9+.-]*://"#, options: .regularExpression) != nil {
             normalized = input
         } else {
             // A bare hostname may include a port; an explicit non-HTTP scheme

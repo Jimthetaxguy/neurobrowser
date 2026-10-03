@@ -29,11 +29,22 @@ struct ReloadRegression {
                 status = event["message"] as? String ?? ""
             }
         }
-        for input in ["file:///blocked.html", "mailto:user@example.com", "javascript:alert(1)", "http:///missing-host"] {
+        for input in ["file:///blocked.html", "mailto:user@example.com", "javascript:alert(1)", "http:///missing-host", "a.b://blocked.example"] {
             status = ""
             controller.navigateCurrentTab(to: input)
             precondition(status == "Only http and https URLs can be opened", "a rejected URL must report its reason: \(input)")
         }
-        print("AppKit navigation: 9/9 assertions passed")
+        let accepted = [
+            ("example.com/?next=https://other.example", "https://example.com/?next=https://other.example"),
+            ("example.com/path/https://other.example", "https://example.com/path/https://other.example"),
+            ("example.com:8443/?next=https://other.example", "https://example.com:8443/?next=https://other.example"),
+            ("HTTPS://example.com/", "HTTPS://example.com/"),
+            ("example.com", "https://example.com")
+        ]
+        for (input, expected) in accepted {
+            precondition(ContentViewController.validatedNavigationURL(from: input)?.absoluteString == expected,
+                         "a valid URL must retain its path and query: \(input)")
+        }
+        print("AppKit navigation: 15/15 assertions passed")
     }
 }
