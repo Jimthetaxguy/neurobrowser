@@ -129,6 +129,8 @@ fn call(name: &str, args: &[(&str, &str)]) -> ToolCall {
 /// verify the agent surfaces the POST-navigation URL to the model.
 struct MutBrowser {
     snapshot: Mutex<PageSnapshot>,
+    failures_after_navigate: usize,
+    remaining_snapshot_failures: Mutex<usize>,
 }
 
 impl MutBrowser {
@@ -144,7 +146,14 @@ impl MutBrowser {
                 interactive_ready: true,
                 ..PageSnapshot::default()
             }),
+            failures_after_navigate: 0,
+            remaining_snapshot_failures: Mutex::new(0),
         }
+    }
+
+    fn with_snapshot_failures(mut self, count: usize) -> Self {
+        self.failures_after_navigate = count;
+        self
     }
 }
 
@@ -152,6 +161,7 @@ impl MutBrowser {
 impl BrowserInterface for MutBrowser {
     async fn navigate(&self, url: &str) -> Result<(), String> {
         self.snapshot.lock().unwrap().url = url.to_string();
+        *self.remaining_snapshot_failures.lock().unwrap() = self.failures_after_navigate;
         Ok(())
     }
     async fn query_selector(&self, _selector: &str) -> Result<Vec<ElementInfo>, String> {
@@ -176,6 +186,11 @@ impl BrowserInterface for MutBrowser {
         Ok(())
     }
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
+        let mut failures = self.remaining_snapshot_failures.lock().unwrap();
+        if *failures > 0 {
+            *failures -= 1;
+            return Err("document is unloading".to_string());
+        }
         Ok(self.snapshot.lock().unwrap().clone())
     }
 }
@@ -610,5 +625,73 @@ fn parses_legacy_action_syntax_with_multiple_positional_args() {
     assert_eq!(
         calls[0].arguments.get("text").map(String::as_str),
         Some("hello")
+    );
+}
+
+#[tokio::test]
+async fn transient_post_tool_snapshot_failure_retries_the_read_and_updates_model_context() {
+    let browser = MutBrowser::new("https://example.com/start").with_snapshot_failures(1);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(RecordingProvider::new(
+        vec![
+            response(
+                "navigate",
+                vec![call("navigate", &[("url", "https://example.com/final")])],
+            ),
+            response("done", vec![]),
+        ],
+        seen.clone(),
+    ));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+    let run = agent
+        .execute_with_policy("navigate", &browser, &ActionPolicy::default())
+        .await
+        .expect("run");
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["https://example.com/start", "https://example.com/final"]
+    );
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(event,
+        AgentRunEvent::ToolCallResult { tool, success: true, .. } if tool == "navigate"))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn persistent_post_tool_snapshot_failure_keeps_success_and_previous_context() {
+    let browser = MutBrowser::new("https://example.com/start").with_snapshot_failures(2);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(RecordingProvider::new(
+        vec![
+            response(
+                "navigate",
+                vec![call("navigate", &[("url", "https://example.com/final")])],
+            ),
+            response("done", vec![]),
+        ],
+        seen.clone(),
+    ));
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+    let run = agent
+        .execute_with_policy("navigate", &browser, &ActionPolicy::default())
+        .await
+        .expect("run");
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["https://example.com/start", "https://example.com/start"]
+    );
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(event,
+        AgentRunEvent::ToolCallResult { tool, success: true, .. } if tool == "navigate"))
+            .count(),
+        1
     );
 }

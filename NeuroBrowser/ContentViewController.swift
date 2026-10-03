@@ -209,6 +209,7 @@ class ContentViewController: NSViewController {
         if currentTabIndex < webViews.count {
             let webView = webViews[currentTabIndex]
             webView.isHidden = false
+            reloadButton.title = webView.isLoading ? "◌" : "↻"
             
             if let url = webView.url {
                 urlBar.stringValue = url.absoluteString
@@ -277,7 +278,13 @@ class ContentViewController: NSViewController {
     func navigateCurrentTab(to input: String) {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, currentTabIndex < webViews.count else { return }
-        guard let url = Self.validatedNavigationURL(from: input) else { return }
+        guard let url = Self.validatedNavigationURL(from: input) else {
+            pageUpdateHandler?([
+                "type": "status",
+                "message": "Only http and https URLs can be opened"
+            ])
+            return
+        }
         urlBar.stringValue = url.absoluteString
         webViews[currentTabIndex].load(URLRequest(url: url))
     }
@@ -289,17 +296,21 @@ class ContentViewController: NSViewController {
         return scheme == "http" || scheme == "https"
     }
 
-    private static func validatedNavigationURL(from input: String) -> URL? {
+    static func validatedNavigationURL(from input: String) -> URL? {
         let normalized: String
-        if input.hasPrefix("http://") || input.hasPrefix("https://") {
+        if input.range(of: #"^[A-Za-z][A-Za-z0-9+.-]*://"#, options: .regularExpression) != nil {
             normalized = input
-        } else if input.contains(".") && !input.contains(" ") {
-            normalized = "https://" + input
         } else {
-            return nil
+            // A bare hostname may include a port; an explicit non-HTTP scheme
+            // must not be reinterpreted as an HTTPS hostname.
+            if let scheme = URL(string: input)?.scheme, !scheme.contains(".") {
+                return nil
+            }
+            guard input.contains("."), !input.contains(" ") else { return nil }
+            normalized = "https://" + input
         }
         guard let url = URL(string: normalized),
-              allowsHttpNavigation(url) else {
+              allowsHttpNavigation(url), url.host != nil else {
             return nil
         }
         return url
@@ -402,11 +413,13 @@ extension ContentViewController: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "↻"
         updateNavigationButtons()
     }
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "↻"
         updateNavigationButtons()
     }

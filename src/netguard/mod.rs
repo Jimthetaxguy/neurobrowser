@@ -1,18 +1,9 @@
 //! Shared SSRF boundary for every `BrowserInterface` implementation and for
-//! provider egress.
-//!
-//! Previously this logic lived privately inside `BrowserEngine`, which meant the static
-//! HTTP engine was guarded and the Tauri webview runtime — the interactive path that
-//! actually drives a browser — was not. Any guard that only one implementation calls is
-//! not a boundary; it is a suggestion. This module is the boundary, and both impls call
-//! it.
-//!
-//! Design rules, each written against a specific way the previous version was bypassed:
+//! provider egress. The static HTTP engine and the Tauri webview runtime both
+//! call this module.
 //!
 //! 1. **Fail closed.** An unparseable URL or an unresolvable host is *blocked*, never
-//!    allowed. The prior code used `.ok()?` on both, so a resolution failure returned
-//!    "not blocked" — a security predicate that answers "I don't know" with "yes" is
-//!    worse than no predicate, because it reads as protection.
+//!    allowed.
 //! 2. **Canonicalize before deciding.** `::ffff:169.254.169.254` and `169.254.169.254`
 //!    are the same destination. IPv4-mapped and IPv4-compatible IPv6 addresses are
 //!    unwrapped to their v4 form and judged there, so one address cannot be laundered
@@ -200,7 +191,6 @@ pub fn blocked_reason_for_parsed(parsed: &url::Url) -> Option<BlockReason> {
                     Some(BlockReason::Unresolvable(domain.to_string()))
                 }
             }
-            // Fail CLOSED. The previous `.ok()?` returned "not blocked" here.
             Err(_) => Some(BlockReason::Unresolvable(domain.to_string())),
         },
     }
@@ -384,8 +374,6 @@ mod tests {
 
     #[test]
     fn does_not_block_a_url_merely_mentioning_a_scheme_in_its_query() {
-        // The old substring check (`contains("javascript:")`) rejected this legitimate
-        // https URL. Scheme parsing does not.
         let r = blocked_reason("https://example.com/redir?next=javascript:alert(1)");
         assert!(
             !matches!(r, Some(BlockReason::DisallowedScheme(_))),
@@ -419,14 +407,8 @@ mod tests {
 
 /// A `reqwest` DNS resolver that refuses to hand back blocked addresses.
 ///
-/// This closes the DNS-rebinding TOCTOU that a pre-flight check cannot: previously
-/// `blocked_reason` resolved a hostname, judged it, and then reqwest performed a
-/// *second, independent* lookup to connect. A name answering public on the first
-/// lookup and loopback on the second was fetched anyway.
-///
-/// Filtering inside the resolver removes the gap by construction — the addresses that
-/// are judged are the addresses the connector receives, because they are the same
-/// resolution. There is no second lookup to disagree with the first.
+/// Filtering inside the resolver makes the judged addresses the addresses the
+/// connector receives, because they come from the same resolution.
 ///
 /// This is a *narrowed* TOCTOU, not an eliminated one: a name resolving to several
 /// addresses could in principle be re-resolved by a connection retry outside this
