@@ -21,6 +21,10 @@ cargo check --manifest-path src-tauri/Cargo.toml --features headless --locked
 cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --bin neurobrowser-headless
 echo "→ Webview capability regression tests..."
 cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "→ AppKit navigation regression..."
+  ./tests/run_appkit_navigation.sh
+fi
 echo "→ cargo build --release..."
 cargo build --release
 echo "=== All checks passed ==="
