@@ -128,26 +128,6 @@ impl PageStore {
     /// Only `{content_hash}.json` files are considered. A page that disappears
     /// between the listing and the delete is left alone.
     pub async fn delete_by_url(&self, page_url: &Url) -> Result<(), StoreError> {
-        self.delete_by_url_keeping(page_url, None).await
-    }
-
-    /// Remove stored pages whose URL equals `page_url`, except `keep_hash`.
-    ///
-    /// Capture keeps the hash it just wrote and drops older files for that URL.
-    /// `keep_hash` is skipped even when it names a page at `page_url`.
-    pub async fn delete_by_url_except(
-        &self,
-        page_url: &Url,
-        keep_hash: &str,
-    ) -> Result<(), StoreError> {
-        self.delete_by_url_keeping(page_url, Some(keep_hash)).await
-    }
-
-    async fn delete_by_url_keeping(
-        &self,
-        page_url: &Url,
-        keep_hash: Option<&str>,
-    ) -> Result<(), StoreError> {
         let mut hashes = Vec::new();
         let mut dir = tokio::fs::read_dir(&self.pages_dir)
             .await
@@ -169,9 +149,6 @@ impl PageStore {
         }
 
         for hash in hashes {
-            if keep_hash == Some(hash.as_str()) {
-                continue;
-            }
             let Some(page) = self.get(&hash).await? else {
                 continue;
             };
@@ -227,7 +204,7 @@ fn encode_page(page: &CapturedPage) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 
-fn is_content_hash(hash: &str) -> bool {
+pub(crate) fn is_content_hash(hash: &str) -> bool {
     hash.len() == 64
         && hash
             .bytes()

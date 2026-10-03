@@ -10,11 +10,12 @@
 //! fast `u64` of Unix epoch milliseconds, and it is stored for the same reason.
 
 use crate::model::SemanticBlock;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use tantivy::collector::{Count, TopDocs};
 use tantivy::directory::MmapDirectory;
-use tantivy::query::TermQuery;
+use tantivy::query::{BooleanQuery, Occur, Query, TermQuery};
 use tantivy::schema::{
     Field, IndexRecordOption, OwnedValue, Schema, TantivyDocument, Term, FAST, STORED, STRING, TEXT,
 };
@@ -26,6 +27,7 @@ const FIELD_PAGE_URL: &str = "page_url";
 const FIELD_HEADING_PATH: &str = "heading_path";
 const FIELD_TEXT: &str = "text";
 const FIELD_CAPTURED_AT: &str = "captured_at";
+const PAGE_MARKER: &str = "__captured_page__";
 
 /// Per-thread minimum Tantivy accepts (`MARGIN_IN_BYTES * 15`).
 const WRITER_HEAP_BYTES: usize = 15_000_000;
@@ -33,6 +35,7 @@ const WRITER_THREADS: usize = 1;
 
 /// Cap for [`BlockIndex::blocks_for_url`]. A captured page stays far under this.
 const MAX_BLOCKS_PER_URL: usize = 10_000;
+const MAX_CAPTURE_HASHES_PER_URL: usize = 10_000;
 
 /// Failure from [`BlockIndex`].
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +62,12 @@ pub enum IndexError {
     },
     #[error("page {url} has {count} blocks, above the {limit} lookup limit")]
     TooManyBlocks {
+        url: String,
+        count: usize,
+        limit: usize,
+    },
+    #[error("page {url} has {count} retained captures, above the {limit} cleanup limit")]
+    TooManyCaptures {
         url: String,
         count: usize,
         limit: usize,
@@ -174,6 +183,60 @@ impl BlockIndex {
         Ok(())
     }
 
+    // A second block_id term marks metadata without changing the disk schema.
+    // The first stored ID retains the existing {hash}:{suffix} convention.
+    pub(crate) fn add_page_marker(&self, page_url: &Url, hash: &str) -> Result<(), IndexError> {
+        let mut doc = TantivyDocument::default();
+        doc.add_text(self.fields.block_id, format!("{hash}:page"));
+        doc.add_text(self.fields.block_id, PAGE_MARKER);
+        doc.add_text(self.fields.page_url, page_url.as_str());
+        self.writer()?.add_document(doc)?;
+        Ok(())
+    }
+
+    pub(crate) fn remove_page_marker(&self, hash: &str) -> Result<(), IndexError> {
+        self.writer()?.delete_term(Term::from_field_text(
+            self.fields.block_id,
+            &format!("{hash}:page"),
+        ));
+        Ok(())
+    }
+
+    // Legacy semantic blocks already contain their page hash in block_id.
+    pub(crate) fn page_hashes_for_url(&self, page_url: &Url) -> Result<Vec<String>, IndexError> {
+        let mut hashes = BTreeSet::new();
+        let mut docs = self.documents_for_url(page_url, true)?;
+        if docs.is_empty() {
+            // Old indexes have only semantic blocks; new indexes need read
+            // only the small marker set, never the current page's full text.
+            docs = self.documents_for_url(page_url, false)?;
+        }
+        for doc in docs {
+            let id = required_str(&doc, self.fields.block_id, FIELD_BLOCK_ID)?;
+            let (hash, _) = id.split_once(':').ok_or(IndexError::BadField {
+                field: FIELD_BLOCK_ID,
+            })?;
+            if !crate::store::is_content_hash(hash) {
+                return Err(IndexError::BadField {
+                    field: FIELD_BLOCK_ID,
+                });
+            }
+            hashes.insert(hash.to_string());
+        }
+        Ok(hashes.into_iter().collect())
+    }
+
+    pub(crate) fn exclude_page_markers(&self, query: Box<dyn Query>) -> Box<dyn Query> {
+        let marker = TermQuery::new(
+            Term::from_field_text(self.fields.block_id, PAGE_MARKER),
+            IndexRecordOption::Basic,
+        );
+        Box::new(BooleanQuery::new(vec![
+            (Occur::Must, query),
+            (Occur::MustNot, Box::new(marker)),
+        ]))
+    }
+
     /// Queue deletion of every block whose page URL equals `page_url`.
     ///
     /// The deletion is visible after [`BlockIndex::commit`]. Blocks added after
@@ -195,6 +258,17 @@ impl BlockIndex {
     ///
     /// Uncommitted adds and deletes are omitted. This is an exact URL lookup.
     pub fn blocks_for_url(&self, page_url: &Url) -> Result<Vec<SemanticBlock>, IndexError> {
+        self.documents_for_url(page_url, false)?
+            .iter()
+            .map(|doc| self.block_from_doc(doc))
+            .collect()
+    }
+
+    fn documents_for_url(
+        &self,
+        page_url: &Url,
+        markers_only: bool,
+    ) -> Result<Vec<TantivyDocument>, IndexError> {
         let reader = self
             .index
             .reader_builder()
@@ -202,25 +276,47 @@ impl BlockIndex {
             .try_into()?;
         let searcher = reader.searcher();
         let term = Term::from_field_text(self.fields.page_url, page_url.as_str());
-        let query = TermQuery::new(term, IndexRecordOption::Basic);
-        let count = searcher.search(&query, &Count)?;
+        let mut query: Box<dyn Query> = Box::new(TermQuery::new(term, IndexRecordOption::Basic));
+        if markers_only {
+            let marker = TermQuery::new(
+                Term::from_field_text(self.fields.block_id, PAGE_MARKER),
+                IndexRecordOption::Basic,
+            );
+            query = Box::new(BooleanQuery::new(vec![
+                (Occur::Must, query),
+                (Occur::Must, Box::new(marker)),
+            ]));
+        } else {
+            query = self.exclude_page_markers(query);
+        }
+        let count = searcher.search(query.as_ref(), &Count)?;
         if count == 0 {
             return Ok(Vec::new());
         }
-        if count > MAX_BLOCKS_PER_URL {
-            return Err(IndexError::TooManyBlocks {
-                url: page_url.to_string(),
-                count,
-                limit: MAX_BLOCKS_PER_URL,
+        let limit = if markers_only {
+            MAX_CAPTURE_HASHES_PER_URL
+        } else {
+            MAX_BLOCKS_PER_URL
+        };
+        if count > limit {
+            return Err(if markers_only {
+                IndexError::TooManyCaptures {
+                    url: page_url.to_string(),
+                    count,
+                    limit,
+                }
+            } else {
+                IndexError::TooManyBlocks {
+                    url: page_url.to_string(),
+                    count,
+                    limit,
+                }
             });
         }
-        let hits = searcher.search(&query, &TopDocs::with_limit(count))?;
-        let mut blocks = Vec::with_capacity(hits.len());
-        for (_score, address) in hits {
-            let doc: TantivyDocument = searcher.doc(address)?;
-            blocks.push(self.block_from_doc(&doc)?);
-        }
-        Ok(blocks)
+        let hits = searcher.search(query.as_ref(), &TopDocs::with_limit(count))?;
+        hits.into_iter()
+            .map(|(_, address)| searcher.doc(address).map_err(IndexError::from))
+            .collect()
     }
 
     fn writer(&self) -> Result<MutexGuard<'_, IndexWriter>, IndexError> {

@@ -71,9 +71,14 @@ impl MemoryService {
     /// is written to the store (which assigns [`CapturedPage::content_hash`]),
     /// blocks are extracted from that stored page, and those blocks replace any
     /// previously indexed blocks for the same URL. The index commit makes the
-    /// new blocks searchable. Other stored page files for that URL are then
-    /// removed; the file for this capture's content hash is kept. `content_hash`
-    /// includes `captured_at`, so a later capture of the same URL is a new file.
+    /// new blocks searchable. Older hashes recorded for that URL are then
+    /// removed; the file for this capture's content hash is kept. Page markers
+    /// also track captures that produce no searchable blocks. Obsolete markers
+    /// remain until deletion succeeds, so a later capture can retry after restart.
+    /// Legacy hashes in semantic block IDs are recognized; historical files with
+    /// no remaining index reference are retained rather than scanning every page.
+    /// `content_hash` includes `captured_at`, so a later capture of the same URL
+    /// is a new file.
     /// Capture and forget operations are serialized so overlapping updates cannot
     /// delete a page that another operation is still indexing.
     pub async fn capture(
@@ -86,17 +91,40 @@ impl MemoryService {
             return Err(MemoryError::Denied { reason });
         }
 
+        let prior_hashes = self
+            .index
+            .page_hashes_for_url(&page.url)
+            .map_err(index_error)?;
         let stored = self.store.put(page).await.map_err(store_error)?;
         let blocks = extract_blocks(&stored);
         self.index.remove_by_url(&stored.url).map_err(index_error)?;
+        self.index
+            .add_page_marker(&stored.url, &stored.content_hash)
+            .map_err(index_error)?;
+        let obsolete: Vec<_> = prior_hashes
+            .into_iter()
+            .filter(|hash| *hash != stored.content_hash)
+            .collect();
+        for hash in &obsolete {
+            self.index
+                .add_page_marker(&stored.url, hash)
+                .map_err(index_error)?;
+        }
         for block in &blocks {
             self.index.add_block(block).map_err(index_error)?;
         }
         self.index.commit().map_err(index_error)?;
-        self.store
-            .delete_by_url_except(&stored.url, &stored.content_hash)
-            .await
-            .map_err(store_error)?;
+        // Publish retained deletion candidates with the new blocks before
+        // removing files; a failed delete must not lose its recovery metadata.
+        for hash in &obsolete {
+            self.store.delete(hash).await.map_err(store_error)?;
+        }
+        if !obsolete.is_empty() {
+            for hash in &obsolete {
+                self.index.remove_page_marker(hash).map_err(index_error)?;
+            }
+            self.index.commit().map_err(index_error)?;
+        }
         Ok(())
     }
 
