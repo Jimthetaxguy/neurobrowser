@@ -209,6 +209,7 @@ class ContentViewController: NSViewController {
         if currentTabIndex < webViews.count {
             let webView = webViews[currentTabIndex]
             webView.isHidden = false
+            reloadButton.title = webView.isLoading ? "◌" : "↻"
             
             if let url = webView.url {
                 urlBar.stringValue = url.absoluteString
@@ -297,15 +298,19 @@ class ContentViewController: NSViewController {
 
     private static func validatedNavigationURL(from input: String) -> URL? {
         let normalized: String
-        if input.hasPrefix("http://") || input.hasPrefix("https://") {
+        if input.contains("://") {
             normalized = input
-        } else if input.contains(".") && !input.contains(" ") {
-            normalized = "https://" + input
         } else {
-            return nil
+            // A bare hostname may include a port; an explicit non-HTTP scheme
+            // must not be reinterpreted as an HTTPS hostname.
+            if let scheme = URL(string: input)?.scheme, !scheme.contains(".") {
+                return nil
+            }
+            guard input.contains("."), !input.contains(" ") else { return nil }
+            normalized = "https://" + input
         }
         guard let url = URL(string: normalized),
-              allowsHttpNavigation(url) else {
+              allowsHttpNavigation(url), url.host != nil else {
             return nil
         }
         return url
