@@ -123,12 +123,13 @@ fn parse_user_query(index: &BlockIndex, query: &str) -> Result<Box<dyn Query>, Q
         index.tantivy_index(),
         vec![index.text_field(), index.heading_path_field()],
     );
-    parser
+    let query = parser
         .parse_query(query)
         .map_err(|source| QueryError::Parse {
             query: query.to_string(),
             source,
-        })
+        })?;
+    Ok(index.exclude_page_markers(query))
 }
 
 fn open_searcher(index: &BlockIndex) -> Result<Searcher, QueryError> {
