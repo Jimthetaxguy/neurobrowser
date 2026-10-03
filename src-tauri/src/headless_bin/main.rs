@@ -369,6 +369,28 @@ where
     Ok(())
 }
 
+/// `arguments` must be a JSON object whose values are strings.
+///
+/// A missing key is an empty map. Null, a non-object, or a non-string value is
+/// rejected. Substituting `{}` would drop `navigate`'s `url` and skip the
+/// scheme and domain gates.
+fn string_arguments(value: Option<&Value>) -> Result<HashMap<String, String>, &'static str> {
+    let Some(value) = value else {
+        return Ok(HashMap::new());
+    };
+    let Value::Object(map) = value else {
+        return Err("arguments must be a JSON object whose values are strings");
+    };
+    let mut arguments = HashMap::with_capacity(map.len());
+    for (key, value) in map {
+        let Value::String(text) = value else {
+            return Err("arguments must be a JSON object whose values are strings");
+        };
+        arguments.insert(key.clone(), text.clone());
+    }
+    Ok(arguments)
+}
+
 async fn dispatch(request: &Request, _state: &SessionState) -> Response {
     match request.method.as_str() {
         "ping" => Response::ok(request.id.clone(), serde_json::json!({ "pong": true })),
@@ -399,9 +421,12 @@ async fn dispatch(request: &Request, _state: &SessionState) -> Response {
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
                 .to_string();
-            let arguments_value = params.get("arguments").cloned().unwrap_or(Value::Null);
-            let arguments: HashMap<String, String> =
-                serde_json::from_value(arguments_value).unwrap_or_default();
+            let arguments = match string_arguments(params.get("arguments")) {
+                Ok(arguments) => arguments,
+                Err(message) => {
+                    return Response::err(request.id.clone(), "VALIDATION", message);
+                }
+            };
             _state
                 .evaluate_tool_call(&request.id, &name, &arguments)
                 .await
@@ -613,5 +638,86 @@ mod tests {
             .expect("outcome field present");
 
         assert_eq!(outcome, "Allow");
+    }
+
+    fn evaluate_request(id: &str, params: Value) -> Request {
+        Request {
+            id: id.to_string(),
+            method: "policy.evaluate".to_string(),
+            params,
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_evaluate_rejects_arguments_that_are_not_a_string_map() {
+        let state = SessionState::new();
+        let cases = [
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": 1 } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": ["https://evil.example"] } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": { "href": "javascript:alert(1)" } } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": true } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": null } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": "https://example.com", "n": 2 } }),
+            serde_json::json!({ "tool": "navigate", "arguments": 1 }),
+            serde_json::json!({ "tool": "navigate", "arguments": ["https://evil.example"] }),
+            serde_json::json!({ "tool": "navigate", "arguments": "https://evil.example" }),
+            serde_json::json!({ "tool": "navigate", "arguments": null }),
+        ];
+
+        for params in cases {
+            let response = dispatch(&evaluate_request("bad", params.clone()), &state).await;
+            assert!(!response.ok, "{params}");
+            assert!(response.result.is_none(), "{params}");
+            let error = response.error.expect("validation error");
+            assert_eq!(error.code, "VALIDATION", "{params}: {error:?}");
+            assert!(
+                error
+                    .message
+                    .contains("JSON object whose values are strings"),
+                "{params}: {}",
+                error.message
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_evaluate_keeps_string_argument_values() {
+        let state = SessionState::new();
+
+        let blocked = dispatch(
+            &evaluate_request(
+                "js",
+                serde_json::json!({
+                    "tool": "navigate",
+                    "arguments": { "url": "javascript:alert(1)" }
+                }),
+            ),
+            &state,
+        )
+        .await;
+        assert!(blocked.ok, "{blocked:?}");
+        assert_eq!(blocked.result.unwrap()["outcome"], "Block");
+
+        let allowed = dispatch(
+            &evaluate_request(
+                "read",
+                serde_json::json!({
+                    "tool": "get_text",
+                    "arguments": { "selector": "h1" }
+                }),
+            ),
+            &state,
+        )
+        .await;
+        assert!(allowed.ok, "{allowed:?}");
+        assert_eq!(allowed.result.unwrap()["outcome"], "Allow");
+
+        let omitted = dispatch(
+            &evaluate_request("omit", serde_json::json!({ "tool": "get_text" })),
+            &state,
+        )
+        .await;
+        assert!(omitted.ok, "{omitted:?}");
+        assert_eq!(omitted.result.unwrap()["outcome"], "Allow");
     }
 }

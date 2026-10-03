@@ -25,6 +25,7 @@ pub use query::{explain, search, QueryError};
 use crate::index::{BlockIndex, IndexError};
 use crate::store::{PageStore, StoreError};
 use std::path::{Path, PathBuf};
+use tokio::sync::Mutex;
 use url::Url;
 
 /// Durable page memory rooted at a data directory.
@@ -37,6 +38,8 @@ pub struct MemoryService {
     data_dir: PathBuf,
     store: PageStore,
     index: BlockIndex,
+    // Keep each store/index update and obsolete-file cleanup in one operation.
+    mutations: Mutex<()>,
 }
 
 impl MemoryService {
@@ -52,6 +55,7 @@ impl MemoryService {
             data_dir,
             store,
             index,
+            mutations: Mutex::new(()),
         })
     }
 
@@ -67,12 +71,17 @@ impl MemoryService {
     /// is written to the store (which assigns [`CapturedPage::content_hash`]),
     /// blocks are extracted from that stored page, and those blocks replace any
     /// previously indexed blocks for the same URL. The index commit makes the
-    /// new blocks searchable.
+    /// new blocks searchable. Other stored page files for that URL are then
+    /// removed; the file for this capture's content hash is kept. `content_hash`
+    /// includes `captured_at`, so a later capture of the same URL is a new file.
+    /// Capture and forget operations are serialized so overlapping updates cannot
+    /// delete a page that another operation is still indexing.
     pub async fn capture(
         &self,
         page: CapturedPage,
         policy: &CapturePolicy,
     ) -> Result<(), MemoryError> {
+        let _mutation = self.mutations.lock().await;
         if let CaptureDecision::Deny { reason } = policy.evaluate(page.url.as_str()) {
             return Err(MemoryError::Denied { reason });
         }
@@ -84,6 +93,10 @@ impl MemoryService {
             self.index.add_block(block).map_err(index_error)?;
         }
         self.index.commit().map_err(index_error)?;
+        self.store
+            .delete_by_url_except(&stored.url, &stored.content_hash)
+            .await
+            .map_err(store_error)?;
         Ok(())
     }
 
@@ -120,6 +133,7 @@ impl MemoryService {
         page_url: &Url,
         policy: &mut CapturePolicy,
     ) -> Result<(), MemoryError> {
+        let _mutation = self.mutations.lock().await;
         tombstone_host(policy, page_url);
         self.index.remove_by_url(page_url).map_err(index_error)?;
         self.index.commit().map_err(index_error)?;
