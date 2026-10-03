@@ -204,7 +204,7 @@ fn encode_page(page: &CapturedPage) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 
-fn is_content_hash(hash: &str) -> bool {
+pub(crate) fn is_content_hash(hash: &str) -> bool {
     hash.len() == 64
         && hash
             .bytes()
