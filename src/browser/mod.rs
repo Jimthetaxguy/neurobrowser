@@ -850,9 +850,15 @@ fn scroll_delta(args: &HashMap<String, String>, name: &str) -> Result<f32, Strin
     let Some(value) = args.get(name) else {
         return Ok(0.0);
     };
-    value
+    let delta = value
         .parse::<f32>()
-        .map_err(|_| format!("scroll_by {name} must be a number, got {value:?}"))
+        .map_err(|_| format!("scroll_by {name} must be a number, got {value:?}"))?;
+    if !delta.is_finite() {
+        return Err(format!(
+            "scroll_by {name} must be a finite number, got {value:?}"
+        ));
+    }
+    Ok(delta)
 }
 
 struct SubmitFormTool;
@@ -1231,6 +1237,22 @@ mod tests {
         assert!(result.success, "{result:?}");
         assert_eq!(result.result, "Scrolled by 4, -8.5");
         assert_eq!(*browser.calls.lock().expect("scroll count"), 1);
+    }
+
+    #[tokio::test]
+    async fn scroll_by_rejects_non_finite_deltas() {
+        let browser = CountingScroll {
+            calls: Mutex::new(0),
+        };
+        for key in ["x", "y"] {
+            for value in ["NaN", "inf", "-inf", "1e100"] {
+                let args = HashMap::from([(key.to_string(), value.to_string())]);
+                let result = ScrollByTool.execute(args, &browser).await;
+                assert!(!result.success, "{key}={value}: {result:?}");
+                assert!(result.result.contains("finite number"), "{result:?}");
+            }
+        }
+        assert_eq!(*browser.calls.lock().expect("scroll count"), 0);
     }
 
     #[test]

@@ -260,3 +260,54 @@ async fn recapture_drops_older_page_files_for_the_same_url() {
         "{blocks:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_recaptures_keep_the_page_used_by_the_index() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let service = MemoryService::open(dir.path()).expect("open");
+    let policy = CapturePolicy::default();
+    let page_url = url("https://example.com/concurrent");
+
+    for round in 0..8 {
+        let mut first = page(
+            page_url.as_str(),
+            "<p>first concurrent capture</p>",
+            "first concurrent capture",
+        );
+        first.captured_at += round * 2;
+        let mut second = page(
+            page_url.as_str(),
+            "<p>second concurrent capture</p>",
+            "second concurrent capture",
+        );
+        second.captured_at += round * 2 + 1;
+        let (first, second) = tokio::join!(
+            service.capture(first, &policy),
+            service.capture(second, &policy),
+        );
+        first.expect("first capture");
+        second.expect("second capture");
+        let files = json_files(dir.path());
+        assert_eq!(
+            files.len(),
+            1,
+            "one complete capture must remain: {files:?}"
+        );
+        let stored: CapturedPage = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("pages").join(&files[0]))
+                .expect("stored page"),
+        )
+        .expect("captured page");
+        let blocks = service
+            .blocks_for_url(&page_url)
+            .await
+            .expect("committed blocks");
+        assert!(!blocks.is_empty(), "the remaining capture must be indexed");
+        assert!(
+            blocks
+                .iter()
+                .all(|block| block.captured_at == stored.captured_at),
+            "the index must refer to the retained page: {blocks:?}"
+        );
+    }
+}
