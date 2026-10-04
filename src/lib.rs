@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod browser;
+pub mod capability;
 pub mod netguard;
 pub mod providers;
 pub mod session;
@@ -22,4 +23,10 @@ pub use tools::{
     BrowserInterface, BrowserTool, ElementInfo, FormInfo, FormInputInfo, ImageInfo, LinkInfo,
     PageSnapshot, PriceInfo, TableInfo, ToolAction, ToolArgumentDefinition, ToolDefinition,
     ToolRegistry, ToolResult, ToolRisk,
+};
+
+pub use capability::{
+    ActionReceipt, ApprovalContext, DispatchState, DocumentStamp, ObservationLimits,
+    ObservedTarget, PageObservation, RuntimeCapabilities, RuntimeKind, TargetAction, TargetCommand,
+    TargetDispatchError, VerificationState,
 };

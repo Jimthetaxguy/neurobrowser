@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Capability evidence workload</title></head>
+<body>
+  <h1>Observatory shipment ledger</h1>
+  <p id="static-fact">Depot stock: 17 crates.</p>
+  <p id="loaded-fact" aria-live="polite">Loading dispatch schedule…</p>
+  <table><thead><tr><th>Route</th><th>Crates</th></tr></thead>
+    <tbody><tr><td>North</td><td>17</td></tr><tr><td>South</td><td>23</td></tr></tbody>
+  </table>
+  <a href="/route/north">North route manifest</a>
+  <button id="advance" type="button">Advance shipment</button>
+  <button id="replace" type="button">Replace shipment control</button>
+  <button id="spa" type="button">Open route view</button>
+  <button type="button" disabled>Unavailable shipment</button>
+  <p id="shipment-fact">Shipment state: waiting.</p>
+  <form id="dispatch-form" action="/dispatch/default" aria-label="Dispatch form">
+    <label for="recipient">Recipient</label><input id="recipient" name="recipient" value="CANARY_NORMAL_VALUE_97">
+    <label for="password">Access password</label><input id="password" type="password" value="CANARY_PASSWORD_41">
+    <input name="csrf" type="hidden" value="CANARY_HIDDEN_83">
+    <button id="confirm-dispatch" type="submit" formaction="/dispatch/reviewed">Confirm dispatch</button>
+  </form>
+  <p id="form-fact">Form state: waiting.</p>
+  <div hidden>CANARY_HIDDEN_TEXT_62</div>
+  <script src="/workload.js"></script>
+</body>
+</html>

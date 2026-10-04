@@ -625,3 +625,15 @@ main {
     border-top: 1px solid var(--border);
   }
 }
+
+.evidence-panel { padding: 12px; border-bottom: 1px solid var(--border-color, #394047); font-size: 12px; }
+.evidence-panel > summary { cursor: pointer; margin-bottom: 10px; font-weight: 600; }
+.evidence-panel details { margin: 8px 0; }
+.evidence-source { overflow-wrap: anywhere; }
+.evidence-limit { opacity: .75; line-height: 1.5; }
+.evidence-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; }
+.evidence-actions { display: grid; gap: 8px; margin-top: 10px; }
+.evidence-actions label { display: grid; gap: 4px; }
+.evidence-actions select, .evidence-actions input { max-width: 100%; min-width: 0; padding: 6px; background: #18202a; color: #f1f4f8; border: 1px solid #526071; border-radius: 4px; }
+.evidence-table { border-collapse: collapse; display: block; overflow: auto; max-height: 150px; }
+.evidence-table th, .evidence-table td { padding: 4px; border: 1px solid #526071; }

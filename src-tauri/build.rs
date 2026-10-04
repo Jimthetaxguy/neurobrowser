@@ -13,6 +13,8 @@ fn main() {
             "forget_memory",
             "get_action_policy",
             "get_page_snapshot",
+            "get_page_observation",
+            "execute_browser_tool",
             "navigate",
             "search_local_memory",
             "set_action_policy",

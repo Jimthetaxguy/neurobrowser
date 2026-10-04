@@ -3,13 +3,14 @@
 Canonical agent-facing surface for the **shipped crate**. Update `SKILL.md`
 with this file.
 
-- **19 tools** on the agent surface. `default_tool_registry()` in
-  `src/browser/mod.rs` registers the 17 browser tools.
+- **24 tools** on the agent surface. `default_tool_registry()` in
+  `src/browser/mod.rs` registers the 22 browser tools.
   `default_tool_registry_with_memory()` adds `search_personal_memory` and
-  `inspect_active_page`. `ReActAgent::with_memory` uses that 19-tool registry.
-  `ReActAgent::new` keeps the 17 browser tools.
-- CSS selectors (or pixels / a key). There is no `ref_map`
-  (`PageSnapshot` has no such field).
+  `inspect_active_page`. `ReActAgent::with_memory` uses that 24-tool registry.
+  `ReActAgent::new` keeps the 22 browser tools.
+- Legacy tools accept CSS selectors (or pixels / a key). New scoped target tools
+  consume `PageObservation.document` and a runtime-issued `target_id`. `PageSnapshot`
+  keeps its compatibility shape and has no `ref_map`.
 - Autonomy: `ReadOnly` / `Assisted` / `HighAutonomy` via `ActionPolicy`.
 - Headless JSON-RPC is `ping` / `policy.*` / `snapshot`. `snapshot` returns a
   hardcoded stub (`url`, `title`, `viewport`, `tree: ""`), not a crate
@@ -34,6 +35,37 @@ interactive_ready, links, images, forms, prices, tables
 
 No element-ref map. No ARIA tree field.
 
+## Shared observations and scoped actions
+
+`observe_page` returns a version-1 `PageObservation` with exact source URL,
+capabilities, document stamp, bounded text/links/tables, targets and omissions.
+The serialized envelope is at most 64 KiB; raw HTML and field values are excluded.
+HTTP has no scoped targets. Desktop targets contain IDs, roles, labels, state and
+reviewed destinations, with no field values. Document IDs change on navigation and
+revision changes invalidate relevant page state, including silent form-value edits.
+
+`click_target`, `type_target`, `submit_target` and `scroll_target` take string arguments
+`document` (JSON stamp) and `target_id`; typing also takes `text`, redacted in events.
+Optional `postcondition` is JSON `{ "type": "url_equals", "url": "..." }` or
+`{ "type": "text_contains", "text": "..." }`. Unknown arguments are rejected.
+
+A scoped tool's `ToolResult.result` is a JSON `ActionReceipt` with dispatch
+`not_dispatched`/`acknowledged`/`unknown`, page readiness and verification
+`not_requested`/`satisfied`/`unsatisfied`/`unavailable`. Verification proves the
+specified observed document condition, not remote transaction success. The run stops
+on uncertain dispatch or unresolved readiness/verification; inspect before continuing.
+
+External Rust clients can call `propose_tool_with_policy` without an AI provider call.
+Approved execution must use `execute_approved_tool_with_policy` with latest host policy.
+The old compatibility method uses only the stored proposal's policy. Grants bind exact
+run/call/policy and reviewed page/target; IDs cannot manufacture authority and are consumed
+once. Desktop policy changes acknowledge after an exclusive write lease installs them.
+
+The desktop exposes `get_page_observation` and `execute_browser_tool` only to its
+trusted control webview. Remote page webviews have report-only IPC, bound to native
+caller and request ownership. No new MCP transport is shipped; the daemon below
+remains its separate policy stub. Main-world page execution is not hostile-page isolation.
+
 ## Personal memory vs agent run memory
 
 Two stores share the word "memory". They are not interchangeable.
@@ -48,7 +80,7 @@ returns that URL's captured blocks, or a `capture denied: ...` error when
 `CapturePolicy` refuses the URL. `search_personal_memory` ignores the browser
 argument and searches the index.
 
-## Tools (19)
+## Tools (24)
 
 Arguments are `HashMap<String, String>`. Results are `ToolResult`
 (`tool_name`, `result`, `success`).
@@ -106,8 +138,8 @@ Click. Action: `Click`.
 ### 9. `type` — `selector`, `text`
 
 Type into an input. Tool metadata sets `sensitive: true`, so policy requires approval.
-Action: `Type`. Redaction is based on argument keys; do not assume the
-plain `text` key is redacted from every tool or event payload.
+Action: `Type`. Text and credential arguments are `[REDACTED]` in policy and
+agent event payloads. Browser evidence excludes input values.
 
 ### 10. `scroll_to` — `selector`
 
@@ -186,13 +218,13 @@ Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 This table applies only after the common gates. Denied tools/domains, off-list
 domains, unsafe navigation schemes, and detected prompt injection block first.
 Sensitive argument keys, sensitive tool metadata (including `type`), and explicit
-approval-list matches return `RequireApproval` before mode evaluation, even in
-`HighAutonomy` or `ReadOnly`.
+approval-list matches return `RequireApproval` before mode evaluation in
+`HighAutonomy`; ReadOnly action prohibitions block before approval triggers.
 
 Credential keys are normalized across case, camelCase, and separators; matching
 credential tokens (including `authorization`, `authentication`, `apiKey`,
 `accessToken`, and `cardNumber`) are redacted to `[REDACTED]` in the decision.
-Sensitive tool metadata does not redact unrelated keys such as plain `text`.
+The plain `text` argument is also redacted in decisions and events. Tool metadata still determines whether approval is needed.
 
 ## Policy gates
 
@@ -202,12 +234,17 @@ Sensitive tool metadata does not redact unrelated keys such as plain `text`.
 2. Prompt-injection on the page → `Block`.
 3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
 4. If the URL has a parsed host, block it when it appears in `denied_domains` or misses a non-empty allowlist. A rule matches that host or its subdomains (`example.com` matches `a.example.com`). If the URL has no parsed host, skip this gate.
-5. Sensitive argument keys or sensitive tool metadata → `RequireApproval`.
-6. `approval_required_tools` → `RequireApproval`.
-7. Mode table.
+5. ReadOnly action prohibitions → `Block`.
+6. Sensitive argument keys or sensitive tool metadata → `RequireApproval`.
+7. `approval_required_tools` → `RequireApproval`.
+8. Remaining mode table.
 
 Tauri: `get_action_policy` / `set_action_policy`. Daemon: `policy.get` /
 `policy.set`.
+
+Approval IDs are single-use lookup keys into private reviewed grants. Grants expire
+after five minutes. `ReActAgent::approval_context` exposes only the reviewed URL,
+document and target for a human approval card. Input values stay redacted.
 
 ## Error shape
 

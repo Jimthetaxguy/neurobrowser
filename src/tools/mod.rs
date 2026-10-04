@@ -47,6 +47,32 @@ pub trait BrowserTool: Send + Sync {
 
 #[async_trait]
 pub trait BrowserInterface: Send + Sync {
+    /// Conservative defaults keep existing adapters source compatible without
+    /// inventing execution guarantees they have not implemented.
+    fn capabilities(&self) -> crate::capability::RuntimeCapabilities {
+        crate::capability::RuntimeCapabilities::unknown()
+    }
+    async fn observe(
+        &self,
+        limits: crate::capability::ObservationLimits,
+    ) -> Result<crate::capability::PageObservation, String> {
+        let observation = crate::capability::PageObservation::from_snapshot(
+            self.snapshot().await?,
+            self.capabilities(),
+            limits,
+        );
+        observation.validate()?;
+        Ok(observation)
+    }
+    async fn dispatch_target(
+        &self,
+        _command: &crate::capability::TargetCommand,
+    ) -> Result<(), crate::capability::TargetDispatchError> {
+        Err(crate::capability::TargetDispatchError::rejected(
+            "Scoped target actions are unsupported by this runtime",
+        ))
+    }
+
     async fn navigate(&self, url: &str) -> Result<(), String>;
     async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String>;
     async fn get_text(&self, selector: &str) -> Result<String, String>;

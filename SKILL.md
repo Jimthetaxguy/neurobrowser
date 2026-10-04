@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 19 tools (17 browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
+description: Drive NeuroBrowser from a Rust agent via the crate's 24 tools (22 browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -18,10 +18,10 @@ drive it in two ways:
    stub (`url`, `title`, `viewport`, `tree: ""`), not a crate `PageSnapshot`.
    The daemon does not execute browser tools.
 
-The shipped agent surface is **19 tools**. Seventeen are browser
+The shipped agent surface is **24 tools**. Twenty-two are browser
 tools from `default_tool_registry()`. `search_personal_memory` and
 `inspect_active_page` are added by `default_tool_registry_with_memory()` and
-`ReActAgent::with_memory`. `ReActAgent::new` stays at the 17 browser tools.
+`ReActAgent::with_memory`. `ReActAgent::new` stays at the 22 browser tools.
 There is no `ref_map` (`PageSnapshot` has no such field). Not shipped as named
 tools: `evaluate`, `get_attribute`, `wait_for`, `extract_text`.
 
@@ -30,6 +30,21 @@ memory tools close over that service. They do not read an in-run agent log.
 The shipped crate has no `agent::memory` module.
 
 Full spec: `docs/AGENT-SURFACE.md`.
+
+## Shared capability route
+
+Use `observe_page` for bounded page evidence and runtime capabilities. For interaction,
+use `click_target`, `type_target`, `submit_target` or `scroll_target` with the exact JSON
+`document` stamp and `target_id` from that observation. Refresh after page changes.
+Typed `text` is redacted from events. Optional JSON `postcondition` tests URL equality
+or text presence in the resulting observation. Receipts distinguish dispatch from
+page readiness and predicate verification; uncertain or unresolved outcomes stop the run.
+
+Use `ReActAgent::propose_tool_with_policy` for provider-free explicit proposals.
+Use `execute_approved_tool_with_policy` with current host policy for approved dispatch.
+Public IDs are not grants: exact calls, policy and reviewed page state must still match.
+Humans use the same route through the desktop evidence/action panel. The separate
+headless policy daemon is unchanged and cannot browse.
 
 ## When to use
 
@@ -170,10 +185,10 @@ either; that call uses the `BrowserInterface` default error, as do `back`,
 | `Assisted` (default) | Read, wait, scroll, navigate that is not cross-domain; a hostless current page (`about:blank`, empty URL) is not cross-domain | otherwise `RequireApproval` |
 | `HighAutonomy` | Remaining non-high-impact actions | Submit / purchase / auth / upload / message / destructive → `RequireApproval` |
 
-The mode table applies after the common gates below. Sensitive inputs and
-explicit approval-list matches return `RequireApproval` before mode evaluation,
-including in `ReadOnly` and `HighAutonomy`. Tool/domain denials and injection
-checks run first and return `Block`.
+Tool/domain denials and injection checks run first and return `Block`.
+`ReadOnly` blocks state-changing actions before sensitive-input or explicit
+approval gates; approval cannot widen read-only authority. Other modes apply
+sensitive-input and explicit approval gates before their remaining mode rules.
 
 ## Policy gates
 
@@ -183,9 +198,10 @@ Same order as `ActionPolicy::evaluate`; first match wins:
 2. Prompt-injection on the page → `Block`.
 3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
 4. If the URL has a parsed host, block it when it appears in `denied_domains` or misses a non-empty allowlist. A rule matches that host or its subdomains (`example.com` matches `a.example.com`). If the URL has no parsed host, skip this gate.
-5. Sensitive keys or sensitive tool metadata → `RequireApproval`.
-6. `approval_required_tools` → `RequireApproval`.
-7. Mode table.
+5. `ReadOnly` state-changing actions → `Block`.
+6. Sensitive keys or sensitive tool metadata → `RequireApproval`.
+7. `approval_required_tools` → `RequireApproval`.
+8. Remaining mode rules.
 
 Headless `policy.evaluate` reads `params.tool` and `params.arguments`, then
 builds an empty `PageSnapshot` (no URL, HTML, or text) before calling
@@ -194,8 +210,8 @@ evaluate, so prompt-injection cannot fire,
 domain; allow/deny lists still apply to `navigate` via the argument URL.
 
 Credential tokens (`password`, `token`, `secret`, `api_key`, `authorization`,
-and related) are `[REDACTED]` in the decision. `type` is marked sensitive;
-metadata alone does not redact every argument value.
+and related), plus every `text` argument, are `[REDACTED]` in decisions and
+agent events. `type` is marked sensitive and requires approval.
 
 ## See also
 

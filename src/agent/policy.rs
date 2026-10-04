@@ -153,6 +153,43 @@ pub struct AgentRunResult {
 }
 
 impl ActionPolicy {
+    /// Evaluate the host-observed destination, while preserving the actual action's risk.
+    pub fn evaluate_target(
+        &self,
+        tool_name: &str,
+        tool_risk: &ToolRisk,
+        arguments: &HashMap<String, String>,
+        snapshot: &PageSnapshot,
+        target: &crate::capability::ObservedTarget,
+    ) -> PolicyDecision {
+        let current = self.evaluate(tool_name, tool_risk, arguments, snapshot);
+        if current.outcome == PolicyOutcome::Block {
+            return current;
+        }
+        if let Some(destination) = target
+            .destination
+            .as_ref()
+            .filter(|_| matches!(tool_risk.action, ToolAction::Click | ToolAction::Submit))
+        {
+            let destination_arguments = HashMap::from([("url".into(), destination.clone())]);
+            let mut destination_decision = self.evaluate(
+                "navigate",
+                &ToolRisk::new(ToolAction::Navigate),
+                &destination_arguments,
+                snapshot,
+            );
+            if destination_decision.outcome == PolicyOutcome::Block {
+                destination_decision.redacted_arguments = redact_arguments(arguments);
+                return destination_decision;
+            }
+        }
+        let mut observed_risk = tool_risk.clone();
+        observed_risk.sensitive |= target.sensitive;
+        observed_risk.externally_visible |=
+            target.destination.is_some() && tool_risk.action == ToolAction::Click;
+        self.evaluate(tool_name, &observed_risk, arguments, snapshot)
+    }
+
     pub fn evaluate(
         &self,
         tool_name: &str,
@@ -246,6 +283,23 @@ impl ActionPolicy {
             }
         }
 
+        // A prohibition cannot become executable merely by obtaining approval.
+        if self.autonomy_level == AutonomyLevel::ReadOnly
+            && !matches!(
+                tool_risk.action,
+                ToolAction::Read | ToolAction::Wait | ToolAction::Scroll
+            )
+        {
+            reasons.push("Read-only mode blocks this action".into());
+            flags.push(RiskFlag::ReadOnlyMode);
+            return PolicyDecision::with_outcome(
+                PolicyOutcome::Block,
+                reasons,
+                flags,
+                redacted_arguments,
+            );
+        }
+
         if contains_sensitive_argument(arguments) || tool_risk.sensitive {
             reasons.push("Tool call contains sensitive input".to_string());
             flags.push(RiskFlag::SensitiveArgument);
@@ -309,6 +363,14 @@ impl ActionPolicy {
                     )
                 }
             },
+            AutonomyLevel::HighAutonomy if tool_risk.externally_visible => {
+                PolicyDecision::with_outcome(
+                    PolicyOutcome::RequireApproval,
+                    vec!["Externally visible action requires approval".into()],
+                    vec![RiskFlag::HighImpactAction],
+                    redacted_arguments,
+                )
+            }
             AutonomyLevel::HighAutonomy => match tool_risk.action {
                 ToolAction::Submit
                 | ToolAction::Purchase
@@ -335,7 +397,7 @@ pub fn redact_arguments(arguments: &HashMap<String, String>) -> HashMap<String, 
     arguments
         .iter()
         .map(|(key, value)| {
-            if is_sensitive_key(key) {
+            if is_sensitive_key(key) || key.eq_ignore_ascii_case("text") {
                 (key.clone(), "[REDACTED]".to_string())
             } else {
                 (key.clone(), value.clone())

@@ -16,6 +16,21 @@ export async function applyPresentedRun(result, { appendMessage, setPendingAppro
 }
 
 export function presentAgentRun(result) {
+  const receipt = [...(result.events || [])].reverse().find(event => event.receipt)?.receipt;
+  if (receipt && ["completed", "failed"].includes(result.status)) {
+    return {
+      pendingApproval: null,
+      message: receipt.message,
+      status: receipt.dispatch === "unknown" ? "Outcome unknown; inspect page"
+        : receipt.dispatch === "not_dispatched" ? "Action was not dispatched"
+        : receipt.verification === "satisfied" ? "Requested page condition observed"
+        : receipt.verification === "not_requested" && receipt.page_ready ? "Dispatch acknowledged; outcome not verified"
+        : "Dispatch acknowledged; inspect page",
+    };
+  }
+  if (result.status === "failed") {
+    return { pendingApproval: null, message: result.final_response || "Run failed.", status: "Run failed; inspect page" };
+  }
   if (result.status === "awaiting_approval") {
     return {
       pendingApproval: result,

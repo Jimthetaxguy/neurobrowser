@@ -106,6 +106,10 @@ impl BrowserEngine {
 
 #[async_trait]
 impl BrowserInterface for BrowserEngine {
+    fn capabilities(&self) -> crate::capability::RuntimeCapabilities {
+        crate::capability::RuntimeCapabilities::http()
+    }
+
     async fn navigate(&self, url: &str) -> Result<(), String> {
         // Shared boundary — the same check the Tauri runtime performs. Covers scheme,
         // literal addresses, every resolved address, and fails closed on parse or
@@ -201,6 +205,15 @@ impl BrowserInterface for BrowserEngine {
 
 pub fn default_tool_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(crate::capability::tools::ObservePageTool));
+    for action in [
+        crate::capability::TargetAction::Click,
+        crate::capability::TargetAction::Type,
+        crate::capability::TargetAction::Submit,
+        crate::capability::TargetAction::Scroll,
+    ] {
+        registry.register(Arc::new(crate::capability::tools::TargetTool::new(action)));
+    }
     registry.register(Arc::new(NavigateTool));
     registry.register(Arc::new(WaitTool));
     registry.register(Arc::new(QueryDomTool));
@@ -249,6 +262,47 @@ pub fn enrich_snapshot(snapshot: &mut PageSnapshot) {
     snapshot.prices = extract_prices(source_text);
 }
 
+/// Remove non-rendered source and secret field values before any snapshot,
+/// query result or persistent-memory capture can receive the parsed page.
+fn sanitize_snapshot_html(html: &str) -> String {
+    let mut document = Html::parse_document(html);
+    let ids: Vec<_> = document.tree.nodes().map(|node| node.id()).collect();
+    for id in ids {
+        let Some(mut node) = document.tree.get_mut(id) else {
+            continue;
+        };
+        if let scraper::Node::Element(element) = node.value() {
+            if matches!(element.name(), "script" | "style" | "noscript") {
+                node.detach();
+                continue;
+            }
+            if matches!(element.name(), "textarea" | "select") {
+                let children: Vec<_> = document
+                    .tree
+                    .get(id)
+                    .unwrap()
+                    .children()
+                    .map(|child| child.id())
+                    .collect();
+                for child in children {
+                    document.tree.get_mut(child).unwrap().detach();
+                }
+                continue;
+            }
+            let secret = element.name() == "input"
+                && element.attr("type").is_some_and(|t| {
+                    t.eq_ignore_ascii_case("password") || t.eq_ignore_ascii_case("hidden")
+                });
+            let iframe = element.name() == "iframe";
+            element.attrs.retain(|(name, _)| {
+                !(secret && name.local.as_ref() == "value"
+                    || iframe && name.local.as_ref() == "srcdoc")
+            });
+        }
+    }
+    document.html()
+}
+
 fn snapshot_from_html(
     url: &str,
     html: &str,
@@ -256,7 +310,8 @@ fn snapshot_from_html(
     viewport_height: u32,
     interactive_ready: bool,
 ) -> PageSnapshot {
-    let doc = Html::parse_document(html);
+    let sanitized_html = sanitize_snapshot_html(html);
+    let doc = Html::parse_document(&sanitized_html);
     let title = doc
         .select(&Selector::parse("title").expect("valid title selector"))
         .next()
@@ -267,7 +322,7 @@ fn snapshot_from_html(
     let mut snapshot = PageSnapshot {
         url: url.to_string(),
         title,
-        html: Some(html.to_string()),
+        html: Some(sanitized_html),
         text: Some(text),
         viewport_width,
         viewport_height,
@@ -294,7 +349,7 @@ fn query_selector_from_html(html: &str, selector: &str) -> Result<Vec<ElementInf
         return Ok(vec![]);
     }
 
-    let document = Html::parse_document(html);
+    let document = Html::parse_document(&sanitize_snapshot_html(html));
     Ok(document
         .select(&parsed_selector)
         .map(|element| ElementInfo {
@@ -1063,6 +1118,29 @@ mod tests {
     }
 
     #[test]
+    fn http_snapshot_and_query_redact_credentials_before_export() {
+        let html = r#"<html><body><script>const secret = 'script-canary';</script><form><input type='PASSWORD' name='pw' value='password-canary'><input type='hidden' value='hidden-canary'><input type='text' name='q' value='public-value'><textarea>textarea-canary</textarea><select><option>selection-canary</option></select></form><table><tr><td><textarea>table-field-canary</textarea>Public cell</td></tr></table><iframe srcdoc='<input type=password value=frame-canary>'></iframe><p>Visible fact</p></body></html>"#;
+        let snapshot = snapshot_from_html("https://example.com", html, 100, 100, false);
+        let exported = serde_json::to_string(&snapshot).unwrap();
+        for secret in [
+            "password-canary",
+            "hidden-canary",
+            "script-canary",
+            "frame-canary",
+            "textarea-canary",
+            "selection-canary",
+            "table-field-canary",
+        ] {
+            assert!(!exported.contains(secret), "snapshot leaked {secret}");
+        }
+        assert!(snapshot.text.unwrap().contains("Visible fact"));
+        let inputs = query_selector_from_html(html, "input").unwrap();
+        assert!(!inputs[0].attributes.contains_key("value"));
+        assert!(!inputs[1].attributes.contains_key("value"));
+        assert_eq!(inputs[2].attributes.get("value").unwrap(), "public-value");
+    }
+
+    #[test]
     fn snapshot_from_html_collects_basic_metadata() {
         let snapshot = snapshot_from_html(
             "https://example.com",
@@ -1080,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_registers_seventeen_explicit_definitions() {
+    fn default_registry_registers_all_explicit_definitions() {
         let registry = default_tool_registry();
         let expected = [
             ("navigate", ToolRisk::new(ToolAction::Navigate)),
@@ -1105,7 +1183,19 @@ mod tests {
             ("reload", ToolRisk::new(ToolAction::Reload)),
         ];
         assert_eq!(expected.len(), 17);
-        assert_eq!(registry.len(), expected.len());
+        assert_eq!(registry.len(), expected.len() + 5);
+        for name in [
+            "observe_page",
+            "click_target",
+            "type_target",
+            "submit_target",
+            "scroll_target",
+        ] {
+            assert!(
+                registry.get(name).is_some(),
+                "missing capability tool {name}"
+            );
+        }
 
         for (name, risk) in expected {
             let tool = registry

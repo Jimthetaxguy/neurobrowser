@@ -322,6 +322,7 @@ pub fn build_system_prompt(context: &AiContext) -> String {
 
     prompt.push_str("Use structured browser tool calls when an action is needed:\n");
     prompt.push_str("ToolCall: {\"name\":\"tool_name\",\"arguments\":{\"key\":\"value\"}}\n\n");
+    prompt.push_str("Use observe_page before scoped target actions. Its document stamp and target_id are evidence for that observation only; refresh after page changes. A dispatch acknowledgment is not a verified website outcome. On unknown dispatch stop and hand off; never repeat the action automatically.\n");
     prompt.push_str("Available tools:\n");
     for definition in browser_tool_registry().definitions() {
         push_tool_definition(&mut prompt, &definition);
@@ -421,7 +422,7 @@ mod tests {
         assert!(!prompt.contains("Navigate to an HTTP(S) URL"));
 
         let browser = crate::browser::default_tool_registry().definitions();
-        assert_eq!(browser.len(), 17);
+        assert_eq!(browser.len(), 22);
         for definition in &browser {
             assert_lists(&prompt, definition);
         }
