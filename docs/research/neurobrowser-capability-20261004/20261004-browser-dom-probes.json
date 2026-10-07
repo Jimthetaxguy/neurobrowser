@@ -1,0 +1,23 @@
+{
+  "recorded_at": "2026-10-04T14:56:16-04:00",
+  "source_commit": "f50f5aec9599a8b8926167dc17fcf3d012e6be31",
+  "environment": "React DOM + jsdom with exact shipped runtime; not native WebKit",
+  "react_controlled_form": {
+    "type_receipt": "acknowledged",
+    "dom_value_after_type": "updated",
+    "on_change_calls": 0,
+    "submitted_react_state": "initial"
+  },
+  "css_hidden_button": {
+    "observed_enabled": true,
+    "dispatch_receipt": "acknowledged",
+    "click_handler_calls": 1
+  },
+  "legacy_privacy_canaries": {
+    "legacy_html_contains_ordinary_credential": true,
+    "legacy_form_value_contains_ordinary_credential": true,
+    "legacy_html_contains_script_canary": true,
+    "new_observation_contains_either_canary": false
+  },
+  "real_private_data_accessed": false
+}

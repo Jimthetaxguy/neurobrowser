@@ -1,0 +1,57 @@
+[
+  {
+    "file": "20261004-accepted-verification.log",
+    "original_sha256": "a9dbe520e54803aff60ec1ff0ff3d2bb29a82f4db5ad646888a7f825771e2208",
+    "tracked_sha256": "6406d64588174678f3bd20c96961fe6b288eae3ba542d29afaf6b68cb4d749ef"
+  },
+  {
+    "file": "20261004-browser-dom-probes.json",
+    "original_sha256": "c94cd377eba7d90bf96ca731107922cbc3fd2570e82936b8e0453886ccb56a2b",
+    "tracked_sha256": "c94cd377eba7d90bf96ca731107922cbc3fd2570e82936b8e0453886ccb56a2b"
+  },
+  {
+    "file": "20261004-browser-function-audit.md",
+    "original_sha256": "8b759b200a8d071369c1ade62d7d0a25e98a35300c2569c71aec8781f20615b3",
+    "tracked_sha256": "8b759b200a8d071369c1ade62d7d0a25e98a35300c2569c71aec8781f20615b3"
+  },
+  {
+    "file": "20261004-clippy-repair.log",
+    "original_sha256": "6332bd17d599a249d8b9c3f578c7d215afc3fb7eda38fda1b48bb09d9f55ed66",
+    "tracked_sha256": "9eab3baae8ed06efbc22704246d9ce8dcab65974e1b0e30c44081f37ca6f7953"
+  },
+  {
+    "file": "20261004-final-verification.log",
+    "original_sha256": "8d4e3d1c8096f9ece9d33671aa10fe7856dbfe6d0b51e2c2a0712d9f0ba1a89d",
+    "tracked_sha256": "1aa03163bc27bc07f64b1dcac183a4675a75b3ab82438548765d3124b9cc7326"
+  },
+  {
+    "file": "20261004-provider-fixture-repair.log",
+    "original_sha256": "e335c5623f81097d8104c4cf564a3c4629caa576109ff58b58c4e12aa1fc34d4",
+    "tracked_sha256": "e91d8a6fa2b103546cfc62dd5a6a0914969a742c75db953534fdcc5e6c1c8b9c"
+  },
+  {
+    "file": "20261004-verification-receipt.json",
+    "original_sha256": "ff7a2e564bfe6f94d447345b2e8fccf490dca07398f477ddbb225d3659626fdf",
+    "tracked_sha256": "ff7a2e564bfe6f94d447345b2e8fccf490dca07398f477ddbb225d3659626fdf"
+  },
+  {
+    "file": "20261004-verification.log",
+    "original_sha256": "385e0e120c44c14abe64266169d495bb7ce205e025b9c9e28d2e8bfb11ae2d3d",
+    "tracked_sha256": "cc66f8d623633be425b5af670897bfc3fd2c6202f57bd96a8857e4b5b8b4afad"
+  },
+  {
+    "file": "20261004-webkit-receipt.json",
+    "original_sha256": "294c3f52ab69bd3f80663b3e1ff3bd2035b895b062edb1ff323bfa63657d2e71",
+    "tracked_sha256": "294c3f52ab69bd3f80663b3e1ff3bd2035b895b062edb1ff323bfa63657d2e71"
+  },
+  {
+    "file": "browser-integration-plan.md",
+    "original_sha256": "ed9cda1b4c7818f1ca74915d44f4c5f00776ca25ae2ac8d9716092a37faae849",
+    "tracked_sha256": "c852d2ee4381b52bb30afc41fb31c6c9ef7b7ccae1151a79b5723f2ef1c35121"
+  },
+  {
+    "file": "neurobrowser-lightpanda-assessment-20261003.md",
+    "original_sha256": "4077450dd513e835108f2401c32f6a686f357d3b1952dca5ac229d9a64fff94f",
+    "tracked_sha256": "f23cfc433f890b634a0226802a9b216f39045153f7c939daef81e065ce9e2bd5"
+  }
+]
