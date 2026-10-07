@@ -40,22 +40,36 @@ fn page_webviews_never_inherit_control_commands() {
     let authority = context.runtime_authority_mut();
     let manifests: serde_json::Value =
         serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json")).unwrap();
-    let permissions = manifests["__app-acl__"]["permissions"].as_object().unwrap();
-    let commands: Vec<_> = permissions
-        .values()
-        .flat_map(|p| p["commands"]["allow"].as_array().unwrap())
-        .map(|c| c.as_str().unwrap())
-        .filter(|c| *c != "browser_runtime_report")
-        .collect();
-    assert!(commands.contains(&"submit_approval"));
-    assert!(commands.contains(&"set_provider"));
-    for command in commands {
+    let main_capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+    let permissions = main_capability["permissions"].as_array().unwrap();
+    let mut configured_commands = Vec::new();
+    for permission in permissions {
+        let permission = permission.as_str().unwrap();
+        let allowed = manifests["__app-acl__"]["permissions"][permission]["commands"]["allow"]
+            .as_array()
+            .unwrap();
+        configured_commands.extend(allowed.iter().map(|command| command.as_str().unwrap()));
+    }
+    configured_commands.retain(|command| *command != "browser_runtime_report");
+    assert!(configured_commands.contains(&"submit_approval"));
+    assert!(configured_commands.contains(&"set_provider"));
+    for command in configured_commands {
         assert!(
             authority
                 .resolve_access(command, "main", "main", &Origin::Local)
                 .is_some(),
             "control webview lost {command}"
         );
+    }
+    let commands = manifests["__app-acl__"]["permissions"]
+        .as_object()
+        .unwrap()
+        .values()
+        .flat_map(|permission| permission["commands"]["allow"].as_array().unwrap())
+        .map(|command| command.as_str().unwrap())
+        .filter(|command| *command != "browser_runtime_report");
+    for command in commands {
         for origin in [
             Origin::Local,
             remote("about:blank"),

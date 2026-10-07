@@ -2,6 +2,14 @@
 name = "neurobrowser-tauri"
 version = "0.1.0"
 edition = "2021"
+# Disambiguates the app's main binary for `tauri build`: this crate has two
+# [[bin]] targets (this implicit one from src/main.rs, plus the
+# feature-gated neurobrowser-headless daemon below). Without an explicit
+# default-run, tauri-cli's binary autodetection picks the first bin target
+# in `cargo metadata` order (neurobrowser-headless) instead of this one,
+# and fails with "No such file or directory" looking for a nonexistent
+# `release/headless` binary.
+default-run = "neurobrowser-tauri"
 
 [features]
 default = []
@@ -14,7 +22,7 @@ devtools = ["tauri/devtools"]
 
 [[bin]]
 name = "neurobrowser-headless"
-path = "src/bin/headless.rs"
+path = "src/headless_bin/main.rs"
 required-features = ["headless"]
 
 [dependencies]
