@@ -20,7 +20,9 @@ Drive a **real browser session** (WKWebView / WebView2 / WebKitGTK via Tauri) wi
 | **Submit approval** | `submit_approval` / `cancel_agent_run` resolve gated actions |
 | **StreamEvent** | Tagged JSON events for proposed / blocked / approved / rejected / executed actions |
 | **Tabs-as-workers** | Phase E model: tabs as parallel work units for agent tasks |
-| **Headless daemon** | Phase D4: Unix domain socket control plane for external agents |
+| **Headless daemon** | Phase D4: Unix domain socket control plane for external agents (local TCP fallback) |
+| **Socket authz** | Per-connection: Unix uses `SO_PEERCRED` same-uid (+ `chmod 0600`); TCP requires an `auth` handshake with a shared secret (`NEUROBROWSER_TOKEN`). Each connection gets its own `SessionState`/`ActionPolicy` so `policy.set` is connection-scoped |
+| **Tool-profile scoping** | NB-12: policy tier → allowed tool-name set; `tools.list` advertises only in-profile tools and `policy.evaluate` rejects out-of-profile calls before dispatch |
 | **Agent surface** | 12 tools: snapshot, click, type_text, submit_form, query_selector, evaluate, navigate, get_text, get_attribute, wait_for, extract_text, screenshot |
 | **Provider** | Pluggable LLM backends: OpenAI, Anthropic, Ollama (real keys via env) |
 | **ReAct loop** | Library agent path (`src/agent/`) with memory/observability structures |

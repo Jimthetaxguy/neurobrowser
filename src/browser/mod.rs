@@ -1213,10 +1213,7 @@ mod tests {
         async fn get_text(&self, _selector: &str) -> Result<String, String> {
             Ok(String::new())
         }
-        async fn get_attributes(
-            &self,
-            _selector: &str,
-        ) -> Result<HashMap<String, String>, String> {
+        async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
             Ok(HashMap::new())
         }
         async fn click(&self, _selector: &str) -> Result<(), String> {
@@ -1244,10 +1241,7 @@ mod tests {
         let browser = NoopBrowser;
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#password".to_string());
-        args.insert(
-            "text".to_string(),
-            "super-secret-value-42".to_string(),
-        );
+        args.insert("text".to_string(), "super-secret-value-42".to_string());
 
         let result = TypeTool.execute(args, &browser).await;
 

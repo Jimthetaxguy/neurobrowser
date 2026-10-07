@@ -2016,6 +2016,7 @@ name = "neurobrowser-tauri"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "libc",
  "neurobrowser",
  "serde",
  "serde_json",

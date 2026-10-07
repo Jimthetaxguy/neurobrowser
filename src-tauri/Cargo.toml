@@ -29,6 +29,9 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 tokio = { version = "1", features = ["net"] }
+# SO_PEERCRED same-uid authorization on the headless control socket needs the
+# daemon's own uid (`getuid`); tokio exposes the *peer* uid via `UnixStream::peer_cred`.
+libc = "0.2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
