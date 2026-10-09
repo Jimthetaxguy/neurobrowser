@@ -5,7 +5,7 @@ edition = "2021"
 description = "HTTP scraper and policy-gated browser agent library"
 
 [dependencies]
-# Persistent page memory (neuro_memory::MemoryService), distinct from agent::memory::AgentMemory.
+# Persistent page memory (neuro_memory::MemoryService).
 neuro-memory = { path = "crates/neuro-memory" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

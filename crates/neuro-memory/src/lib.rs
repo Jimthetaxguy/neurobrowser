@@ -66,21 +66,8 @@ impl MemoryService {
 
     /// Store `page` and index its blocks when `policy` allows the URL.
     ///
-    /// [`CapturePolicy::evaluate`] runs first. A deny leaves the store and the
-    /// index unchanged and returns [`MemoryError::Denied`]. On allow, the page
-    /// is written to the store (which assigns [`CapturedPage::content_hash`]),
-    /// blocks are extracted from that stored page, and those blocks replace any
-    /// previously indexed blocks for the same URL. The index commit makes the
-    /// new blocks searchable. Older hashes recorded for that URL are then
-    /// removed; the file for this capture's content hash is kept. Page markers
-    /// also track captures that produce no searchable blocks. Obsolete markers
-    /// remain until deletion succeeds, so a later capture can retry after restart.
-    /// Legacy hashes in semantic block IDs are recognized; historical files with
-    /// no remaining index reference are retained rather than scanning every page.
-    /// `content_hash` includes `captured_at`, so a later capture of the same URL
-    /// is a new file.
-    /// Capture and forget operations are serialized so overlapping updates cannot
-    /// delete a page that another operation is still indexing.
+    /// A deny leaves storage unchanged. `content_hash` includes `captured_at`.
+    /// Capture and forget operations are serialized.
     pub async fn capture(
         &self,
         page: CapturedPage,

@@ -234,7 +234,7 @@ pub fn default_tool_registry() -> ToolRegistry {
     registry
 }
 
-/// The 17 browser tools plus `search_personal_memory` and `inspect_active_page`.
+/// Browser tools plus `search_personal_memory` and `inspect_active_page`.
 ///
 /// `memory` is durable `neuro_memory::MemoryService` state. `policy` gates
 /// `inspect_active_page` only. `ReActAgent::with_memory` builds this registry
@@ -512,7 +512,15 @@ impl BrowserTool for NavigateTool {
     ) -> crate::tools::ToolResult {
         let url = args.get("url").cloned().unwrap_or_default();
         match browser.navigate(&url).await {
-            Ok(()) => crate::tools::ToolResult::success("navigate", format!("Navigated to {url}")),
+            Ok(()) => {
+                // Snapshot URL is the page actually fetched. HTTP stores
+                // `response.url()` after redirects; a failed read keeps the request.
+                let landed = match browser.snapshot().await {
+                    Ok(snapshot) => snapshot.url,
+                    Err(_) => url,
+                };
+                crate::tools::ToolResult::success("navigate", format!("Navigated to {landed}"))
+            }
             Err(error) => crate::tools::ToolResult::error("navigate", error),
         }
     }
@@ -704,7 +712,7 @@ impl BrowserTool for GetTablesTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
             "get_tables",
-            "Table N: H headers, R rows per table",
+            "Summarize tables on the current page",
             ToolRisk::new(ToolAction::Read),
         )
     }
@@ -1378,6 +1386,25 @@ mod tests {
             message.contains("invalid CSS selector"),
             "invalid selector should be flagged distinctly: {message}"
         );
+    }
+
+    #[tokio::test]
+    async fn navigate_reports_post_redirect_url_on_http_engine() {
+        let requested = "https://httpbingo.org/redirect/1";
+        let engine = BrowserEngine::new(PageConfig::default());
+        let args = HashMap::from([("url".to_string(), requested.to_string())]);
+
+        let result = NavigateTool.execute(args, &engine).await;
+
+        assert!(result.success, "{}", result.result);
+        let landed = engine
+            .snapshot()
+            .await
+            .expect("snapshot after navigate")
+            .url;
+        assert_eq!(landed, "https://httpbingo.org/get");
+        assert_ne!(landed, requested);
+        assert_eq!(result.result, format!("Navigated to {landed}"));
     }
 
     #[test]
