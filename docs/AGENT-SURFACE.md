@@ -90,8 +90,10 @@ Every `BrowserTool` must implement `definition()`; there is no default risk.
 The registry keys each tool by `definition().name`.
 `ToolRisk` contains the action category plus the `sensitive` and
 `externally_visible` flags; both flags default to `false`. There is no
-risk-level or tool-version field. The catalog below names each action and
-identifies the two tools that set a flag.
+risk-level or tool-version field. The catalog below names each action.
+Five tools set a flag: `type` and `type_target` set `sensitive`;
+`submit_form`, `click_target`, and `submit_target` set `externally_visible`.
+`observe_page` is `Read`. `scroll_target` is `Scroll`.
 
 The system prompt's tool list is rendered from these definitions: name,
 description, and each argument with a `(required)` flag. The two memory tools
@@ -102,88 +104,108 @@ honest static-engine error (no live DOM). `keypress` / `back` / `forward` /
 `reload` / `screenshot` use the `BrowserInterface` defaults (error) unless a
 runtime overrides them. The Tauri runtime does not override `screenshot`.
 
-### 1. `navigate` — `url`
+### 1. `observe_page`
+
+No args. Action: `Read`.
+
+### 2. `click_target` — `document`, `target_id`, optional `postcondition`
+
+`document` is the JSON stamp from `observe_page`. Action: `Click`, with `externally_visible: true`.
+
+### 3. `type_target` — `document`, `target_id`, `text`, optional `postcondition`
+
+Tool metadata sets `sensitive: true`, so policy requires approval. Action: `Type`.
+
+### 4. `submit_target` — `document`, `target_id`, optional `postcondition`
+
+Action: `Submit`, with `externally_visible: true`.
+
+### 5. `scroll_target` — `document`, `target_id`, optional `postcondition`
+
+Action: `Scroll`.
+
+### 6. `navigate` — `url`
 
 Navigate / fetch. Action: `Navigate`.
 
-### 2. `wait`
+### 7. `wait`
 
 Wait for navigation to settle. No args. Action: `Wait`.
 
-### 3. `query_dom` — `selector`
+### 8. `query_dom` — `selector`
 
 Query by CSS selector. Returns a text dump of matches, or
 `No elements found`. Invalid CSS returns an error. Action: `Read`.
 
-### 4. `get_text` — `selector`
+### 9. `get_text` — `selector`
 
 Concatenated text of matches. Action: `Read`.
 
-### 5. `get_links`
+### 10. `get_links`
 
 All links (`text - href`). Action: `Read`.
 
-### 6. `get_prices`
+### 11. `get_prices`
 
 Price-like strings from the snapshot. Action: `Read`.
 
-### 7. `get_tables`
+### 12. `get_tables`
 
 `Table N: H headers, R rows` per table. Action: `Read`.
 
-### 8. `click` — `selector`
+### 13. `click` — `selector`
 
 Click. Action: `Click`.
 
-### 9. `type` — `selector`, `text`
+### 14. `type` — `selector`, `text`
 
 Type into an input. Tool metadata sets `sensitive: true`, so policy requires approval.
 Action: `Type`. Text and credential arguments are `[REDACTED]` in policy and
 agent event payloads. Browser evidence excludes input values.
 
-### 10. `scroll_to` — `selector`
+### 15. `scroll_to` — `selector`
 
 Scroll an element into view. Action: `Scroll`.
 
-### 11. `scroll_by` — `x`, `y`
+### 16. `scroll_by` — `x`, `y`
 
 Pixel deltas. Action: `Scroll`.
 
-### 12. `submit_form` — `selector`
+### 17. `submit_form` — `selector`
 
 Submit a form (or an element inside one). Action: `Submit`,
 with `externally_visible: true`.
 
-### 13. `keypress` — `key`
+### 18. `keypress` — `key`
 
 Send a key (`Enter`, `Escape`, …). Action: `Keypress`.
 
-### 14. `screenshot`
+### 19. `screenshot`
 
 Registered. `BrowserInterface::screenshot` defaults to
 `Err("screenshot is not supported by this browser")`. No PNG path is
 wired. Action: `Screenshot`.
 
-### 15. `back`
+### 20. `back`
 
 History back. Default: not supported. Action: `Back`.
 
-### 16. `forward`
+### 21. `forward`
 
 History forward. Default: not supported. Action: `Forward`.
 
-### 17. `reload`
+### 22. `reload`
 
 Reload. Default: not supported. Action: `Reload`.
 
-### 18. `search_personal_memory` — `query`, optional `limit`
+### 23. `search_personal_memory` — `query`, optional `limit`
 
 Search `MemoryService` (persistent personal memory, not an in-run agent log).
 Ignores the browser argument. `limit` defaults to 5 and caps at 20. A miss
 is `No personal memory matches.` Action: `Read`. Registered by
 `default_tool_registry_with_memory` / `ReActAgent::with_memory`.
 
-### 19. `inspect_active_page`
+### 24. `inspect_active_page`
 
 Captured blocks for the browser's current URL, or `capture denied: ...` when
 `CapturePolicy` refuses that URL. A URL with no committed blocks is
@@ -200,7 +222,7 @@ Action: `Read`. Same registration as `search_personal_memory`.
 | `ping` | `{ "pong": true }` |
 | `policy.get` | Current `ActionPolicy` |
 | `policy.set` | Replace the stored policy by deserializing `params` as an `ActionPolicy` object |
-| `policy.evaluate` | Reads `params.tool` and `params.arguments`, then gates that call (no execution). Unknown names, including memory tools absent from the 17-tool risk catalog, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
+| `policy.evaluate` | Reads `params.tool` and `params.arguments`, then gates that call (no execution). Unknown names, including memory tools absent from the 22-tool `default_tool_registry()`, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
 | `snapshot` | Ignores `params`. Hardcoded stub `{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }` — not a crate `PageSnapshot` |
 
 Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
@@ -217,7 +239,7 @@ Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 
 This table applies only after the common gates. Denied tools/domains, off-list
 domains, unsafe navigation schemes, and detected prompt injection block first.
-Sensitive argument keys, sensitive tool metadata (including `type`), and explicit
+Sensitive argument keys, sensitive tool metadata (`type` and `type_target`), and explicit
 approval-list matches return `RequireApproval` before mode evaluation in
 `HighAutonomy`; ReadOnly action prohibitions block before approval triggers.
 

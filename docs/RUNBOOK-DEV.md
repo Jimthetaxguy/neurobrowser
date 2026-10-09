@@ -22,29 +22,13 @@ From repo root:
 ./verify.sh
 ```
 
-This is the verification chain in `verify.sh`:
+Commands and order are in `verify.sh`. CI jobs are in `.github/workflows/ci.yml`. `verify.sh` ends with `=== All checks passed ===`.
 
-1. `cargo fmt -- --check`
-2. `cargo clippy --all-targets -- -D warnings`
-3. `cargo test --all-targets`
-4. `cargo test --manifest-path crates/neuro-memory/Cargo.toml`
-5. `cd src-tauri && npm ci && npm test && npm run build`
-6. `cargo check --manifest-path src-tauri/Cargo.toml --locked`
-7. `cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri`
-8. Locked headless check and binary tests with `--features headless`
-9. `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities`
-10. `./tests/run_appkit_navigation.sh` on macOS (native Reload/tab-switch regression)
-11. `cargo build --release` (library crate)
+Darwin only, after the webview capability tests: `./tests/run_appkit_navigation.sh`, then `bash tests/run_capability_webkit.sh`.
 
-Expected output ends with `=== All checks passed ===`.
+CI also runs a `guards` job that `verify.sh` does not. That job rejects mock crates, conflict markers, and iCloud duplicate names.
 
-That line is the end of `verify.sh` only.
-
-- `cargo fmt`, `cargo clippy`, the root `cargo test`, and `cargo build --release` cover the root crate. There is no Cargo workspace, so those commands leave out `neuro-memory` and `src-tauri`.
-- `neuro-memory` is tested (`cargo test --manifest-path crates/neuro-memory/Cargo.toml`) and is not clippy-checked.
-- The CI `tauri` job is macOS check and test (frontend, desktop bin, headless, `runtime_capabilities`, and the native AppKit navigation regression). It does not run clippy.
-- CI also runs a `guards` job that `verify.sh` does not. That job rejects mock crates, conflict markers, and iCloud duplicate names.
-- CI pins Node 22 on the `tauri` job. Local `verify.sh` uses the `node` and `npm` on `PATH`.
+CI pins Node 22 on the `tauri` job. Local `verify.sh` uses the `node` and `npm` on `PATH`.
 
 ## Desktop app
 
@@ -89,8 +73,9 @@ Integration tests live in `tests/`:
 
 ## Tauri IPC
 
-The desktop app exposes 20 commands (`tauri::generate_handler!` in
-`src-tauri/src/main.rs`). From the React frontend:
+The desktop app exposes 22 commands (`tauri::generate_handler!` in
+`src-tauri/src/main.rs`), including `get_page_observation` and
+`execute_browser_tool`. From the React frontend:
 
 ```javascript
 import { invoke } from "@tauri-apps/api/core";
@@ -130,18 +115,7 @@ commands (including provider changes and approval submission).
 
 ## verify.sh failures
 
-| Step | Symptom | Fix |
-|---|---|---|
-| `cargo fmt --check` | diff output | `cargo fmt`, re-run |
-| `cargo clippy` | warnings-as-errors | fix the warning, re-run |
-| `cargo test` | failed assertions | fix the test or the code |
-| `cargo test --manifest-path crates/neuro-memory/Cargo.toml` | failed assertions | fix the memory crate test or the code |
-| `npm ci && npm test && npm run build` | node:test or Vite error | check `src-tauri/src/*.{jsx,js}` |
-| `cargo check --manifest-path src-tauri/Cargo.toml --locked` | Tauri compile error | missing icon or capability |
-| `cargo test --manifest-path src-tauri/Cargo.toml --locked --bin neurobrowser-tauri` | failed assertions | fix the desktop binary test or the code |
-| locked headless `cargo check` / `cargo test --bin neurobrowser-headless` | headless compile or binary test failure | fix the headless feature path |
-| `cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities` | failed assertions | fix the webview capability test or the capability files |
-| `cargo build --release` | linker / symbol error | inspect linker diagnostics and `rustc --version` |
+The failing command is the one `verify.sh` printed. Fix that step and re-run `./verify.sh`. Job names are in `.github/workflows/ci.yml`.
 
 ## Environment variables
 

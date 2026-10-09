@@ -7,8 +7,8 @@ type: code-audit
 task: Assess browser function beyond the shared capability foundation
 status: complete-with-findings
 summary: The OS webview supplies engine behavior; browser-host ownership remains incomplete, with reproduced React input and legacy export gaps.
-next_steps: [Repair new input behavior and native shell state, Govern legacy capture and profiles, Establish cancellation and whole-app verification]
-remaining: [Implementation fixes and native reproduction for DOM probes]
+next_steps: []
+remaining: []
 open_questions: [Intended browser profile sharing, Scope of human navigation policy, Which native workflows take priority]
 ---
 
@@ -24,6 +24,8 @@ browser-host contracts: identity, authority, lifecycle, observation and durable 
 This audit does not suggest rebuilding a standards engine.
 
 ## Confirmed defects and inadequate guarantees
+
+Measured at `f50f5ae`, not current. Merged `runtime.rs` skips non-rendered targets and uses the prototype value setter.
 
 | Finding | Evidence and trigger | Consequence |
 | --- | --- | --- |
@@ -63,20 +65,13 @@ This audit does not suggest rebuilding a standards engine.
   bookmarks, explicit zoom/printing controls and browser-chrome accessibility need a
   separate product inventory. This audit did not exercise their OS-default behavior.
 
-## Verification limits and next dependencies
+## Verification limits
 
-React/JSDOM probes establish real React DOM behavior using the exact shipped script;
-they are not native WebKit proofs. Source traces establish control/ownership gaps,
-not observed cookie leaks or a demonstrated hostile-site exploit. The existing tests
-exercise mounted shell components with adapters and genuine WKWebView with a test-only
-report bridge. A whole live Tauri IPC session remains untested. The hosted corpus still
-fails before execution at its fixture-server startup.
-
-Repair the reproduced new typing path and shell source synchronization before treating
-PR #111 as product-ready. Govern legacy capture and define profile ownership, then add
-active cancellation and a whole-app integration workflow. Broader frame/file/permission
-coverage and background/network isolation can follow in bounded capability changes.
-CI success alone does not resolve these findings.
+React/JSDOM probes establish real React DOM behavior using the exact script at
+`f50f5ae`; they are not native WebKit proofs. Source traces establish control/ownership
+gaps, not observed cookie leaks or a demonstrated hostile-site exploit. The tests in
+that checkout exercise mounted shell components with adapters and genuine WKWebView
+with a test-only report bridge. A whole live Tauri IPC session was not part of this audit.
 
 Primary platform references: [Tauri webview ownership](https://v2.tauri.app/reference/webview-versions/),
 [Tauri webview integration hooks](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewBuilder.html),

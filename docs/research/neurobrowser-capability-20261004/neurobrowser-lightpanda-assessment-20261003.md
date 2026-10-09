@@ -23,9 +23,9 @@ open_questions:
 
 Design NeuroBrowser from its own purpose: help a human and their agents make reliable, authorized progress on the web, with understandable evidence of what happened. Decompose that job before selecting an engine. Lightpanda is one source of prior art; it does not define our architecture, API, benchmark or implementation.
 
-James's latest direction supersedes this assessment's earlier recommendation to pilot a Lightpanda adapter. The new recommendation is to measure NeuroBrowser's actual workloads and strengthen its own observation, authority and outcome contracts first. Runtime selection remains open. This is a completed planning assessment; experiments and implementation have not been performed.
+James's latest direction supersedes this assessment's earlier recommendation to pilot a Lightpanda adapter. The new recommendation is to measure NeuroBrowser's actual workloads and strengthen its own observation, authority and outcome contracts first. Runtime selection remains open.
 
-The source baseline is clean `main` at `d0271f7929e69abd6496e9b670852991bc300d56`, aligned with `origin/main` after a fresh fetch. The [PR closeout](README.md#local-provenance) remains complete. The original assessment is preserved in [its dated backup](README.md#local-provenance).
+The source baseline is clean `main` at `d0271f7929e69abd6496e9b670852991bc300d56`.
 
 ## Start with the job
 
@@ -55,7 +55,7 @@ These are candidate workload classes, not claims about James's observed usage di
 
 [BrowserInterface](../../../src/tools/mod.rs) is an existing execution seam, and [execute_with_policy](../../../src/agent/mod.rs) owns the governed agent loop. That separation is useful, but it does not prove that the present interface is sufficient for every future runtime. Current `PageSnapshot` contains HTML/text plus links, forms, tables, prices and viewport data; it is not a semantic accessibility tree. Current `ElementInfo` carries selectors and attributes, without a document-generation contract for target freshness.
 
-Recent repairs deliberately distinguish action dispatch from later page readiness. Preserve that behavior: observation failure after an executed action must not encourage replay. The current interface primarily returns `Result<(), String>` for actions and a boolean success in tool results; richer uncertainty and verification states below are proposed contract work, not shipped guarantees.
+Recent repairs deliberately distinguish action dispatch from later page readiness. Preserve that behavior: observation failure after an executed action must not encourage replay. The interface at this baseline primarily returns `Result<(), String>` for actions and a boolean success in tool results.
 
 The [accepted frontend decision](../../../docs/adr/ADR-001-react-tauri-primary.md) makes React/Tauri with Rust-owned webviews primary and AppKit a parity lane. Keep that working baseline during experiments. Reconsider it only if a specific task requirement and evidence justify changing it.
 
