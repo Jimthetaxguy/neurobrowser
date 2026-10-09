@@ -336,6 +336,23 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       form ? Array.from(form.elements).slice(0, 500).map((input) =>
         [input.name, input.type, input.value, input.checked, input.disabled]) : null]);
   };
+  // Attribute checks miss CSS-hidden and inert subtrees; require a rendered, actionable element.
+  const isRendered = (element) => {
+    if (element.closest('[hidden], [aria-hidden="true"], [inert]')) return false;
+    if (typeof element.checkVisibility === 'function') {
+      return element.checkVisibility({ checkVisibilityCSS: true, visibilityProperty: true });
+    }
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden'
+      && Array.from(element.getClientRects()).length > 0;
+  };
+  // Assigning `.value` directly hits React's instrumented setter and its value tracker
+  // then swallows the input event; the prototype setter keeps onChange firing.
+  const setNativeValue = (element, value) => {
+    const proto = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(element, value); else element.value = value;
+  };
   const observePage = (runtimeId, requested = {}) => {
     const ceilings = { max_text_bytes: 12000, max_targets: 80, max_links: 40,
       max_tables: 6, max_rows: 20, max_cell_bytes: 240 };
@@ -347,7 +364,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     const candidates = document.querySelectorAll('a[href], button, input:not([type="hidden"]), textarea, select, form, [role="button"], [role="link"]');
     const observedTargets = [];
     for (const element of candidates) {
-      if (element.closest('[hidden], [aria-hidden="true"]')) continue;
+      if (!isRendered(element)) continue;
       const destination = targetDestination(element);
       if (destination !== null && byteLimit(destination, 4096) !== destination) { omissions.add('Oversized destination targets excluded'); continue; }
       if (observedTargets.length >= limits.max_targets) { omissions.add('Targets truncated'); break; }
@@ -396,6 +413,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     if (!target || !target.element.isConnected || target.element.ownerDocument !== document
         || target.fingerprint !== targetFingerprint(target.element)) return reject('Reviewed target is stale; observe again');
     const element = target.element;
+    if (!isRendered(element)) return reject('Target is not rendered; observe again');
     if (element.disabled) return reject('Target is disabled');
     if (!['click', 'type', 'submit', 'scroll'].includes(command.action)) return reject('Unsupported target action');
     if (command.action === 'type' && (!['INPUT', 'TEXTAREA'].includes(element.tagName)
@@ -412,7 +430,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     try {
       if (command.action === 'click') element.click();
       if (command.action === 'type') {
-        element.focus(); element.value = command.text;
+        element.focus(); setNativeValue(element, command.text);
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
       }
@@ -518,7 +536,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         throw new Error(`Element does not support value assignment: ${selector}`);
       }
       element.focus();
-      element.value = text;
+      setNativeValue(element, text);
       element.dispatchEvent(new Event('input', { bubbles: true }));
       element.dispatchEvent(new Event('change', { bubbles: true }));
       return { ok: true };

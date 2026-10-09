@@ -185,6 +185,10 @@ private struct CapabilityWebKitWorkloads {
         try test.check(secret["sensitive"] as? Bool == true, "Password target did not retain sensitivity metadata")
         let disabled = try target(initial, label: "Unavailable shipment")
         try test.check(disabled["disabled"] as? Bool == true, "Disabled target metadata absent")
+        let observedLabels = (initial["targets"] as? [[String: Any]] ?? []).compactMap { $0["label"] as? String }
+        for hiddenLabel in ["CSS dormant control", "Invisible ancestor control", "Inert ancestor control"] {
+            try test.check(!observedLabels.contains(hiddenLabel), "Non-rendered target was observed: \(hiddenLabel)")
+        }
         let disabledDispatch = try test.payload(command(initial, target: disabled, action: "click"))
         try test.check(disabledDispatch["state"] as? String == "not_dispatched", "Disabled target was dispatched")
         let narrow = try observe(test, ["max_text_bytes": 48, "max_targets": 2, "max_links": 1, "max_tables": 1, "max_rows": 1, "max_cell_bytes": 8])

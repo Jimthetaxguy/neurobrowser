@@ -15,7 +15,7 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler) as server:
     server.serve_forever()
 PY
 task_server_pid=$!
-for _ in {1..50}; do
+for _ in {1..200}; do
   [[ -s "$task_output/port" ]] && break
   kill -0 "$task_server_pid" 2>/dev/null || { cat "$task_output/http.log"; exit 1; }
   sleep 0.1
