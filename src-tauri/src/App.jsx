@@ -25,6 +25,23 @@ const EMPTY_COUNTS = {
   table_count: 0,
 };
 
+const RELOAD_UNCONFIRMED_STATUS = "Reload dispatched; page readiness is unconfirmed";
+
+const APPKIT_ACTION_STATUS = {
+  browser_back: "Going back…",
+  browser_forward: "Going forward…",
+  browser_reload: "Reloading…",
+};
+
+function appKitSnapshotApplies(loadRef, event) {
+  const load = loadRef.current;
+  if (load.blocked) return false;
+  if (!load.expecting) return true;
+  if (event?.loadGeneration !== load.epoch) return false;
+  loadRef.current = { epoch: load.epoch, expecting: false, blocked: false };
+  return true;
+}
+
 function messageText(error) {
   if (error instanceof Error) return error.message;
   return String(error);
@@ -196,7 +213,7 @@ function ChatPanel({
   return (
     <aside className="sidebar">
       <div className="sidebar-header">AI Assistant</div>
-      {evidencePanel}
+      <div className="sidebar-evidence">{evidencePanel}</div>
       <div className="chat-messages">
         {messages.map((item) => (
           <Message item={item} key={item.id} />
@@ -327,6 +344,7 @@ export default function App({ adapter, lane }) {
       text: "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
     },
   ]);
+  const hostLoadRef = useRef({ epoch: 0, expecting: false, blocked: false });
 
   const appendMessage = useCallback((role, text) => {
     const id = nextMessageId.current;
@@ -365,21 +383,39 @@ export default function App({ adapter, lane }) {
     return nextSnapshot;
   }, [adapter, currentPageId, sessionId, updateSnapshot]);
 
+  const beginHostLoad = useCallback(() => {
+    if (!compact) return undefined;
+    const epoch = hostLoadRef.current.epoch + 1;
+    hostLoadRef.current = { epoch, expecting: true, blocked: false };
+    return epoch;
+  }, [compact]);
+
   // A completed navigation or toolbar action must not look failed merely because
   // the following page read failed. Same split as applyPresentedRun.
   const performPageAction = useCallback(async (action, failureLabel) => {
     try {
       await action();
     } catch (error) {
-      setStatus(`${failureLabel}: ${messageText(error)}`);
+      const message = messageText(error);
+      if (message.startsWith(RELOAD_UNCONFIRMED_STATUS)) {
+        setStatus(message);
+        return;
+      }
+      if (compact) {
+        hostLoadRef.current = { ...hostLoadRef.current, expecting: false, blocked: true };
+      }
+      setStatus(`${failureLabel}: ${message}`);
       return;
     }
+    // AppKit navigate/back/forward/reload only post a message. The cached
+    // snapshot is the previous page, not this load.
+    if (compact) return;
     try {
       await refreshSnapshot();
     } catch (error) {
       setStatus(`Page refresh failed: ${messageText(error)}`);
     }
-  }, [refreshSnapshot]);
+  }, [compact, refreshSnapshot]);
 
   const activatePage = useCallback(
     async (pageId) => {
@@ -391,7 +427,7 @@ export default function App({ adapter, lane }) {
         const nextSnapshot = await adapter.getPageSnapshot(sessionId, pageId);
         updateSnapshot(pageId, nextSnapshot);
       } catch (error) {
-        console.warn("snapshot refresh failed", messageText(error));
+        setStatus(`Page refresh failed: ${messageText(error)}`);
       }
     },
     [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
@@ -427,7 +463,7 @@ export default function App({ adapter, lane }) {
             const nextSnapshot = await adapter.getPageSnapshot(sessionId, nextTab.id);
             updateSnapshot(nextTab.id, nextSnapshot);
           } catch (error) {
-            console.warn("snapshot refresh failed", messageText(error));
+            setStatus(`Page refresh failed: ${messageText(error)}`);
           }
         }
       } catch (error) {
@@ -444,26 +480,29 @@ export default function App({ adapter, lane }) {
 
     setStatus(`Navigating to ${rawUrl}`);
     setLoading(`Opening ${rawUrl}...`);
+    const loadGeneration = beginHostLoad();
 
     try {
       await performPageAction(
-        () => adapter.navigate(sessionId, currentPageId, rawUrl),
+        () => adapter.navigate(sessionId, currentPageId, rawUrl, loadGeneration),
         "Navigation failed"
       );
     } finally {
       setLoading(null);
     }
-  }, [adapter, currentPageId, performPageAction, sessionId, url]);
+  }, [adapter, beginHostLoad, currentPageId, performPageAction, sessionId, url]);
 
   const runBrowserAction = useCallback(
     async (command) => {
       if (currentPageId == null || !sessionId) return;
+      if (compact) setStatus(APPKIT_ACTION_STATUS[command] || "Working…");
+      const loadGeneration = beginHostLoad();
       await performPageAction(
-        () => adapter.browserAction(command, sessionId, currentPageId),
+        () => adapter.browserAction(command, sessionId, currentPageId, loadGeneration),
         "Browser action failed"
       );
     },
-    [adapter, currentPageId, performPageAction, sessionId]
+    [adapter, beginHostLoad, compact, currentPageId, performPageAction, sessionId]
   );
 
   const askAssistant = useCallback(async () => {
@@ -612,10 +651,24 @@ export default function App({ adapter, lane }) {
           setActivePageId(updates.activePageId);
           if ("url" in updates) setUrl(updates.url);
         }
-        if (updates.snapshot) updateSnapshot(event.pageId, updates.snapshot);
+        if (updates.snapshot && appKitSnapshotApplies(hostLoadRef, event)) {
+          updateSnapshot(event.pageId, updates.snapshot);
+        }
       }
       if (event.type === "status") {
-        setStatus(event.message);
+        if (!compact) {
+          setStatus(event.message);
+        } else {
+          const load = hostLoadRef.current;
+          const generation = event.loadGeneration;
+          const stale = load.expecting && Number.isInteger(generation) && generation !== load.epoch;
+          if (!stale) {
+            if (load.expecting) {
+              hostLoadRef.current = { epoch: load.epoch, expecting: false, blocked: true };
+            }
+            setStatus(event.message);
+          }
+        }
       }
     });
     return unsubscribe;

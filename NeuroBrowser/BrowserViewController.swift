@@ -84,16 +84,23 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
             }
         case "navigate":
             if let url = payload["url"] as? String {
-                contentViewController.navigate(pageId: Self.payloadPageId(payload), to: url)
+                contentViewController.navigate(
+                    pageId: Self.payloadPageId(payload),
+                    to: url,
+                    loadGeneration: Self.payloadLoadGeneration(payload)
+                )
             }
         case "browser_back":
             if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
+            contentViewController.noteHostLoadGeneration(Self.payloadLoadGeneration(payload))
             contentViewController.goBack()
         case "browser_forward":
             if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
+            contentViewController.noteHostLoadGeneration(Self.payloadLoadGeneration(payload))
             contentViewController.goForward()
         case "browser_reload":
             if let pageId = Self.payloadPageId(payload), !contentViewController.selectTab(pageId: pageId) { return }
+            contentViewController.noteHostLoadGeneration(Self.payloadLoadGeneration(payload))
             contentViewController.reloadCurrentPage()
         default:
             controlSurfaceViewController.dispatchToReact([
@@ -106,6 +113,12 @@ extension BrowserViewController: ReactControlSurfaceDelegate {
     private static func payloadPageId(_ payload: [String: Any]) -> Int? {
         if let value = payload["pageId"] as? Int { return value }
         if let value = payload["pageId"] as? NSNumber { return value.intValue }
+        return nil
+    }
+
+    private static func payloadLoadGeneration(_ payload: [String: Any]) -> Int? {
+        if let value = payload["loadGeneration"] as? Int { return value }
+        if let value = payload["loadGeneration"] as? NSNumber { return value.intValue }
         return nil
     }
 }

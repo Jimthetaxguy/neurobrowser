@@ -20,6 +20,8 @@ class ContentViewController: NSViewController {
     // MARK: - State
     
     var currentTabIndex: Int = 0
+    /// React navigation epoch. Snapshots capture the value from when they were taken.
+    private var hostLoadGeneration = 0
     var currentPageId: Int? {
         pageIds.indices.contains(currentTabIndex) ? pageIds[currentTabIndex] : nil
     }
@@ -184,9 +186,15 @@ class ContentViewController: NSViewController {
         return true
     }
 
-    func navigate(pageId: Int?, to input: String) {
+    func navigate(pageId: Int?, to input: String, loadGeneration: Int? = nil) {
         if let pageId, !selectTab(pageId: pageId) { return }
-        navigateCurrentTab(to: input)
+        navigateCurrentTab(to: input, loadGeneration: loadGeneration)
+    }
+
+    func noteHostLoadGeneration(_ generation: Int?) {
+        if let generation {
+            hostLoadGeneration = generation
+        }
     }
     
     @objc private func tabBarChanged() {
@@ -275,18 +283,29 @@ class ContentViewController: NSViewController {
         navigateCurrentTab(to: input)
     }
 
-    func navigateCurrentTab(to input: String) {
+    func navigateCurrentTab(to input: String, loadGeneration: Int? = nil) {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, currentTabIndex < webViews.count else { return }
         guard let url = Self.validatedNavigationURL(from: input) else {
-            pageUpdateHandler?([
-                "type": "status",
-                "message": "Only http and https URLs can be opened"
-            ])
+            if let loadGeneration {
+                hostLoadGeneration = loadGeneration
+            }
+            emitStatus("Only http and https URLs can be opened", loadGeneration: loadGeneration)
             return
+        }
+        if let loadGeneration {
+            hostLoadGeneration = loadGeneration
         }
         urlBar.stringValue = url.absoluteString
         webViews[currentTabIndex].load(URLRequest(url: url))
+    }
+
+    private func emitStatus(_ message: String, loadGeneration: Int? = nil) {
+        var event: [String: Any] = ["type": "status", "message": message]
+        if let loadGeneration {
+            event["loadGeneration"] = loadGeneration
+        }
+        pageUpdateHandler?(event)
     }
 
     /// First-stage http(s) allowlist shared by the URL bar and page WKWebViews.
@@ -363,12 +382,14 @@ class ContentViewController: NSViewController {
 
     private func emitSnapshot() {
         guard let pageId = currentPageId else { return }
+        let loadGeneration = hostLoadGeneration
         snapshotCurrentPage { [weak self] snapshot in
             guard let self, self.currentPageId == pageId,
                   self.pageIds.contains(pageId) else { return }
             self.pageUpdateHandler?([
                 "type": "snapshot",
                 "pageId": pageId,
+                "loadGeneration": loadGeneration,
                 "snapshot": snapshot
             ])
         }
@@ -390,6 +411,13 @@ extension ContentViewController: WKNavigationDelegate {
         guard let url = navigationAction.request.url,
               Self.allowsHttpNavigation(url) else {
             decisionHandler(.cancel)
+            let scheme = navigationAction.request.url?.scheme?.lowercased()
+            // A fresh webview's about:blank is not a user-facing navigation failure.
+            if scheme != "about",
+               webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView {
+                let generation = hostLoadGeneration == 0 ? nil : hostLoadGeneration
+                emitStatus("Only http and https URLs can be opened", loadGeneration: generation)
+            }
             return
         }
         decisionHandler(.allow)
@@ -416,11 +444,27 @@ extension ContentViewController: WKNavigationDelegate {
         guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "↻"
         updateNavigationButtons()
+        emitNavigationFailure(error)
     }
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView else { return }
         reloadButton.title = "↻"
         updateNavigationButtons()
+        emitNavigationFailure(error)
+    }
+
+    private func emitNavigationFailure(_ error: Error) {
+        let nsError = error as NSError
+        // Policy rejection already emitted its own status. WebKit then reports the cancel.
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return
+        }
+        if nsError.domain == WKError.errorDomain && nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
+            return
+        }
+        let message = nsError.localizedDescription.isEmpty ? "Page failed to load" : nsError.localizedDescription
+        let generation = hostLoadGeneration == 0 ? nil : hostLoadGeneration
+        emitStatus(message, loadGeneration: generation)
     }
 }

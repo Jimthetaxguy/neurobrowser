@@ -129,14 +129,18 @@ export function createAppKitHostAdapter() {
     async setActivePage(activeSessionId, pageId) {
       await send("set_active_page", { sessionId: activeSessionId, pageId });
     },
-    async navigate(activeSessionId, pageId, url) {
-      await send("navigate", { sessionId: activeSessionId, pageId, url });
+    async navigate(activeSessionId, pageId, url, loadGeneration) {
+      const payload = { sessionId: activeSessionId, pageId, url };
+      if (Number.isInteger(loadGeneration)) payload.loadGeneration = loadGeneration;
+      await send("navigate", payload);
     },
     async getPageSnapshot(_activeSessionId, pageId) {
       return snapshotsByPageId.get(pageId) ?? null;
     },
-    async browserAction(command, activeSessionId, pageId) {
-      await send(command, { sessionId: activeSessionId, pageId });
+    async browserAction(command, activeSessionId, pageId, loadGeneration) {
+      const payload = { sessionId: activeSessionId, pageId };
+      if (Number.isInteger(loadGeneration)) payload.loadGeneration = loadGeneration;
+      await send(command, payload);
     },
     onHostEvent(callback) {
       const handler = (event) => {

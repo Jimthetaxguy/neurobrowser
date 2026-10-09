@@ -439,7 +439,7 @@ main {
   background: rgba(11, 18, 33, 0.9);
   border-left: 1px solid var(--border);
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
 }
 
