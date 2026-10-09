@@ -225,7 +225,7 @@ fn positional_argument_names(tool_name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// True for the 17 browser tools and the two memory tools.
+/// True for the browser tools and the two memory tools.
 fn is_known_tool(tool_name: &str) -> bool {
     crate::tools::memory_tools::positional_argument_names(tool_name).is_some()
         || browser_tool_registry().get(tool_name).is_some()
@@ -275,7 +275,7 @@ fn split_arguments(args_str: &str) -> Vec<String> {
     args
 }
 
-/// The 17 browser tools, built once. The legacy positional parser and the
+/// The browser tools, built once. The legacy positional parser and the
 /// prompt's tool catalog both read this registry.
 fn browser_tool_registry() -> &'static crate::tools::ToolRegistry {
     static REGISTRY: std::sync::OnceLock<crate::tools::ToolRegistry> = std::sync::OnceLock::new();
