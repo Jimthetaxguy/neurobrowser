@@ -342,9 +342,11 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     if (typeof element.checkVisibility === 'function') {
       return element.checkVisibility({ checkVisibilityCSS: true, visibilityProperty: true });
     }
-    const style = getComputedStyle(element);
-    return style.display !== 'none' && style.visibility !== 'hidden'
-      && Array.from(element.getClientRects()).length > 0;
+    // Layout-free fallback: no box geometry, so walk ancestors for display:none.
+    if (getComputedStyle(element).visibility === 'hidden') return false;
+    for (let node = element; node; node = node.parentElement)
+      if (getComputedStyle(node).display === 'none') return false;
+    return true;
   };
   // Assigning `.value` directly hits React's instrumented setter and its value tracker
   // then swallows the input event; the prototype setter keeps onChange firing.

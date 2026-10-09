@@ -264,3 +264,24 @@ test('overridden submitter destination is rejected when requestSubmit is unavail
     assert.equal(submitted, 0);
   });
 });
+
+test('CSS-hidden, hidden-ancestor and inert controls are not targets', () => {
+  withRuntime(`<button style="display:none">A</button><div style="display:none"><button>B</button></div>
+    <div style="visibility:hidden"><button>C</button></div><div inert><button>D</button></div><button>Shown</button>`, (runtime) => {
+    const labels = runtime.observe(runtimeId).targets.map(t => t.label);
+    assert.deepEqual(labels, ['Shown']);
+  });
+});
+
+test('typing uses the native value setter so framework value trackers see the change', () => {
+  withRuntime('<input name="q" value="old">', (runtime, window) => {
+    const input = window.document.querySelector('input');
+    let instrumented = 0;
+    Object.defineProperty(input, 'value', { configurable: true, get() { return Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').get.call(this); },
+      set(v) { instrumented++; Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(this, v); } });
+    const before = runtime.observe(runtimeId);
+    assert.equal(runtime.dispatchTarget(command(before, before.targets[0], 'type', 'typed')).state, 'acknowledged');
+    assert.equal(instrumented, 0);
+    assert.equal(Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').get.call(input), 'typed');
+  });
+});
