@@ -269,7 +269,7 @@ test('CSS-hidden, hidden-ancestor and inert controls are not targets', () => {
   withRuntime(`<button style="display:none">A</button><div style="display:none"><button>B</button></div>
     <div style="visibility:hidden"><button>C</button></div><div inert><button>D</button></div><button>Shown</button>`, (runtime) => {
     const labels = runtime.observe(runtimeId).targets.map(t => t.label);
-    assert.deepEqual(labels, ['Shown']);
+    assert.deepEqual([...labels], ['Shown']);
   });
 });
 
