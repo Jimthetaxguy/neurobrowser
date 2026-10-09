@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-04T02:57:43-04:00",
+  "base_commit": "d0271f7929e69abd6496e9b670852991bc300d56",
+  "gate": "bash verify.sh",
+  "gate_exit_code": 0,
+  "frontend_tests_passed": 73,
+  "native_navigation_assertions_passed": 15,
+  "real_webkit_assertions_passed": 42,
+  "live_public_http": {
+    "command": "cargo test --test capability_observation real_public_http_engine_observes_example_domain -- --ignored --exact --nocapture",
+    "status": "passed",
+    "url": "https://example.com/",
+    "title": "Example Domain",
+    "text_bytes": 173,
+    "links": []
+  },
+  "credentialed_provider_tests": "not run; ignored by default",
+  "transport_coverage": "Real WKWebView executes shipped runtime with test-only report bridge; Rust request correlation and real Tauri ACL resolution tested separately",
+  "generated_schema_disposition": "verified archive then restored tracked HEAD files; generated permissions remain ignored",
+  "source_checkpoint": "f50f5aec9599a8b8926167dc17fcf3d012e6be31",
+  "draft_pr": "https://github.com/Jimthetaxguy/neurobrowser/pull/111",
+  "hosted_ci": "guards passed; Rust and macOS checks running at closeout"
+}

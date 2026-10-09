@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { applyPresentedRun } from "./agentRunPresentation.js";
+import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
+import { EvidencePanel } from "./EvidencePanel.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { nativePageUpdates } from "./nativePageEvents.js";
 
@@ -116,6 +117,13 @@ function latestApprovalEvent(run) {
 }
 
 function eventSummary(event) {
+  if (event?.receipt) {
+    const receipt = event.receipt;
+    if (receipt.dispatch === "unknown") return `${event.tool}: outcome unknown; inspect page`;
+    if (receipt.dispatch === "not_dispatched") return `${event.tool}: no action dispatched`;
+    const proof = receipt.verification === "satisfied" ? "page condition observed" : receipt.verification === "not_requested" ? "outcome not verified" : "page condition unconfirmed";
+    return `${event.tool}: dispatch acknowledged; ${proof}`;
+  }
   if (!event) return "";
   if (event.type === "ToolCallStarted") return `Started ${event.tool}`;
   if (event.type === "ToolCallResult") return `${event.success ? "Finished" : "Failed"} ${event.tool}`;
@@ -131,10 +139,17 @@ function ApprovalCard({ approval, onResolve, onCancel }) {
   const approvalEvent = latestApprovalEvent(approval);
   const reasons = approvalEvent?.decision?.reasons ?? [];
   const args = approvalEvent?.decision?.redacted_arguments ?? {};
+  const context = approval?.approval_context;
   return (
     <div className="approval-card">
       <div className="approval-title">Approval required</div>
       <div className="approval-tool">{approvalEvent?.tool}</div>
+      {context && <div className="approval-context">
+        <p className="evidence-source">Page: {context.url}</p>
+        {context.target && <p>Target: {context.target.role} — {context.target.label || context.target.tag}</p>}
+        {context.target?.destination && <p className="evidence-source">Destination: {context.target.destination}</p>}
+        {context.document && <p>Reviewed revision: {context.document.revision}</p>}
+      </div>}
       {reasons.length > 0 && <div className="approval-reason">{reasons.join("; ")}</div>}
       <pre className="approval-args">{JSON.stringify(args, null, 2)}</pre>
       <div className="approval-actions">
@@ -167,6 +182,7 @@ function ActionHistory({ events }) {
 }
 
 function ChatPanel({
+  evidencePanel,
   actionEvents,
   messages,
   onCancelApproval,
@@ -180,6 +196,7 @@ function ChatPanel({
   return (
     <aside className="sidebar">
       <div className="sidebar-header">AI Assistant</div>
+      {evidencePanel}
       <div className="chat-messages">
         {messages.map((item) => (
           <Message item={item} key={item.id} />
@@ -500,6 +517,18 @@ export default function App({ adapter, lane }) {
     }
   }, [adapter, appendMessage, pendingApproval]);
 
+  const presentProposal = useCallback(async (result, source) => {
+    setActionEvents((items) => [...items, ...(result.events || []).map(event => ({ ...event, source }))]);
+    if (source && source.pageId !== currentPageIdRef.current) {
+      const presentation = presentAgentRun(result);
+      appendMessage("assistant", `Action on ${source.pageUrl || "previous page"}: ${presentation.message}`);
+      if (result.status === "awaiting_approval") setPendingApproval(result);
+      setStatus(presentation.status);
+      return;
+    }
+    await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
+  }, [appendMessage, refreshSnapshot]);
+
   const selectProvider = useCallback(
     async (nextProvider) => {
       setProviderValue(nextProvider);
@@ -516,7 +545,7 @@ export default function App({ adapter, lane }) {
 
   const selectPolicyMode = useCallback(
     async (nextMode) => {
-      setPolicyModeValue(nextMode);
+      setStatus("Applying policy after the current governed operation…");
       const nextPolicy = {
         ...(actionPolicy || {
           allowed_domains: [],
@@ -527,9 +556,10 @@ export default function App({ adapter, lane }) {
         }),
         autonomy_level: nextMode,
       };
-      setActionPolicy(nextPolicy);
       try {
-        await adapter.setActionPolicy(nextPolicy);
+        const accepted = await adapter.setActionPolicy(nextPolicy);
+        setActionPolicy(accepted || nextPolicy);
+        setPolicyModeValue(nextMode);
         setStatus(`Policy: ${nextMode.replace("_", " ")}`);
       } catch (error) {
         setStatus(`Policy update failed: ${messageText(error)}`);
@@ -700,6 +730,7 @@ export default function App({ adapter, lane }) {
           </div>
         </section>
         <ChatPanel
+          evidencePanel={<EvidencePanel adapter={adapter} sessionId={sessionId} pageId={currentPageId} pageUrl={snapshot?.url} onRun={presentProposal} />}
           actionEvents={actionEvents}
           messages={messages}
           onCancelApproval={cancelApproval}

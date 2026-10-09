@@ -24,6 +24,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabili
 if [[ "$(uname -s)" == "Darwin" ]]; then
   echo "→ AppKit navigation regression..."
   ./tests/run_appkit_navigation.sh
+  echo "→ Real WebKit capability workload..."
+  bash tests/run_capability_webkit.sh
 fi
 echo "→ cargo build --release..."
 cargo build --release

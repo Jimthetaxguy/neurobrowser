@@ -1,0 +1,1859 @@
+{
+  "assertions" : 42,
+  "collected_at" : "2026-10-04T06:56:35Z",
+  "engine" : "WKWebView",
+  "failure" : null,
+  "passed" : true,
+  "requests" : [
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995200,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 3,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-2",
+              "label" : "Advance shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance shipment Replace shipment control Open route view Unavailable shipment Shipment state: waiting. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-1"
+      },
+      "request_id" : "webkit-1"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":3,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-5\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Target is disabled",
+          "state" : "not_dispatched"
+        },
+        "request_id" : "webkit-2"
+      },
+      "request_id" : "webkit-2"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":8,\"max_links\":1,\"max_rows\":1,\"max_tables\":1,\"max_targets\":2,\"max_text_bytes\":48})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995223,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 3,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded",
+            "Targets truncated",
+            "Table cells or rows truncated",
+            "Page text truncated"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-2",
+              "label" : "Advance shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crat",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-3"
+      },
+      "request_id" : "webkit-3"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995235,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 3,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-2",
+              "label" : "Advance shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance shipment Replace shipment control Open route view Unavailable shipment Shipment state: waiting. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-4"
+      },
+      "request_id" : "webkit-4"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":3,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-2\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Action dispatch acknowledged; outcome has not been verified",
+          "state" : "acknowledged"
+        },
+        "request_id" : "webkit-5"
+      },
+      "request_id" : "webkit-5"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995262,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 5,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-2",
+              "label" : "Advance shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-6"
+      },
+      "request_id" : "webkit-6"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995274,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 5,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-2",
+              "label" : "Advance shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-7"
+      },
+      "request_id" : "webkit-7"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":5,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-3\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Action dispatch acknowledged; outcome has not been verified",
+          "state" : "acknowledged"
+        },
+        "request_id" : "webkit-8"
+      },
+      "request_id" : "webkit-8"
+    },
+    {
+      "expression" : "({count: window.workloadTrace.filter(event => event.kind === 'advance').length})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "count" : 1
+        },
+        "request_id" : "webkit-9"
+      },
+      "request_id" : "webkit-9"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":5,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-2\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Reviewed document state is stale; observe again",
+          "state" : "not_dispatched"
+        },
+        "request_id" : "webkit-10"
+      },
+      "request_id" : "webkit-10"
+    },
+    {
+      "expression" : "({count: window.workloadTrace.filter(event => event.kind === 'advance').length})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "count" : 1
+        },
+        "request_id" : "webkit-11"
+      },
+      "request_id" : "webkit-11"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995373,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 8,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-10",
+              "label" : "Advance replacement shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance replacement shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-12"
+      },
+      "request_id" : "webkit-12"
+    },
+    {
+      "expression" : "({set: (document.querySelector('#recipient').value = 'CANARY_PROPERTY_CHANGED_29')})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "set" : "CANARY_PROPERTY_CHANGED_29"
+        },
+        "request_id" : "webkit-13"
+      },
+      "request_id" : "webkit-13"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"type\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":8,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-7\",\"text\":\"Ada Lovelace\"})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Reviewed document state is stale; observe again",
+          "state" : "not_dispatched"
+        },
+        "request_id" : "webkit-14"
+      },
+      "request_id" : "webkit-14"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995410,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 9,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-10",
+              "label" : "Advance replacement shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance replacement shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-15"
+      },
+      "request_id" : "webkit-15"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"type\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":9,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-7\",\"text\":\"Ada Lovelace\"})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Action dispatch acknowledged; outcome has not been verified",
+          "state" : "acknowledged"
+        },
+        "request_id" : "webkit-16"
+      },
+      "request_id" : "webkit-16"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995462,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 13,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-10",
+              "label" : "Advance replacement shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance replacement shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-17"
+      },
+      "request_id" : "webkit-17"
+    },
+    {
+      "expression" : "({input: window.workloadTrace.some(event => event.kind === 'input' && event.detail === 'Ada Lovelace'), change: window.workloadTrace.some(event => event.kind === 'change' && event.detail === 'Ada Lovelace')})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "change" : true,
+          "input" : true
+        },
+        "request_id" : "webkit-18"
+      },
+      "request_id" : "webkit-18"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"submit\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":13,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-9\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Action dispatch acknowledged; outcome has not been verified",
+          "state" : "acknowledged"
+        },
+        "request_id" : "webkit-19"
+      },
+      "request_id" : "webkit-19"
+    },
+    {
+      "expression" : "({event: window.workloadTrace.find(event => event.kind === 'submitter').detail})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "event" : {
+            "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+            "id" : "confirm-dispatch"
+          }
+        },
+        "request_id" : "webkit-20"
+      },
+      "request_id" : "webkit-20"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995512,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 15,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-10",
+              "label" : "Advance replacement shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance replacement shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: dispatched to Ada Lovelace.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-21"
+      },
+      "request_id" : "webkit-21"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995527,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 15,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-10",
+              "label" : "Advance replacement shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance replacement shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: dispatched to Ada Lovelace.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-22"
+      },
+      "request_id" : "webkit-22"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":15,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-4\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Action dispatch acknowledged; outcome has not been verified",
+          "state" : "acknowledged"
+        },
+        "request_id" : "webkit-23"
+      },
+      "request_id" : "webkit-23"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995552,
+          "document" : {
+            "document_id" : "1c37e75b-f52f-4516-aca5-a1fbd6898e89",
+            "revision" : 18,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-10",
+              "label" : "Advance replacement shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance replacement shipment Replace shipment control Open route view Unavailable shipment Shipment state: dispatched. Recipient Access password Confirm dispatch Form state: dispatched to Ada Lovelace.",
+          "title" : "North route live manifest",
+          "url" : "http:\/\/127.0.0.1:52829\/route\/north?view=live"
+        },
+        "request_id" : "webkit-24"
+      },
+      "request_id" : "webkit-24"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":15,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-4\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Reviewed document state is stale; observe again",
+          "state" : "not_dispatched"
+        },
+        "request_id" : "webkit-25"
+      },
+      "request_id" : "webkit-25"
+    },
+    {
+      "expression" : "runtime.observe('page-runtime-webkit-workload', {\"max_cell_bytes\":240,\"max_links\":40,\"max_rows\":20,\"max_tables\":6,\"max_targets\":80,\"max_text_bytes\":12000})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "capabilities" : {
+            "background_javascript" : false,
+            "enforcing_subresource_network" : false,
+            "interaction" : true,
+            "javascript" : true,
+            "native_url" : true,
+            "runtime" : "desktop_webview",
+            "schema_version" : 1,
+            "scoped_targets" : true,
+            "screenshots" : false
+          },
+          "collected_at_ms" : 1791096995604,
+          "document" : {
+            "document_id" : "a84bcc9a-2178-4bee-80f1-a1418fc896ca",
+            "revision" : 3,
+            "runtime_id" : "page-runtime-webkit-workload"
+          },
+          "links" : [
+            {
+              "href" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "text" : "North route manifest"
+            }
+          ],
+          "omissions" : [
+            "Raw HTML, input values, frames and visual evidence are excluded"
+          ],
+          "schema_version" : 1,
+          "tables" : [
+            {
+              "headers" : [
+                "Route",
+                "Crates"
+              ],
+              "rows" : [
+                [
+                  "North",
+                  "17"
+                ],
+                [
+                  "South",
+                  "23"
+                ]
+              ]
+            }
+          ],
+          "targets" : [
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/route\/north",
+              "disabled" : false,
+              "id" : "target-1",
+              "label" : "North route manifest",
+              "role" : "a",
+              "sensitive" : false,
+              "tag" : "a"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-2",
+              "label" : "Advance shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-3",
+              "label" : "Replace shipment control",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : false,
+              "id" : "target-4",
+              "label" : "Open route view",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : null,
+              "disabled" : true,
+              "id" : "target-5",
+              "label" : "Unavailable shipment",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-6",
+              "label" : "Dispatch form",
+              "role" : "form",
+              "sensitive" : false,
+              "tag" : "form"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-7",
+              "label" : "Recipient",
+              "role" : "input",
+              "sensitive" : false,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/default",
+              "disabled" : false,
+              "id" : "target-8",
+              "label" : "Access password",
+              "role" : "input",
+              "sensitive" : true,
+              "tag" : "input"
+            },
+            {
+              "destination" : "http:\/\/127.0.0.1:52829\/dispatch\/reviewed",
+              "disabled" : false,
+              "id" : "target-9",
+              "label" : "Confirm dispatch",
+              "role" : "button",
+              "sensitive" : false,
+              "tag" : "button"
+            }
+          ],
+          "text" : "Observatory shipment ledger Depot stock: 17 crates. Next dispatch: North route at 14:30 UTC. Route Crates North 17 South 23 North route manifest Advance shipment Replace shipment control Open route view Unavailable shipment Shipment state: waiting. Recipient Access password Confirm dispatch Form state: waiting.",
+          "title" : "Capability evidence workload",
+          "url" : "http:\/\/127.0.0.1:52829\/"
+        },
+        "request_id" : "webkit-26"
+      },
+      "request_id" : "webkit-26"
+    },
+    {
+      "expression" : "runtime.dispatchTarget({\"action\":\"click\",\"document\":{\"document_id\":\"1c37e75b-f52f-4516-aca5-a1fbd6898e89\",\"revision\":18,\"runtime_id\":\"page-runtime-webkit-workload\"},\"target_id\":\"target-4\",\"text\":null})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "message" : "Reviewed document state is stale; observe again",
+          "state" : "not_dispatched"
+        },
+        "request_id" : "webkit-27"
+      },
+      "request_id" : "webkit-27"
+    },
+    {
+      "expression" : "({count: window.workloadTrace.filter(event => event.kind === 'spa').length})",
+      "report" : {
+        "error" : null,
+        "page_id" : 1,
+        "payload" : {
+          "count" : 0
+        },
+        "request_id" : "webkit-28"
+      },
+      "request_id" : "webkit-28"
+    }
+  ],
+  "runtime_source" : "\/Users\/jamespustorino\/code\/_worktrees\/neurobrowser-capability-20261004\/src-tauri\/src\/runtime.rs",
+  "schema_version" : 1,
+  "site" : "http:\/\/127.0.0.1:52829\/",
+  "storage" : "nonPersistent"
+}

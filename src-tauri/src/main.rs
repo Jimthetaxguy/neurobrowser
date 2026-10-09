@@ -5,8 +5,9 @@ use neuro_memory::{
     SearchRequest, SearchResult,
 };
 use neurobrowser::{
-    ActionPolicy, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus, BrowserInterface,
-    PageSnapshot, PolicyDecision, ProviderConfig, ProviderType, SessionManager, ToolCall,
+    ActionPolicy, ActionReceipt, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus,
+    ApprovalContext, BrowserInterface, ObservationLimits, PageObservation, PageSnapshot,
+    PolicyDecision, ProviderConfig, ProviderType, ReActAgent, SessionManager, ToolCall,
 };
 use runtime::{
     close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
@@ -24,7 +25,9 @@ struct AppState {
     /// Persistent page memory (`neuro_memory::MemoryService`). Opened at
     /// `app_data_dir()/memory/`.
     memory: Arc<MemoryService>,
-    action_policy: Mutex<ActionPolicy>,
+    /// A read lease orders each governed operation against policy updates.
+    /// The UI receives acknowledgment only after a write lease installs the policy.
+    action_policy: tokio::sync::RwLock<ActionPolicy>,
     /// Caller-owned capture rules. `MemoryService::forget` tombstones a host
     /// here for this process. The service does not store the policy itself.
     capture_policy: tokio::sync::Mutex<CapturePolicy>,
@@ -55,6 +58,8 @@ struct AgentRunResponse {
     status: AgentRunStatus,
     final_response: Option<String>,
     events: Vec<AgentRunEventResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approval_context: Option<ApprovalContext>,
 }
 
 #[derive(Serialize)]
@@ -72,6 +77,8 @@ enum AgentRunEventResponse {
     ToolCallResult {
         tool: String,
         success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        receipt: Option<ActionReceipt>,
     },
     ToolCallBlocked {
         tool: String,
@@ -200,8 +207,25 @@ fn agent_run_event_response(event: AgentRunEvent) -> AgentRunEventResponse {
         AgentRunEvent::ToolCallStarted { tool, .. } => {
             AgentRunEventResponse::ToolCallStarted { tool }
         }
-        AgentRunEvent::ToolCallResult { tool, success, .. } => {
-            AgentRunEventResponse::ToolCallResult { tool, success }
+        AgentRunEvent::ToolCallResult {
+            tool,
+            success,
+            result,
+            ..
+        } => {
+            let receipt = if matches!(
+                tool.as_str(),
+                "click_target" | "type_target" | "submit_target" | "scroll_target"
+            ) {
+                serde_json::from_str::<ActionReceipt>(&result).ok()
+            } else {
+                None
+            };
+            AgentRunEventResponse::ToolCallResult {
+                tool,
+                success,
+                receipt,
+            }
         }
         AgentRunEvent::ToolCallBlocked { tool, decision, .. } => {
             AgentRunEventResponse::ToolCallBlocked {
@@ -225,6 +249,7 @@ fn agent_run_event_response(event: AgentRunEvent) -> AgentRunEventResponse {
 
 fn agent_run_response(result: AgentRunResult) -> AgentRunResponse {
     AgentRunResponse {
+        approval_context: None,
         run_id: result.run_id,
         status: result.status,
         final_response: result.final_response,
@@ -234,6 +259,21 @@ fn agent_run_response(result: AgentRunResult) -> AgentRunResponse {
             .map(agent_run_event_response)
             .collect(),
     }
+}
+
+fn contextual_agent_run_response(
+    result: AgentRunResult,
+    agent: &ReActAgent,
+) -> Result<AgentRunResponse, String> {
+    let context = result
+        .approval_id
+        .as_deref()
+        .map(|id| agent.approval_context(id))
+        .transpose()?
+        .flatten();
+    let mut response = agent_run_response(result);
+    response.approval_context = context;
+    Ok(response)
 }
 
 #[tauri::command]
@@ -314,6 +354,10 @@ async fn navigate(
     page_id: usize,
     url: String,
 ) -> Result<(), String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
     // Host-side scheme/format + netguard check. UI does not preflight.
     let normalized_url = normalize_and_guard_url(url)?;
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
@@ -334,6 +378,45 @@ async fn get_page_snapshot(
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
     let snapshot = browser.snapshot().await?;
     Ok(snapshot_response(snapshot))
+}
+
+/// Human and agent clients receive the same bounded, provenance-bearing evidence.
+#[tauri::command]
+async fn get_page_observation(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<PageObservation, String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.observe(ObservationLimits::default()).await
+}
+
+/// A single explicit proposal uses the agent's policy/approval route without a model.
+#[tauri::command]
+async fn execute_browser_tool(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    tool_call: ToolCall,
+) -> Result<AgentRunResponse, String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
+    let (page, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let policy = state.action_policy.read().await;
+    let result = page
+        .agent
+        .propose_tool_with_policy(tool_call, &browser, &policy)
+        .await?;
+    remember_pending_approval(state.inner(), session_id, page_id, &result)?;
+    contextual_agent_run_response(result, &page.agent)
 }
 
 fn remember_pending_approval(
@@ -371,36 +454,32 @@ async fn execute_agent_run(
     session_id: String,
     page_id: usize,
     prompt: &str,
-) -> Result<AgentRunResult, String> {
+) -> Result<AgentRunResponse, String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
     let (page, browser) = browser_for_page(app, state, &session_id, page_id)?;
-    let policy = state
-        .action_policy
-        .lock()
-        .map(|policy| policy.clone())
-        .map_err(|e| e.to_string())?;
+    let policy = state.action_policy.read().await;
     let result = page
         .agent
         .execute_with_policy(prompt, &browser, &policy)
         .await?;
     remember_pending_approval(state, session_id, page_id, &result)?;
-    Ok(result)
+    contextual_agent_run_response(result, &page.agent)
 }
 
 #[tauri::command]
-fn get_action_policy(state: State<'_, AppState>) -> Result<ActionPolicy, String> {
-    state
-        .action_policy
-        .lock()
-        .map(|policy| policy.clone())
-        .map_err(|e| e.to_string())
+async fn get_action_policy(state: State<'_, AppState>) -> Result<ActionPolicy, String> {
+    Ok(state.action_policy.read().await.clone())
 }
 
 #[tauri::command]
-fn set_action_policy(
+async fn set_action_policy(
     state: State<'_, AppState>,
     policy: ActionPolicy,
 ) -> Result<ActionPolicy, String> {
-    let mut current = state.action_policy.lock().map_err(|e| e.to_string())?;
+    let mut current = state.action_policy.write().await;
     *current = policy.clone();
     Ok(policy)
 }
@@ -413,9 +492,7 @@ async fn start_agent_run(
     page_id: usize,
     prompt: String,
 ) -> Result<AgentRunResponse, String> {
-    execute_agent_run(app, state.inner(), session_id, page_id, &prompt)
-        .await
-        .map(agent_run_response)
+    execute_agent_run(app, state.inner(), session_id, page_id, &prompt).await
 }
 
 #[tauri::command]
@@ -431,16 +508,22 @@ async fn submit_approval(
         .map_err(|e| e.to_string())?
         .remove(&run_id)
         .ok_or_else(|| format!("No pending approval for run {run_id}"))?;
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&pending.session_id, pending.page_id)
+        .await?;
     let (page, browser) =
         browser_for_page(app, state.inner(), &pending.session_id, pending.page_id)?;
+    let policy = state.action_policy.read().await;
     page.agent
-        .execute_approved_tool(
+        .execute_approved_tool_with_policy(
             run_id,
             pending.approval_id,
             pending.tool_call,
             &browser,
             approved,
             None,
+            &policy,
         )
         .await
         .map(agent_run_response)
@@ -456,6 +539,14 @@ fn cancel_agent_run(
         .lock()
         .map_err(|e| e.to_string())?
         .remove(&run_id);
+    if let Some(pending) = &removed {
+        if let Ok(page) = state
+            .session_manager
+            .get_page(&pending.session_id, pending.page_id)
+        {
+            page.agent.cancel_pending_approval(&run_id)?;
+        }
+    }
     let reason = if removed.is_some() {
         "Run cancelled by user"
     } else {
@@ -481,6 +572,11 @@ fn close_page(
     page_id: usize,
 ) -> Result<(), String> {
     state.session_manager.close_page(&session_id, page_id)?;
+    state
+        .pending_approvals
+        .lock()
+        .map_err(|e| e.to_string())?
+        .retain(|_, pending| pending.session_id != session_id || pending.page_id != page_id);
     close_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 
@@ -491,6 +587,10 @@ async fn browser_reload(
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
     browser.browser_reload().await?;
     browser.wait_for_navigation().await.map_err(|error| {
@@ -508,6 +608,10 @@ async fn browser_back(
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
     browser.browser_back().await
 }
@@ -519,19 +623,28 @@ async fn browser_forward(
     session_id: String,
     page_id: usize,
 ) -> Result<(), String> {
+    let _operation = state
+        .session_manager
+        .lock_page_operation(&session_id, page_id)
+        .await?;
     let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
     browser.browser_forward().await
 }
 
 #[tauri::command]
 fn browser_runtime_report(
+    webview: tauri::Webview,
     state: State<'_, AppState>,
     payload: RuntimeReportPayload,
 ) -> Result<(), String> {
     state.runtimes.page_runtime_id(payload.page_id)?;
-    state
-        .runtimes
-        .resolve_request(&payload.request_id, payload.payload, payload.error)
+    state.runtimes.resolve_request(
+        payload.page_id,
+        webview.label(),
+        &payload.request_id,
+        payload.payload,
+        payload.error,
+    )
 }
 
 fn normalize_and_guard_url(url: String) -> Result<String, String> {
@@ -722,7 +835,7 @@ fn main() {
                 session_manager,
                 runtimes,
                 memory,
-                action_policy: Mutex::new(ActionPolicy::default()),
+                action_policy: tokio::sync::RwLock::new(ActionPolicy::default()),
                 capture_policy: tokio::sync::Mutex::new(CapturePolicy::default()),
                 pending_approvals: Mutex::new(HashMap::new()),
             });
@@ -741,6 +854,8 @@ fn main() {
             forget_memory,
             get_action_policy,
             get_page_snapshot,
+            get_page_observation,
+            execute_browser_tool,
             navigate,
             search_local_memory,
             set_active_page,

@@ -1,0 +1,809 @@
+=== NeuroBrowser Verify Chain ===
+→ cargo fmt --check...
+→ cargo clippy...
+    Checking neurobrowser v0.1.0 (<feature-checkout>)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.53s
+→ cargo test...
+   Compiling neurobrowser v0.1.0 (<feature-checkout>)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.88s
+     Running unittests src/lib.rs (<user-home>/.cargo-target/debug/deps/neurobrowser-69336d7f9dc17d73)
+
+running 52 tests
+test agent::approval::tests::expired_grant_cannot_authorize_without_waiting ... ok
+test browser::tests::default_registry_registers_all_explicit_definitions ... ok
+test browser::action_readiness_tests::action_failures_remain_failures_and_do_not_wait ... ok
+test browser::action_readiness_tests::explicit_wait_still_reports_readiness_failure ... ok
+test browser::action_readiness_tests::executed_actions_keep_success_and_surface_readiness_timeout ... ok
+test browser::tests::scroll_by_rejects_non_numeric_deltas ... ok
+test browser::tests::scroll_by_rejects_non_finite_deltas ... ok
+test browser::tests::enrich_snapshot_extracts_prices_from_text ... ok
+test browser::action_readiness_tests::ready_actions_have_no_warning_and_navigate_does_not_wait_twice ... ok
+test browser::tests::price_context_preserves_serialized_field_and_unicode_boundaries ... ok
+test browser::tests::type_tool_result_does_not_leak_typed_text ... ok
+test browser::tests::static_interaction_error_reports_invalid_selector ... ok
+test browser::tests::query_selector_from_html_rejects_invalid_css ... ok
+test browser::tests::static_interaction_error_reports_matched_element_as_uneffective ... ok
+test browser::tests::static_interaction_error_reports_missing_element ... ok
+test netguard::resolver_tests::resolver_keeps_loopback_for_configured_localhost ... ok
+test netguard::resolver_tests::resolver_strips_internal_addresses_returned_by_dns ... ok
+test netguard::resolver_tests::resolver_passes_ordinary_public_addresses_through ... ok
+test netguard::resolver_tests::resolver_refuses_when_every_address_is_internal ... ok
+test netguard::resolver_tests::resolver_still_strips_loopback_for_names_that_are_not_the_allow ... ok
+test netguard::tests::allows_ordinary_public_addresses ... ok
+test agent::approval::tests::legacy_approval_context_projects_only_url ... ok
+test netguard::tests::blocks_ipv4_internal_ranges ... ok
+test netguard::tests::blocks_dangerous_schemes_by_scheme_not_substring ... ok
+test netguard::tests::blocks_ipv4_mapped_and_compatible_forms ... ok
+test netguard::tests::blocks_ipv6_unique_local_and_link_local ... ok
+test browser::tests::snapshot_from_html_collects_basic_metadata ... ok
+test netguard::tests::disallowed_scheme_does_not_resolve_hosts ... ok
+test netguard::tests::fails_closed_on_unparseable_url ... ok
+test netguard::tests::blocks_literal_internal_urls ... ok
+test providers::anthropic::tests::extract_text_concatenates_all_text_blocks ... ok
+test netguard::tests::same_origin_is_scheme_host_port_not_path ... ok
+test browser::tests::http_snapshot_and_query_redact_credentials_before_export ... ok
+test providers::http::tests::default_ollama_origin_is_blocked_for_browser_paths ... ok
+test netguard::tests::fails_closed_on_unresolvable_host ... ok
+test providers::tests::failed_tool_results_reach_the_prompt_with_their_reason ... ok
+test providers::tests::parse_tool_calls_keeps_calls_with_missing_required_arguments ... ok
+test providers::tests::parse_tool_calls_keeps_registered_zero_argument_legacy_actions ... ok
+test providers::tests::resolve_endpoint_overrides_origin ... ok
+test providers::tests::resolve_endpoint_trims_trailing_slash_and_ignores_blank ... ok
+test providers::tests::resolve_endpoint_uses_default_origin_when_unset ... ok
+test providers::tests::system_prompt_is_driven_by_the_tool_registry ... ok
+test tools::contracts::tests::missing_required_arguments_flags_absent_and_empty_values_only ... ok
+test netguard::tests::does_not_block_a_url_merely_mentioning_a_scheme_in_its_query ... ok
+test browser::action_readiness_tests::real_post_is_not_reported_failed_when_receipt_loading_times_out ... ok
+test providers::anthropic::tests::request_body_omits_temperature_when_not_configured ... ok
+test providers::anthropic::tests::request_body_puts_system_at_top_level_not_in_messages ... ok
+test agent::approval_context_tests::expired_grant_has_no_public_context_and_is_pruned ... ok
+test providers::anthropic::tests::request_body_includes_temperature_when_configured ... ok
+test providers::anthropic::tests::user_turn_sends_prompt_only_when_tool_results_exist ... ok
+test providers::http::tests::redirect_hop_to_blocked_internal_host_fails_closed ... ok
+test providers::http::tests::configured_loopback_ollama_still_works ... ok
+
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.78s
+
+     Running tests/action_policy.rs (<user-home>/.cargo-target/debug/deps/action_policy-6196fc1ce808ae19)
+
+running 13 tests
+test prompt_injection_content_blocks_tool_calls ... ok
+test injection_hidden_in_html_attribute_is_detected ... ok
+test navigation_to_javascript_scheme_is_blocked ... ok
+test assisted_mode_requires_approval_for_clicks ... ok
+test denylist_beats_allowlist ... ok
+test readonly_prohibition_beats_sensitive_and_explicit_approval ... ok
+test navigate_domain_check_is_case_insensitive ... ok
+test readonly_mode_blocks_navigate ... ok
+test sensitive_key_match_is_token_bounded ... ok
+test sensitive_arguments_are_redacted_and_require_approval ... ok
+test harmless_key_substrings_do_not_require_sensitive_approval ... ok
+test target_destination_is_checked_without_replacing_action_risk ... ok
+test credential_keys_individually_require_approval_and_redaction ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/autonomous_agent.rs (<user-home>/.cargo-target/debug/deps/autonomous_agent-491e48bb54195d2a)
+
+running 15 tests
+test drops_truncated_legacy_calls ... ok
+test parses_structured_tool_calls_without_provider_specific_logic ... ok
+test parses_argument_less_legacy_calls_to_known_tools ... ok
+test parses_legacy_action_syntax_for_compatibility ... ok
+test parses_legacy_action_syntax_with_multiple_positional_args ... ok
+test argument_less_legacy_call_reports_error_to_model_instead_of_completing ... ok
+test invalid_tool_call_reports_error_to_model_instead_of_completing ... ok
+test real_shaped_toolcall_json_dispatches_despite_provider_stop ... ok
+test post_navigation_url_reaches_model_next_iteration ... ok
+test deterministic_provider_runs_read_tool_loop ... ok
+test zero_arg_action_wait_reaches_the_tool_path ... ok
+test argument_less_legacy_wait_passes_policy_and_runs ... ok
+test persistent_post_tool_snapshot_failure_keeps_success_and_previous_context ... ok
+test transient_post_tool_snapshot_failure_retries_the_read_and_updates_model_context ... ok
+test approval_required_run_stops_before_click ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capability_agent.rs (<user-home>/.cargo-target/debug/deps/capability_agent-cd659cf77244a6af)
+
+running 18 tests
+test forged_approval_never_dispatches ... ok
+test invalid_observation_authority_cannot_be_used_or_returned_as_evidence ... ok
+test explicit_dispatch_rejection_receipt_is_not_unknown_and_omits_input ... ok
+test native_observed_url_is_used_for_policy_not_snapshot_url ... ok
+test pending_context_exposes_reviewed_target_without_input_values ... ok
+test legacy_selector_approval_revalidates_snapshot ... ok
+test legacy_mutation_error_halts_batch_before_next_call_or_provider_turn ... ok
+test malformed_scoped_arguments_never_reach_approval_or_dispatch ... ok
+test private_target_destination_cannot_be_proposed_for_approval ... ok
+test exact_approval_dispatches_once_and_excludes_input ... ok
+test legacy_submit_batch_has_no_replay_after_failed_approved_dispatch_or_readiness ... ok
+test readonly_scoped_type_prohibition_cannot_be_approved ... ok
+test predicate_success_is_document_evidence ... ok
+test stale_unknown_disabled_and_unsupported_targets_never_dispatch ... ok
+test scroll_and_type_do_not_govern_an_unused_destination ... ok
+test unknown_dispatch_halts_remaining_calls_and_provider_iterations ... ok
+test altered_call_policy_run_and_reviewed_target_invalidate_approval ... ok
+test readiness_and_postcondition_failures_preserve_acknowledged_dispatch ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capability_observation.rs (<user-home>/.cargo-target/debug/deps/capability_observation-8d54236d8cab5272)
+
+running 9 tests
+test real_public_http_engine_observes_example_domain ... ignored, requires live public HTTPS access; run explicitly as an integration check
+test oversized_authority_is_rejected_without_aliasing ... ok
+test unknown_adapter_does_not_invent_execution_guarantees ... ok
+test caller_limits_use_utf8_bytes_without_splitting_characters ... ok
+test oversized_target_destination_is_rejected_without_truncation ... ok
+test shared_envelope_excludes_raw_html_and_form_value_fields ... ok
+test native_authority_and_destinations_are_preserved_exactly ... ok
+test entire_serialized_envelope_respects_budget_including_json_escapes ... ok
+test default_http_engine_denies_loopback_before_any_real_tcp_request ... ok
+
+test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 8.87s
+
+     Running tests/memory_tools.rs (<user-home>/.cargo-target/debug/deps/memory_tools-53f8688883fec816)
+
+running 8 tests
+test prompt_lists_memory_tools_only_when_personal_memory_is_attached ... ok
+test zero_arg_action_inspect_active_page_reaches_the_tool_path ... ok
+test with_memory_dispatches_search_and_new_does_not ... ok
+test search_requires_a_query_and_honors_limit ... ok
+test inspect_reports_policy_denial_and_a_missing_capture ... ok
+test registry_grows_from_22_browser_tools_to_24_with_memory ... ok
+test search_reads_memory_and_does_not_call_the_browser ... ok
+test inspect_returns_captured_content_for_the_current_url ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/real_provider_smoke.rs (<user-home>/.cargo-target/debug/deps/real_provider_smoke-68fcccd061861eb5)
+
+running 2 tests
+test anthropic_real_call_smoke ... ignored
+test openai_real_call_smoke ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+→ neuro-memory cargo test...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling tokio v1.53.1
+   Compiling neuro-memory v0.1.0 (<feature-checkout>/crates/neuro-memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.17s
+     Running unittests src/lib.rs (<user-home>/.cargo-target/debug/deps/neuro_memory-16ee26fd349f1e70)
+
+running 7 tests
+test store::tests::page_store_is_send_and_sync ... ok
+test store::tests::hex_encode_matches_sha256_of_empty ... ok
+test policy::tests::default_is_enabled_with_empty_domain_lists ... ok
+test store::tests::content_hash_is_sha256_of_compact_body_json ... ok
+test policy::tests::evaluate_applies_domain_rules ... ok
+test store::tests::content_hash_tracks_body_fields_only ... ok
+test store::tests::put_writes_pretty_json_with_trailing_newline ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/extract_blocks.rs (<user-home>/.cargo-target/debug/deps/extract_blocks-aa064643da666f71)
+
+running 14 tests
+test empty_page_yields_no_blocks ... ok
+test headings_without_prose_fall_back_to_plain_text ... ok
+test plain_text_fallback_joins_blank_line_paragraphs ... ok
+test heading_whitespace_is_collapsed_into_the_path ... ok
+test broken_html_still_extracts_visible_text ... ok
+test long_section_splits_on_paragraph_boundaries ... ok
+test plain_text_fallback_also_splits_at_max_length ... ok
+test paragraphs_without_headings_have_an_empty_path ... ok
+test overlong_token_splits_on_character_boundaries ... ok
+test pre_preserves_internal_whitespace ... ok
+test table_cells_follow_the_heading ... ok
+test whitespace_html_is_not_a_block ... ok
+test overlong_paragraph_splits_on_whitespace_without_cutting_tokens ... ok
+test outline_tracks_heading_path_and_skips_non_content ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/index.rs (<user-home>/.cargo-target/debug/deps/index-1338b57de86eedc0)
+
+running 4 tests
+test block_index_is_send_and_sync ... ok
+test schema_matches_block_fields ... ok
+test open_or_create_creates_missing_directory_and_rejects_conflicts ... ok
+test add_commit_remove_round_trip_survives_reopen ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/memory_service.rs (<user-home>/.cargo-target/debug/deps/memory_service-522bf1935f4b74bf)
+
+running 2 tests
+test now_millis_matches_system_time ... ok
+test open_creates_page_store_and_index_directories ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/page_store.rs (<user-home>/.cargo-target/debug/deps/page_store-fe69fdb18e5b5171)
+
+running 8 tests
+test malformed_content_hashes_are_rejected ... ok
+test put_get_round_trips_the_json_file_named_by_content_hash ... ok
+test open_creates_pages_dir_and_rejects_a_file_path ... ok
+test concurrent_puts_keep_both_pages ... ok
+test put_keys_by_body_hash_and_repeat_put_keeps_one_file ... ok
+test put_get_round_trips_empty_and_quoted_fields ... ok
+test corrupt_json_and_tampered_body_are_errors ... ok
+test delete_removes_one_page_and_missing_keys_succeed ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/query.rs (<user-home>/.cargo-target/debug/deps/query-611b8e864b2747ec)
+
+running 5 tests
+test explain_breaks_down_text_and_heading_scores_with_snippets ... ok
+test explain_phrase_and_fielded_queries ... ok
+test search_matches_heading_path_when_the_body_does_not ... ok
+test explain_rejects_a_block_the_query_does_not_match ... ok
+test search_ranks_committed_text ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/service_e2e.rs (<user-home>/.cargo-target/debug/deps/service_e2e-c453d7db1ba2a1a7)
+
+running 7 tests
+test recapture_cleans_legacy_indexed_hashes_without_a_schema_migration ... ok
+test capture_search_forget_removes_the_page_and_tombstones_the_domain ... ok
+test empty_recaptures_survive_restart_without_search_metadata_leaks ... ok
+test recapture_does_not_read_unrelated_corrupt_pages ... ok
+test failed_cleanup_keeps_candidate_hashes_for_retry_after_restart ... ok
+test recapture_drops_older_page_files_for_the_same_url ... ok
+test concurrent_recaptures_keep_the_page_used_by_the_index ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.82s
+
+   Doc-tests neuro_memory
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+→ Tauri frontend tests and build...
+
+added 106 packages, and audited 107 packages in 1s
+
+19 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+npm warn install-scripts 2 packages had install scripts blocked because they are not covered by allowScripts:
+npm warn install-scripts   esbuild@0.25.12 (postinstall: node install.js)
+npm warn install-scripts   fsevents@2.3.3 (install: (install scripts present))
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+npm notice run neurobrowser@0.1.0 test
+npm notice run node --test src/*.test.js
+TAP version 13
+# Subtest: the mounted approval card displays reviewed source, target and destination with redacted arguments
+ok 1 - the mounted approval card displays reviewed source, target and destination with redacted arguments
+  ---
+  duration_ms: 254.064625
+  type: 'test'
+  ...
+# Subtest: the last tab has no close control, and multiple tabs use sibling buttons
+ok 2 - the last tab has no close control, and multiple tabs use sibling buttons
+  ---
+  duration_ms: 257.723
+  type: 'test'
+  ...
+# Subtest: chip padding activates a tab, while title clicks activate it only once
+ok 3 - chip padding activates a tab, while title clicks activate it only once
+  ---
+  duration_ms: 29.313458
+  type: 'test'
+  ...
+# Subtest: closing the active tab refreshes the survivor URL, title, and statistics
+ok 4 - closing the active tab refreshes the survivor URL, title, and statistics
+  ---
+  duration_ms: 24.894
+  type: 'test'
+  ...
+# Subtest: a failed host close keeps both tabs and reports the failure
+ok 5 - a failed host close keeps both tabs and reports the failure
+  ---
+  duration_ms: 19.697333
+  type: 'test'
+  ...
+# Subtest: a failed navigation stays a navigation failure and does not read the page
+ok 6 - a failed navigation stays a navigation failure and does not read the page
+  ---
+  duration_ms: 19.095834
+  type: 'test'
+  ...
+# Subtest: a failed snapshot read after navigation is a page refresh failure
+ok 7 - a failed snapshot read after navigation is a page refresh failure
+  ---
+  duration_ms: 20.055375
+  type: 'test'
+  ...
+# Subtest: back, forward, and reload keep an action failure distinct from a page read failure
+ok 8 - back, forward, and reload keep an action failure distinct from a page read failure
+  ---
+  duration_ms: 23.139042
+  type: 'test'
+  ...
+# Subtest: a delayed observation from another tab cannot populate current evidence
+ok 9 - a delayed observation from another tab cannot populate current evidence
+  ---
+  duration_ms: 185.541291
+  type: 'test'
+  ...
+# Subtest: switching away and back retires the original observation generation
+ok 10 - switching away and back retires the original observation generation
+  ---
+  duration_ms: 11.206167
+  type: 'test'
+  ...
+# Subtest: a unknown receipt after tab switch reaches run presentation
+ok 11 - a unknown receipt after tab switch reaches run presentation
+  ---
+  duration_ms: 21.593625
+  type: 'test'
+  ...
+# Subtest: a acknowledged receipt after tab switch reaches run presentation
+ok 12 - a acknowledged receipt after tab switch reaches run presentation
+  ---
+  duration_ms: 17.349416
+  type: 'test'
+  ...
+# Subtest: a delayed prior-page approval is cancelled instead of resurfacing on another tab
+ok 13 - a delayed prior-page approval is cancelled instead of resurfacing on another tab
+  ---
+  duration_ms: 19.682667
+  type: 'test'
+  ...
+# Subtest: a proposal uses the displayed document identity and retires targets afterward
+ok 14 - a proposal uses the displayed document identity and retires targets afterward
+  ---
+  duration_ms: 14.406375
+  type: 'test'
+  ...
+# Subtest: effect cleanup replay does not disable evidence refresh
+ok 15 - effect cleanup replay does not disable evidence refresh
+  ---
+  duration_ms: 11.499834
+  type: 'test'
+  ...
+# Subtest: a missing transport response after switching tabs preserves its source and uncertainty
+ok 16 - a missing transport response after switching tabs preserves its source and uncertainty
+  ---
+  duration_ms: 19.024041
+  type: 'test'
+  ...
+# Subtest: a failed prior-page cancellation retains the pending run and explains the failure
+ok 17 - a failed prior-page cancellation retains the pending run and explains the failure
+  ---
+  duration_ms: 30.031791
+  type: 'test'
+  ...
+# Subtest: awaiting_approval keeps the run so a follow-up approval card can show
+ok 18 - awaiting_approval keeps the run so a follow-up approval card can show
+  ---
+  duration_ms: 1.424
+  type: 'test'
+  ...
+# Subtest: awaiting_approval uses the shared fallback when the response is empty
+ok 19 - awaiting_approval uses the shared fallback when the response is empty
+  ---
+  duration_ms: 0.1835
+  type: 'test'
+  ...
+# Subtest: blocked and cancelled clear the card and keep their own status copy
+ok 20 - blocked and cancelled clear the card and keep their own status copy
+  ---
+  duration_ms: 0.053625
+  type: 'test'
+  ...
+# Subtest: completed and failed are terminal and clear the card
+ok 21 - completed and failed are terminal and clear the card
+  ---
+  duration_ms: 0.046458
+  type: 'test'
+  ...
+# Subtest: awaiting_approval survives snapshot status Loaded: Receipt
+ok 22 - awaiting_approval survives snapshot status Loaded: Receipt
+  ---
+  duration_ms: 0.401208
+  type: 'test'
+  ...
+# Subtest: awaiting_approval survives snapshot status Ready
+ok 23 - awaiting_approval survives snapshot status Ready
+  ---
+  duration_ms: 0.041458
+  type: 'test'
+  ...
+# Subtest: blocked survives snapshot status Loaded: Receipt
+ok 24 - blocked survives snapshot status Loaded: Receipt
+  ---
+  duration_ms: 0.075125
+  type: 'test'
+  ...
+# Subtest: blocked survives snapshot status Ready
+ok 25 - blocked survives snapshot status Ready
+  ---
+  duration_ms: 0.067292
+  type: 'test'
+  ...
+# Subtest: cancelled survives snapshot status Loaded: Receipt
+ok 26 - cancelled survives snapshot status Loaded: Receipt
+  ---
+  duration_ms: 0.207
+  type: 'test'
+  ...
+# Subtest: cancelled survives snapshot status Ready
+ok 27 - cancelled survives snapshot status Ready
+  ---
+  duration_ms: 0.221416
+  type: 'test'
+  ...
+# Subtest: completed survives snapshot status Loaded: Receipt
+ok 28 - completed survives snapshot status Loaded: Receipt
+  ---
+  duration_ms: 0.316625
+  type: 'test'
+  ...
+# Subtest: completed survives snapshot status Ready
+ok 29 - completed survives snapshot status Ready
+  ---
+  duration_ms: 0.085917
+  type: 'test'
+  ...
+# Subtest: failed survives snapshot status Loaded: Receipt
+ok 30 - failed survives snapshot status Loaded: Receipt
+  ---
+  duration_ms: 0.152
+  type: 'test'
+  ...
+# Subtest: failed survives snapshot status Ready
+ok 31 - failed survives snapshot status Ready
+  ---
+  duration_ms: 0.055125
+  type: 'test'
+  ...
+# Subtest: a failed snapshot read preserves the completed action without another approval
+ok 32 - a failed snapshot read preserves the completed action without another approval
+  ---
+  duration_ms: 0.164333
+  type: 'test'
+  ...
+# Subtest: receipt presentation separates unknown/unavailable from outcome
+ok 33 - receipt presentation separates unknown/unavailable from outcome
+  ---
+  duration_ms: 0.068708
+  type: 'test'
+  ...
+# Subtest: receipt presentation separates not_dispatched/not_requested from outcome
+ok 34 - receipt presentation separates not_dispatched/not_requested from outcome
+  ---
+  duration_ms: 0.037625
+  type: 'test'
+  ...
+# Subtest: receipt presentation separates acknowledged/not_requested from outcome
+ok 35 - receipt presentation separates acknowledged/not_requested from outcome
+  ---
+  duration_ms: 5.961208
+  type: 'test'
+  ...
+# Subtest: receipt presentation separates acknowledged/satisfied from outcome
+ok 36 - receipt presentation separates acknowledged/satisfied from outcome
+  ---
+  duration_ms: 5.158625
+  type: 'test'
+  ...
+# Subtest: receipt presentation separates acknowledged/unsatisfied from outcome
+ok 37 - receipt presentation separates acknowledged/unsatisfied from outcome
+  ---
+  duration_ms: 0.066458
+  type: 'test'
+  ...
+# Subtest: prior receipt cannot hide a later approval request in the same run
+ok 38 - prior receipt cannot hide a later approval request in the same run
+  ---
+  duration_ms: 0.0525
+  type: 'test'
+  ...
+# Subtest: AppKit keeps snapshots associated with their page and discards closed pages
+ok 39 - AppKit keeps snapshots associated with their page and discards closed pages
+  ---
+  duration_ms: 3.774
+  type: 'test'
+  ...
+# Subtest: background tab updates preserve the active page URL draft
+ok 40 - background tab updates preserve the active page URL draft
+  ---
+  duration_ms: 0.332416
+  type: 'test'
+  ...
+# Subtest: a native selection and immediate snapshot use the new active page
+ok 41 - a native selection and immediate snapshot use the new active page
+  ---
+  duration_ms: 0.348167
+  type: 'test'
+  ...
+# Subtest: observations exclude HTML and every input value, with UTF-8 text and collection bounds
+ok 42 - observations exclude HTML and every input value, with UTF-8 text and collection bounds
+  ---
+  duration_ms: 78.517416
+  type: 'test'
+  ...
+# Subtest: same-document replacement is rejected synchronously before MutationObserver callback
+ok 43 - same-document replacement is rejected synchronously before MutationObserver callback
+  ---
+  duration_ms: 10.137583
+  type: 'test'
+  ...
+# Subtest: SPA URL change invalidates reviewed state and fresh evidence names the new URL
+ok 44 - SPA URL change invalidates reviewed state and fresh evidence names the new URL
+  ---
+  duration_ms: 8.294209
+  type: 'test'
+  ...
+# Subtest: input events invalidate reviewed state even if no DOM attributes changed
+ok 45 - input events invalidate reviewed state even if no DOM attributes changed
+  ---
+  duration_ms: 6.459625
+  type: 'test'
+  ...
+# Subtest: property-only form value changes invalidate the target fingerprint without exposing values
+ok 46 - property-only form value changes invalidate the target fingerprint without exposing values
+  ---
+  duration_ms: 7.280958
+  type: 'test'
+  ...
+# Subtest: target typing acknowledges dispatch and changes the real DOM value
+ok 47 - target typing acknowledges dispatch and changes the real DOM value
+  ---
+  duration_ms: 9.044292
+  type: 'test'
+  ...
+# Subtest: cross-runtime, cross-document and disabled target dispatch are rejected
+ok 48 - cross-runtime, cross-document and disabled target dispatch are rejected
+  ---
+  duration_ms: 5.204833
+  type: 'test'
+  ...
+# Subtest: an exception after possible dispatch reports uncertainty and invalidates replay
+ok 49 - an exception after possible dispatch reports uncertainty and invalidates replay
+  ---
+  duration_ms: 8.993375
+  type: 'test'
+  ...
+# Subtest: caller limits cannot expand collection ceilings and zero limits remain valid
+ok 50 - caller limits cannot expand collection ceilings and zero limits remain valid
+  ---
+  duration_ms: 44.295958
+  type: 'test'
+  ...
+# Subtest: installed runtime methods and global reference resist direct reassignment
+ok 51 - installed runtime methods and global reference resist direct reassignment
+  ---
+  duration_ms: 11.675625
+  type: 'test'
+  ...
+# Subtest: oversized forms cannot dispatch with only a partial reviewed value fingerprint
+ok 52 - oversized forms cannot dispatch with only a partial reviewed value fingerprint
+  ---
+  duration_ms: 103.664333
+  type: 'test'
+  ...
+# Subtest: re-observation advances revision before refreshing property-only changed fingerprints
+ok 53 - re-observation advances revision before refreshing property-only changed fingerprints
+  ---
+  duration_ms: 10.473917
+  type: 'test'
+  ...
+# Subtest: narrow observations preserve freshness comparisons for previously observed targets
+ok 54 - narrow observations preserve freshness comparisons for previously observed targets
+  ---
+  duration_ms: 7.324416
+  type: 'test'
+  ...
+# Subtest: oversized authority destinations are omitted instead of truncated to a different URL
+ok 55 - oversized authority destinations are omitted instead of truncated to a different URL
+  ---
+  duration_ms: 13.951541
+  type: 'test'
+  ...
+# Subtest: table header rows do not consume the bounded data row allowance
+ok 56 - table header rows do not consume the bounded data row allowance
+  ---
+  duration_ms: 8.4975
+  type: 'test'
+  ...
+# Subtest: document IDs remain random on HTTP contexts without crypto.randomUUID
+ok 57 - document IDs remain random on HTTP contexts without crypto.randomUUID
+  ---
+  duration_ms: 14.677125
+  type: 'test'
+  ...
+# Subtest: submission uses the exact reviewed submitter including its overridden destination
+ok 58 - submission uses the exact reviewed submitter including its overridden destination
+  ---
+  duration_ms: 7.86625
+  type: 'test'
+  ...
+# Subtest: submit rejects arbitrary descendants whose click destination differs from form action
+ok 59 - submit rejects arbitrary descendants whose click destination differs from form action
+  ---
+  duration_ms: 5.678417
+  type: 'test'
+  ...
+# Subtest: overridden submitter destination is rejected when requestSubmit is unavailable
+ok 60 - overridden submitter destination is rejected when requestSubmit is unavailable
+  ---
+  duration_ms: 6.468083
+  type: 'test'
+  ...
+# Subtest: snapshot html omits password and hidden input values but keeps normal ones
+ok 61 - snapshot html omits password and hidden input values but keeps normal ones
+  ---
+  duration_ms: 56.903416
+  type: 'test'
+  ...
+# Subtest: snapshot html keeps the password/hidden inputs themselves, only strips value
+ok 62 - snapshot html keeps the password/hidden inputs themselves, only strips value
+  ---
+  duration_ms: 16.228458
+  type: 'test'
+  ...
+# Subtest: snapshot html has no value attribute at all on password/hidden inputs
+ok 63 - snapshot html has no value attribute at all on password/hidden inputs
+  ---
+  duration_ms: 18.690708
+  type: 'test'
+  ...
+# Subtest: snapshot forms structured view also redacts password and hidden values
+ok 64 - snapshot forms structured view also redacts password and hidden values
+  ---
+  duration_ms: 5.450334
+  type: 'test'
+  ...
+# Subtest: querySelector attributes view also redacts password and hidden values
+ok 65 - querySelector attributes view also redacts password and hidden values
+  ---
+  duration_ms: 6.491209
+  type: 'test'
+  ...
+# Subtest: a page without a documentElement yields a null html snapshot
+ok 66 - a page without a documentElement yields a null html snapshot
+  ---
+  duration_ms: 5.450209
+  type: 'test'
+  ...
+# Subtest: snapshot html redacts password/hidden values inside <template>, including nested templates
+ok 67 - snapshot html redacts password/hidden values inside <template>, including nested templates
+  ---
+  duration_ms: 13.48975
+  type: 'test'
+  ...
+# Subtest: snapshot never reconstructs custom elements (no clone-triggered constructor side effects)
+ok 68 - snapshot never reconstructs custom elements (no clone-triggered constructor side effects)
+  ---
+  duration_ms: 5.670584
+  type: 'test'
+  ...
+# Subtest: snapshot html omits iframe[srcdoc] entirely, including any secret inside it
+ok 69 - snapshot html omits iframe[srcdoc] entirely, including any secret inside it
+  ---
+  duration_ms: 10.828209
+  type: 'test'
+  ...
+# Subtest: snapshot succeeds and matches its normal output even with DOMParser/innerHTML/createContextualFragment blocked (Trusted Types simulation)
+ok 70 - snapshot succeeds and matches its normal output even with DOMParser/innerHTML/createContextualFragment blocked (Trusted Types simulation)
+  ---
+  duration_ms: 6.352959
+  type: 'test'
+  ...
+# Subtest: serializer output matches root.outerHTML exactly for a secret-free page (parity)
+ok 71 - serializer output matches root.outerHTML exactly for a secret-free page (parity)
+  ---
+  duration_ms: 22.9835
+  type: 'test'
+  ...
+# Subtest: snapshot html drops noscript content entirely when it arrives as one raw text node (real-engine parse shape)
+ok 72 - snapshot html drops noscript content entirely when it arrives as one raw text node (real-engine parse shape)
+  ---
+  duration_ms: 7.260834
+  type: 'test'
+  ...
+# Subtest: snapshot html drops noscript content entirely when it parses into real child elements (jsdom's parse shape)
+ok 73 - snapshot html drops noscript content entirely when it parses into real child elements (jsdom's parse shape)
+  ---
+  duration_ms: 6.620333
+  type: 'test'
+  ...
+1..73
+# tests 73
+# suites 0
+# pass 73
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1084.22575
+npm notice run neurobrowser@0.1.0 build
+npm notice run vite build
+vite v6.4.3 building for production...
+transforming...
+✓ 36 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html            0.36 kB │ gzip:  0.27 kB
+dist/index-0wbfXcQS.css    9.33 kB │ gzip:  2.64 kB
+dist/index-C_uFZvX9.js   224.31 kB │ gzip: 70.12 kB
+✓ built in 367ms
+→ Tauri cargo check...
+    Checking neurobrowser v0.1.0 (<feature-checkout>)
+    Checking neurobrowser-tauri v0.1.0 (<feature-checkout>/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.04s
+→ Tauri binary tests...
+   Compiling neurobrowser v0.1.0 (<feature-checkout>)
+   Compiling neurobrowser-tauri v0.1.0 (<feature-checkout>/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.93s
+     Running unittests src/main.rs (<user-home>/.cargo-target/debug/deps/neurobrowser_tauri-12cc41aea0ebb75b)
+
+running 5 tests
+test runtime::response_tests::missing_action_acknowledgment_warns_of_unknown_outcome ... ok
+test runtime::response_tests::report_ownership_mismatch_does_not_consume_pending_request ... ok
+test runtime::response_tests::closing_page_drains_only_its_pending_requests ... ok
+test runtime::response_tests::incomplete_action_acknowledgments_cannot_be_treated_as_dispatch_success ... ok
+test tests::agent_run_response_drops_unread_bodies ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+→ Headless check and tests...
+   Compiling neurobrowser-tauri v0.1.0 (<feature-checkout>/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.74s
+   Compiling neurobrowser-tauri v0.1.0 (<feature-checkout>/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.10s
+     Running unittests src/headless_bin/main.rs (<user-home>/.cargo-target/debug/deps/neurobrowser_headless-bd1c63bb45a7910d)
+
+running 14 tests
+test tests::parse_args_help ... ok
+test tests::parse_args_rejects_unknown ... ok
+test tests::parse_args_accepts_socket ... ok
+test tests::parse_args_accepts_socket_equals ... ok
+test tests::parse_args_accepts_explicit_dash_prefixed_socket_path ... ok
+test tests::parse_args_rejects_options_in_place_of_socket_path ... ok
+test tests::parse_args_socket_requires_path ... ok
+test tests::resolve_socket_path_prefers_flag_over_env ... ok
+test tests::policy_evaluate_rejects_arguments_that_are_not_a_string_map ... ok
+test tests::evaluate_tool_call_falls_back_to_conservative_risk_for_unknown_tools ... ok
+test tests::evaluate_tool_call_requires_approval_for_submit_form ... ok
+test tests::evaluate_tool_call_still_allows_a_real_read_only_tool ... ok
+test tests::evaluate_tool_call_requires_approval_for_high_risk_tool ... ok
+test tests::policy_evaluate_keeps_string_argument_values ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+→ Webview capability regression tests...
+   Compiling neurobrowser-tauri v0.1.0 (<feature-checkout>/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.91s
+     Running tests/runtime_capabilities.rs (<user-home>/.cargo-target/debug/deps/runtime_capabilities-4126ec71b7e0bd40)
+
+running 3 tests
+test page_reports_work_on_initial_blank_and_remote_documents ... ok
+test page_webviews_never_inherit_control_commands ... ok
+test reports_require_a_page_webview_and_an_allowed_document ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+→ AppKit navigation regression...
+AppKit navigation: 15/15 assertions passed
+→ Real WebKit capability workload...
+Real WebKit capability workloads: 42 assertions passed
+WebKit workload receipt: <temporary-directory>
+→ cargo build --release...
+   Compiling neuro-memory v0.1.0 (<feature-checkout>/crates/neuro-memory)
+   Compiling neurobrowser v0.1.0 (<feature-checkout>)
+    Finished `release` profile [optimized] target(s) in 5.17s
+=== All checks passed ===

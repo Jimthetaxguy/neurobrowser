@@ -318,3 +318,61 @@ fn harmless_key_substrings_do_not_require_sensitive_approval() {
         );
     }
 }
+
+#[test]
+fn readonly_prohibition_beats_sensitive_and_explicit_approval() {
+    let page = snapshot("https://current.example", "Ready");
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::ReadOnly,
+        approval_required_tools: vec!["type_target".into()],
+        ..ActionPolicy::default()
+    };
+    let decision = policy.evaluate(
+        "type_target",
+        &ToolRisk::new(ToolAction::Type).sensitive(true),
+        &HashMap::from([("password".into(), "secret".into())]),
+        &page,
+    );
+    assert_eq!(decision.outcome, PolicyOutcome::Block);
+    assert!(decision.risk_flags.contains(&RiskFlag::ReadOnlyMode));
+}
+
+#[test]
+fn target_destination_is_checked_without_replacing_action_risk() {
+    let page = snapshot("https://allowed.example", "Ready");
+    let target = neurobrowser::capability::ObservedTarget {
+        id: "target".into(),
+        role: "link".into(),
+        label: "Continue".into(),
+        tag: "a".into(),
+        disabled: false,
+        sensitive: false,
+        destination: Some("https://denied.example/path".into()),
+    };
+    let policy = ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        denied_domains: vec!["denied.example".into()],
+        ..ActionPolicy::default()
+    };
+    let decision = policy.evaluate_target(
+        "click_target",
+        &ToolRisk::new(ToolAction::Click),
+        &HashMap::new(),
+        &page,
+        &target,
+    );
+    assert_eq!(decision.outcome, PolicyOutcome::Block);
+    assert!(decision.risk_flags.contains(&RiskFlag::DomainDenied));
+    let decision = ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        ..ActionPolicy::default()
+    }
+    .evaluate_target(
+        "click_target",
+        &ToolRisk::new(ToolAction::Click),
+        &HashMap::new(),
+        &page,
+        &target,
+    );
+    assert_eq!(decision.outcome, PolicyOutcome::RequireApproval);
+}

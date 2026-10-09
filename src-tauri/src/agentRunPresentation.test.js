@@ -41,7 +41,7 @@ test("completed and failed are terminal and clear the card", () => {
 
   const failed = presentAgentRun({ status: "failed", final_response: "Max iterations reached" });
   assert.equal(failed.pendingApproval, null);
-  assert.equal(failed.status, "Ready");
+  assert.equal(failed.status, "Run failed; inspect page");
   assert.equal(failed.message, "Max iterations reached");
 
   const empty = presentAgentRun({ status: "completed", final_response: null });
@@ -54,7 +54,7 @@ for (const [runStatus, expectedStatus] of [
   ["blocked", "Agent action blocked"],
   ["cancelled", "Run cancelled"],
   ["completed", "Ready"],
-  ["failed", "Ready"],
+  ["failed", "Run failed; inspect page"],
 ]) {
   for (const snapshotStatus of ["Loaded: Receipt", "Ready"]) {
     test(`${runStatus} survives snapshot status ${snapshotStatus}`, async () => {
@@ -97,4 +97,24 @@ test("a failed snapshot read preserves the completed action without another appr
     { role: "assistant", message: "Form submission dispatched" },
     { role: "assistant", message: "Page refresh failed: Browser runtime read timed out" },
   ]);
+});
+
+for (const [dispatch, verification, ready, status] of [
+  ["unknown", "unavailable", false, "Outcome unknown; inspect page"],
+  ["not_dispatched", "not_requested", false, "Action was not dispatched"],
+  ["acknowledged", "not_requested", true, "Dispatch acknowledged; outcome not verified"],
+  ["acknowledged", "satisfied", true, "Requested page condition observed"],
+  ["acknowledged", "unsatisfied", true, "Dispatch acknowledged; inspect page"],
+]) {
+  test(`receipt presentation separates ${dispatch}/${verification} from outcome`, () => {
+    const result = { status: "completed", final_response: "raw JSON", events: [{ type: "ToolCallResult", receipt: { dispatch, verification, page_ready: ready, message: "Receipt evidence" } }] };
+    const presentation = presentAgentRun(result);
+    assert.equal(presentation.status, status);
+    assert.equal(presentation.message, "Receipt evidence");
+    assert.equal(presentation.pendingApproval, null);
+  });
+}
+test("prior receipt cannot hide a later approval request in the same run", () => {
+  const result = { status: "awaiting_approval", events: [{ receipt: { dispatch: "acknowledged", verification: "satisfied" } }, { type: "ApprovalRequested", tool: "submit_target" }] };
+  assert.equal(presentAgentRun(result).pendingApproval, result);
 });

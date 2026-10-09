@@ -7,6 +7,7 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionState>>,
     agent_config: Mutex<AgentConfig>,
     page_counter: Mutex<usize>,
+    operations: Mutex<HashMap<usize, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 struct SessionState {
@@ -19,6 +20,7 @@ impl SessionManager {
             sessions: Mutex::new(HashMap::new()),
             agent_config: Mutex::new(agent_config),
             page_counter: Mutex::new(0),
+            operations: Mutex::new(HashMap::new()),
         }
     }
 
@@ -52,6 +54,10 @@ impl SessionManager {
         let mut sessions = self.sessions.lock().unwrap();
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;
         session.pages.push(handle.clone());
+        self.operations
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(page_id, Arc::new(tokio::sync::Mutex::new(())));
 
         Ok(handle)
     }
@@ -78,8 +84,32 @@ impl SessionManager {
             .ok_or("Page not found")?;
 
         session.pages.remove(pos);
+        self.operations
+            .lock()
+            .map_err(|e| e.to_string())?
+            .remove(&page_id);
 
         Ok(())
+    }
+
+    /// Serialize host and agent operations on a page. This is an execution lock,
+    /// not persisted session storage; ownership is checked before acquiring it.
+    pub async fn lock_page_operation(
+        &self,
+        session_id: &str,
+        page_id: usize,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+        self.get_page(session_id, page_id)?;
+        let operation = self
+            .operations
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(&page_id)
+            .cloned()
+            .ok_or("Page is closed")?;
+        let guard = operation.lock_owned().await;
+        self.get_page(session_id, page_id)?;
+        Ok(guard)
     }
 
     pub fn set_provider_config(&self, provider_config: ProviderConfig) -> Result<(), String> {

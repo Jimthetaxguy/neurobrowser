@@ -87,6 +87,9 @@ jobs:
       - name: AppKit navigation regression
         run: ./tests/run_appkit_navigation.sh
 
+      - name: Real WebKit capability workload
+        run: bash tests/run_capability_webkit.sh
+
   guards:
     name: "Guards: no-mock + merge conflicts + iCloud"
     runs-on: ubuntu-latest

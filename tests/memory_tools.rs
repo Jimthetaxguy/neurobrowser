@@ -162,13 +162,13 @@ fn tool_result<'a>(events: &'a [AgentRunEvent], name: &str) -> &'a AgentRunEvent
 }
 
 #[tokio::test]
-async fn registry_grows_from_17_browser_tools_to_19_with_memory() {
+async fn registry_grows_from_22_browser_tools_to_24_with_memory() {
     let (_dir, service) = open_with_page().await;
-    assert_eq!(default_tool_registry().len(), 17);
+    assert_eq!(default_tool_registry().len(), 22);
 
     let registry =
         default_tool_registry_with_memory(Arc::clone(&service), CapturePolicy::default());
-    assert_eq!(registry.len(), 19);
+    assert_eq!(registry.len(), 24);
     assert!(registry.get("navigate").is_some());
     assert!(registry.get("search_personal_memory").is_some());
     assert!(registry.get("inspect_active_page").is_some());

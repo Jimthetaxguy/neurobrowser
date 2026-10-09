@@ -10,7 +10,7 @@ let App;
 
 before(async () => {
   server = await createServer({
-    server: { middlewareMode: true, watch: null, hmr: false },
+    server: { middlewareMode: true, watch: null, hmr: false, ws: false },
     appType: "custom",
   });
   ({ default: App } = await server.ssrLoadModule("/src/App.jsx"));

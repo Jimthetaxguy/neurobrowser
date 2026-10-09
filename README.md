@@ -42,6 +42,27 @@ bind fails). Send newline-delimited JSON such as
 `{"id":"1","method":"ping","params":{}}`. This daemon does not browse.
 See [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md) for more build details.
 
+## Shared capability for humans and agents
+
+The desktop evidence panel reads the same `PageObservation` that agents receive from
+`observe_page`: bounded page text/tables, source URL, runtime capabilities, target IDs
+and explicit omissions. Its provider-free **Propose action** controls use the same
+Rust policy and approval path as the model-driven agent.
+
+The 22 browser tools include `observe_page`, `click_target`, `type_target`,
+`submit_target` and `scroll_target` (24 tools with persistent memory attached).
+Scoped actions require the exact document stamp and target ID from a current observation.
+Optional URL/text postconditions produce typed action receipts. Dispatch acknowledgment,
+page readiness and observed page conditions are distinct from website transaction success.
+
+`ReActAgent::propose_tool_with_policy` executes a single proposal without a model call.
+`execute_approved_tool_with_policy` rechecks the latest policy and reviewed state; an
+approval ID alone grants nothing; grants expire after five minutes. The compatibility approval method can only reuse a
+stored proposal's policy. See [CONTEXT](CONTEXT.md) and [ADR-002](docs/adr/ADR-002-shared-browser-capability.md).
+
+The real WebKit corpus runs in `./verify.sh` on macOS. A separate real public HTTP
+check is available with `cargo test --test capability_observation real_public_http_engine_observes_example_domain -- --ignored --exact`.
+
 ## Architecture
 
 Shipped run/policy surface:

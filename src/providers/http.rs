@@ -78,8 +78,37 @@ mod tests {
         let body = body.to_vec();
         let handle = thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .expect("test request read timeout");
                 let mut buf = [0u8; 4096];
-                let _ = stream.read(&mut buf);
+                let mut request = Vec::new();
+                let header_end = loop {
+                    let read = stream.read(&mut buf).expect("read test request headers");
+                    assert!(read > 0, "request closed before headers");
+                    request.extend_from_slice(&buf[..read]);
+                    assert!(request.len() <= 64 * 1024, "test request is too large");
+                    if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        break end + 4;
+                    }
+                };
+                let headers_text = std::str::from_utf8(&request[..header_end]).unwrap();
+                let content_length = headers_text
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                    .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                    .unwrap_or(0);
+                assert!(
+                    content_length <= 64 * 1024,
+                    "test request body is too large"
+                );
+                // Closing with unread POST bytes can reset a valid response mid-decode.
+                while request.len() < header_end + content_length {
+                    let read = stream.read(&mut buf).expect("read test request body");
+                    assert!(read > 0, "request closed before body");
+                    request.extend_from_slice(&buf[..read]);
+                }
                 let mut out = format!("{status_line}\r\n");
                 for (k, v) in &headers {
                     out.push_str(&format!("{k}: {v}\r\n"));

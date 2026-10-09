@@ -1,4 +1,8 @@
 use async_trait::async_trait;
+use neurobrowser::capability::{
+    DispatchState, ObservationLimits, PageObservation, RuntimeCapabilities, TargetCommand,
+    TargetDispatchError,
+};
 use neurobrowser::{browser::enrich_snapshot, BrowserInterface, ElementInfo, PageSnapshot};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -254,7 +258,201 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     return limitText(parts.join(''), max);
   };
 
+  // These stamps describe page evidence, not an integrity boundary against
+  // hostile page JavaScript. Native Rust owns caller routing and URL provenance.
+  const documentId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  let revision = 0;
+  let observedUrl = location.href;
+  let observedRuntimeId = null;
+  const targetIds = new WeakMap();
+  const targets = new Map();
+  let nextTargetId = 0;
+  let targetRevision = -1;
+  const observer = new MutationObserver((records) => { if (records.length) revision += 1; });
+  observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  document.addEventListener('input', () => { revision += 1; }, true);
+  document.addEventListener('change', () => { revision += 1; }, true);
+  const syncRevision = () => {
+    if (observer.takeRecords().length) revision += 1;
+    if (location.href !== observedUrl) { observedUrl = location.href; revision += 1; }
+    // Re-observation cannot silently replace the approval's private fingerprint
+    // after a property-only field edit that emits no mutation/input event.
+    if (Array.from(targets.values()).some((target) => !target.element.isConnected
+        || target.element.ownerDocument !== document || target.fingerprint !== targetFingerprint(target.element))) revision += 1;
+    if (targetRevision !== revision) { targets.clear(); targetRevision = revision; }
+  };
+  const byteLimit = (value, max) => {
+    let result = '', bytes = 0;
+    for (const char of String(value || '').trim()) {
+      const cp = char.codePointAt(0);
+      const size = cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+      if (bytes + size > max) break;
+      result += char; bytes += size;
+    }
+    return result;
+  };
+  const excludedEvidence = (node) => {
+    for (let element = node.nodeType === 1 ? node : node.parentElement; element; element = element.parentElement) {
+      if (['INPUT', 'TEXTAREA', 'SELECT', 'SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT'].includes(element.tagName)
+          || element.hidden || element.getAttribute('aria-hidden') === 'true') return true;
+    }
+    return false;
+  };
+  const evidenceText = (root, max, omissions) => {
+    if (!root || excludedEvidence(root)) return '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let text = '', node, visited = 0;
+    while ((node = walker.nextNode())) {
+      visited += 1;
+      if (visited > 10000) { omissions?.add('Text traversal limit reached'); break; }
+      if (excludedEvidence(node)) continue;
+      const addition = (text ? ' ' : '') + (node.textContent || '').trim();
+      const bounded = byteLimit(text + addition, max);
+      if (bounded !== (text + addition).trim()) { omissions?.add('Page text truncated'); text = bounded; break; }
+      text = bounded;
+    }
+    return text;
+  };
+  const targetLabel = (element) => byteLimit(
+    element.getAttribute('aria-label') ||
+    Array.from(element.labels || []).map((label) => evidenceText(label, 240)).join(' ') ||
+    element.getAttribute('alt') || evidenceText(element, 240) || element.getAttribute('name') || '', 240);
+  const isSubmitControl = (element) => ['BUTTON', 'INPUT'].includes(element.tagName)
+    && ['submit', 'image'].includes(element.type) && !!element.form;
+  const targetDestination = (element) => {
+    if (element.matches('a[href]')) return element.href;
+    const form = element.tagName === 'FORM' ? element : element.form || element.closest('form');
+    if (!form) return null;
+    return isSubmitControl(element) && element.hasAttribute('formaction') ? element.formAction : form.action;
+  };
+  const targetFingerprint = (element) => {
+    const form = element.tagName === 'FORM' ? element : element.form || element.closest('form');
+    // Values are compared only inside the runtime and never serialized as evidence.
+    return JSON.stringify([element.tagName, element.id, targetLabel(element), element.type,
+      !!element.disabled, !!element.readOnly, element.getAttribute('href'),
+      element.getAttribute('formaction'), targetDestination(element), form?.method,
+      'value' in element ? element.value : null,
+      form ? Array.from(form.elements).slice(0, 500).map((input) =>
+        [input.name, input.type, input.value, input.checked, input.disabled]) : null]);
+  };
+  // Attribute checks miss CSS-hidden and inert subtrees; require a rendered, actionable element.
+  const isRendered = (element) => {
+    if (element.closest('[hidden], [aria-hidden="true"], [inert]')) return false;
+    if (typeof element.checkVisibility === 'function') {
+      return element.checkVisibility({ checkVisibilityCSS: true, visibilityProperty: true });
+    }
+    // Layout-free fallback: no box geometry, so walk ancestors for display:none.
+    if (getComputedStyle(element).visibility === 'hidden') return false;
+    for (let node = element; node; node = node.parentElement)
+      if (getComputedStyle(node).display === 'none') return false;
+    return true;
+  };
+  // Assigning `.value` directly hits React's instrumented setter and its value tracker
+  // then swallows the input event; the prototype setter keeps onChange firing.
+  const setNativeValue = (element, value) => {
+    const proto = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(element, value); else element.value = value;
+  };
+  const observePage = (runtimeId, requested = {}) => {
+    const ceilings = { max_text_bytes: 12000, max_targets: 80, max_links: 40,
+      max_tables: 6, max_rows: 20, max_cell_bytes: 240 };
+    const limits = Object.fromEntries(Object.entries(ceilings).map(([key, ceiling]) =>
+      [key, Number.isSafeInteger(requested[key]) && requested[key] >= 0 ? Math.min(requested[key], ceiling) : ceiling]));
+    syncRevision();
+    observedRuntimeId = runtimeId;
+    const omissions = new Set(['Raw HTML, input values, frames and visual evidence are excluded']);
+    const candidates = document.querySelectorAll('a[href], button, input:not([type="hidden"]), textarea, select, form, [role="button"], [role="link"]');
+    const observedTargets = [];
+    for (const element of candidates) {
+      if (!isRendered(element)) continue;
+      const destination = targetDestination(element);
+      if (destination !== null && byteLimit(destination, 4096) !== destination) { omissions.add('Oversized destination targets excluded'); continue; }
+      if (observedTargets.length >= limits.max_targets) { omissions.add('Targets truncated'); break; }
+      let id = targetIds.get(element);
+      if (!id) { id = `target-${++nextTargetId}`; targetIds.set(element, id); }
+      targets.set(id, { element, fingerprint: targetFingerprint(element) });
+      observedTargets.push({ id, role: byteLimit(element.getAttribute('role') || element.tagName.toLowerCase(), 80),
+        tag: element.tagName.toLowerCase(), label: targetLabel(element), disabled: !!element.disabled,
+        sensitive: element.type === 'password', destination });
+    }
+    const anchors = document.querySelectorAll('a[href]');
+    if (anchors.length > limits.max_links) omissions.add('Links truncated');
+    const links = [];
+    for (const link of anchors) {
+      if (links.length >= limits.max_links) break;
+      if (byteLimit(link.href, 4096) !== link.href) { omissions.add('Oversized link URLs excluded'); continue; }
+      links.push({ href: link.href, text: evidenceText(link, 240, omissions) });
+    }
+    const tableNodes = document.querySelectorAll('table');
+    if (tableNodes.length > limits.max_tables) omissions.add('Tables truncated');
+    const tables = Array.from(tableNodes).slice(0, limits.max_tables).map((table) => {
+      const headerNodes = table.querySelectorAll('th');
+      const rowNodes = Array.from(table.querySelectorAll('tr')).filter((row) => row.querySelector('td'));
+      if (headerNodes.length > 20 || rowNodes.length > limits.max_rows) omissions.add('Table cells or rows truncated');
+      return { headers: Array.from(headerNodes).slice(0, 20).map((cell) => evidenceText(cell, limits.max_cell_bytes, omissions)),
+        rows: Array.from(rowNodes).slice(0, limits.max_rows).map((row) => {
+          const cells = row.querySelectorAll('td');
+          if (cells.length > 20) omissions.add('Table cells or rows truncated');
+          return Array.from(cells).slice(0, 20).map((cell) => evidenceText(cell, limits.max_cell_bytes, omissions));
+        }).filter((row) => row.length) };
+    });
+    const text = evidenceText(document.body, limits.max_text_bytes, omissions);
+    return { schema_version: 1, document: { runtime_id: runtimeId, document_id: documentId, revision },
+      url: location.href, title: byteLimit(document.title, 512), text, links, tables, targets: observedTargets,
+      omissions: [...omissions], capabilities: { schema_version: 1, runtime: 'desktop_webview', javascript: true,
+        interaction: true, scoped_targets: true, native_url: true, screenshots: false,
+        background_javascript: false, enforcing_subresource_network: false }, collected_at_ms: Date.now() };
+  };
+  const dispatchTarget = (command) => {
+    const reject = (message) => ({ state: 'not_dispatched', message });
+    syncRevision();
+    if (!command?.document || command.document.runtime_id !== observedRuntimeId
+        || command.document.document_id !== documentId || command.document.revision !== revision)
+      return reject('Reviewed document state is stale; observe again');
+    const target = targets.get(command.target_id);
+    if (!target || !target.element.isConnected || target.element.ownerDocument !== document
+        || target.fingerprint !== targetFingerprint(target.element)) return reject('Reviewed target is stale; observe again');
+    const element = target.element;
+    if (!isRendered(element)) return reject('Target is not rendered; observe again');
+    if (element.disabled) return reject('Target is disabled');
+    if (!['click', 'type', 'submit', 'scroll'].includes(command.action)) return reject('Unsupported target action');
+    if (command.action === 'type' && (!['INPUT', 'TEXTAREA'].includes(element.tagName)
+        || element.readOnly || typeof command.text !== 'string')) return reject('Target cannot accept typed text');
+    const form = element.tagName === 'FORM' ? element : element.form || element.closest('form');
+    if (form && form.elements.length > 500) return reject('Form exceeds the bounded freshness validation limit');
+    if (command.action === 'submit' && (!form || !(element.tagName === 'FORM' || isSubmitControl(element))))
+      return reject('Submit target must be a form or its submit control');
+    if (command.action === 'submit' && typeof form.requestSubmit !== 'function'
+        && isSubmitControl(element) && element.hasAttribute('formaction'))
+      return reject('Runtime cannot submit this overridden destination with its reviewed submitter');
+    // All validation and dispatch occur in this synchronous turn. A throwing
+    // page handler after dispatch creates uncertainty, never a safe retry.
+    try {
+      if (command.action === 'click') element.click();
+      if (command.action === 'type') {
+        element.focus(); setNativeValue(element, command.text);
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (command.action === 'submit') {
+        if (typeof form.requestSubmit === 'function') {
+          if (isSubmitControl(element)) form.requestSubmit(element); else form.requestSubmit();
+        } else if (isSubmitControl(element)) element.click(); else form.submit();
+      }
+      if (command.action === 'scroll') element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+      revision += 1;
+      return { state: 'acknowledged', message: 'Action dispatch acknowledged; outcome has not been verified' };
+    } catch (_) {
+      revision += 1;
+      return { state: 'unknown', message: 'Action dispatch may have occurred; inspect the page before continuing' };
+    }
+  };
+
   const runtime = {
+    observe: observePage,
+    dispatchTarget,
     dispatch(pageId, requestId, producer) {
       if (!invoke) {
         throw new Error('Tauri invoke bridge is not available in this webview');
@@ -340,7 +538,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
         throw new Error(`Element does not support value assignment: ${selector}`);
       }
       element.focus();
-      element.value = text;
+      setNativeValue(element, text);
       element.dispatchEvent(new Event('input', { bubbles: true }));
       element.dispatchEvent(new Event('change', { bubbles: true }));
       return { ok: true };
@@ -391,7 +589,9 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     }
   };
 
-  window.__NEUROBROWSER_RUNTIME__ = runtime;
+  Object.defineProperty(window, '__NEUROBROWSER_RUNTIME__', {
+    value: Object.freeze(runtime), writable: false, configurable: false
+  });
 })();
 "#;
 
@@ -409,10 +609,16 @@ struct RuntimePage {
     loading: bool,
 }
 
+struct PendingRuntimeRequest {
+    page_id: usize,
+    runtime_id: String,
+    sender: oneshot::Sender<Result<Value, String>>,
+}
+
 #[derive(Default)]
 pub struct BrowserRuntimeRegistry {
     pages: Mutex<HashMap<usize, RuntimePage>>,
-    pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>,
+    pending: Mutex<HashMap<String, PendingRuntimeRequest>>,
     active_page: Mutex<Option<usize>>,
 }
 
@@ -434,6 +640,19 @@ impl BrowserRuntimeRegistry {
         if active_page.as_ref() == Some(&page_id) {
             *active_page = None;
         }
+        let mut pending = self.pending.lock().unwrap();
+        let request_ids: Vec<_> = pending
+            .iter()
+            .filter(|(_, request)| request.page_id == page_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in request_ids {
+            if let Some(request) = pending.remove(&id) {
+                let _ = request.sender.send(Err(
+                    "Runtime page closed; action outcome may be unknown".into(),
+                ));
+            }
+        }
         removed.map(|page| page.runtime_id)
     }
 
@@ -446,14 +665,31 @@ impl BrowserRuntimeRegistry {
             .ok_or_else(|| "Runtime page not found".to_string())
     }
 
-    pub fn begin_request(&self) -> (String, oneshot::Receiver<Result<Value, String>>) {
+    pub fn begin_request(
+        &self,
+        page_id: usize,
+        runtime_id: &str,
+    ) -> Result<(String, oneshot::Receiver<Result<Value, String>>), String> {
+        // Hold page ownership until insertion so page closure cannot drain
+        // requests and then race with a new orphaned pending request.
+        let pages = self.pages.lock().unwrap();
+        if pages
+            .get(&page_id)
+            .is_none_or(|page| page.runtime_id != runtime_id)
+        {
+            return Err("Runtime request ownership mismatch".into());
+        }
         let request_id = uuid::Uuid::new_v4().to_string();
         let (sender, receiver) = oneshot::channel();
-        self.pending
-            .lock()
-            .unwrap()
-            .insert(request_id.clone(), sender);
-        (request_id, receiver)
+        self.pending.lock().unwrap().insert(
+            request_id.clone(),
+            PendingRuntimeRequest {
+                page_id,
+                runtime_id: runtime_id.to_string(),
+                sender,
+            },
+        );
+        Ok((request_id, receiver))
     }
 
     pub fn cancel_request(&self, request_id: &str) {
@@ -462,12 +698,24 @@ impl BrowserRuntimeRegistry {
 
     pub fn resolve_request(
         &self,
+        page_id: usize,
+        caller_runtime_id: &str,
         request_id: &str,
         payload: Option<Value>,
         error: Option<String>,
     ) -> Result<(), String> {
-        if let Some(sender) = self.pending.lock().unwrap().remove(request_id) {
-            let _ = sender.send(match error {
+        if self.page_runtime_id(page_id)? != caller_runtime_id {
+            return Err("Runtime report caller does not own this page".into());
+        }
+        let mut pending = self.pending.lock().unwrap();
+        let request = pending
+            .get(request_id)
+            .ok_or("Runtime request is not pending")?;
+        if request.page_id != page_id || request.runtime_id != caller_runtime_id {
+            return Err("Runtime report does not own this pending request".into());
+        }
+        if let Some(request) = pending.remove(request_id) {
+            let _ = request.sender.send(match error {
                 Some(message) => Err(message),
                 None => Ok(payload.unwrap_or(Value::Null)),
             });
@@ -534,6 +782,12 @@ pub struct RuntimeReportPayload {
     pub error: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct TargetAcknowledgment {
+    state: DispatchState,
+    message: String,
+}
+
 #[derive(Clone)]
 pub struct TauriBrowserRuntime {
     app: AppHandle,
@@ -571,14 +825,17 @@ impl TauriBrowserRuntime {
     where
         T: DeserializeOwned,
     {
-        let (request_id, receiver) = self.registry.begin_request();
+        let webview = self.webview()?;
+        let (request_id, receiver) = self
+            .registry
+            .begin_request(self.page_id, &self.runtime_id)?;
         let request_id_js = serde_json::to_string(&request_id).map_err(|e| e.to_string())?;
         let script = format!(
             "(() => {{ const runtime = window.__NEUROBROWSER_RUNTIME__; if (!runtime) {{ throw new Error('NeuroBrowser runtime bridge is not installed'); }} runtime.dispatch({}, {}, () => ({})); }})();",
             self.page_id, request_id_js, script_expression
         );
 
-        if let Err(error) = self.webview()?.eval(script) {
+        if let Err(error) = webview.eval(script) {
             self.registry.cancel_request(&request_id);
             return Err(error.to_string());
         }
@@ -644,6 +901,87 @@ mod response_tests {
     use super::missing_runtime_response;
 
     #[test]
+    fn incomplete_action_acknowledgments_cannot_be_treated_as_dispatch_success() {
+        for payload in [
+            serde_json::Value::Null,
+            serde_json::json!({"ok": true}),
+            serde_json::json!({"state": "acknowledged"}),
+            serde_json::json!({"message": "claimed success"}),
+            serde_json::json!({"state": "unrecognized", "message": "claimed success"}),
+        ] {
+            assert!(serde_json::from_value::<super::TargetAcknowledgment>(payload).is_err());
+        }
+        let acknowledgment: super::TargetAcknowledgment = serde_json::from_value(
+            serde_json::json!({"state": "acknowledged", "message": "dispatch acknowledged"}),
+        )
+        .unwrap();
+        assert_eq!(
+            acknowledgment.state,
+            neurobrowser::capability::DispatchState::Acknowledged
+        );
+    }
+
+    #[test]
+    fn report_ownership_mismatch_does_not_consume_pending_request() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(1, "page-runtime-1".into());
+        registry.register_page(2, "page-runtime-2".into());
+        let (id, mut receiver) = registry.begin_request(1, "page-runtime-1").unwrap();
+        assert!(registry
+            .resolve_request(2, "page-runtime-2", &id, None, None)
+            .is_err());
+        assert!(registry
+            .resolve_request(1, "page-runtime-2", &id, None, None)
+            .is_err());
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        registry
+            .resolve_request(
+                1,
+                "page-runtime-1",
+                &id,
+                Some(serde_json::json!("correct")),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            receiver.try_recv().unwrap().unwrap(),
+            serde_json::json!("correct")
+        );
+        assert!(registry
+            .resolve_request(1, "page-runtime-1", &id, None, None)
+            .is_err());
+    }
+
+    #[test]
+    fn closing_page_drains_only_its_pending_requests() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(1, "page-runtime-1".into());
+        registry.register_page(2, "page-runtime-2".into());
+        let (_, mut first) = registry.begin_request(1, "page-runtime-1").unwrap();
+        let (second_id, mut second) = registry.begin_request(2, "page-runtime-2").unwrap();
+        registry.unregister_page(1);
+        assert!(first.try_recv().unwrap().unwrap_err().contains("closed"));
+        assert!(matches!(
+            second.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        registry
+            .resolve_request(
+                2,
+                "page-runtime-2",
+                &second_id,
+                Some(serde_json::json!(true)),
+                None,
+            )
+            .unwrap();
+        assert_eq!(second.try_recv().unwrap().unwrap(), serde_json::json!(true));
+        assert!(registry.begin_request(1, "page-runtime-1").is_err());
+    }
+
+    #[test]
     fn missing_action_acknowledgment_warns_of_unknown_outcome() {
         for error in [
             "Timed out waiting for browser runtime response for page 1",
@@ -662,6 +1000,67 @@ mod response_tests {
 
 #[async_trait]
 impl BrowserInterface for TauriBrowserRuntime {
+    fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities::desktop()
+    }
+
+    async fn observe(&self, limits: ObservationLimits) -> Result<PageObservation, String> {
+        let before_url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        let limits = limits.bounded();
+        let limits_json = serde_json::to_string(&limits).map_err(|error| error.to_string())?;
+        let runtime_id_json =
+            serde_json::to_string(&self.runtime_id).map_err(|error| error.to_string())?;
+        let mut observation: PageObservation = self
+            .request_json(
+                &format!("runtime.observe({runtime_id_json}, {limits_json})"),
+                false,
+            )
+            .await?;
+        let native_url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        if before_url != native_url {
+            return Err("Page navigated while collecting evidence; observe again".into());
+        }
+        if observation
+            .document
+            .as_ref()
+            .is_none_or(|document| document.runtime_id != self.runtime_id)
+        {
+            return Err("Observation runtime identity mismatch".into());
+        }
+        observation.url = native_url;
+        observation.capabilities = self.capabilities();
+        observation.apply_limits(limits);
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    async fn dispatch_target(&self, command: &TargetCommand) -> Result<(), TargetDispatchError> {
+        if command.document.runtime_id != self.runtime_id {
+            return Err(TargetDispatchError::rejected(
+                "Target belongs to a different runtime",
+            ));
+        }
+        let command_json = serde_json::to_string(command)
+            .map_err(|error| TargetDispatchError::rejected(error.to_string()))?;
+        let result: TargetAcknowledgment = self
+            .request_json(&format!("runtime.dispatchTarget({command_json})"), true)
+            .await
+            .map_err(TargetDispatchError::unknown)?;
+        match result.state {
+            DispatchState::Acknowledged => Ok(()),
+            DispatchState::NotDispatched => Err(TargetDispatchError::rejected(result.message)),
+            DispatchState::Unknown => Err(TargetDispatchError::unknown(result.message)),
+        }
+    }
+
     async fn navigate(&self, url: &str) -> Result<(), String> {
         if let Some(reason) = neurobrowser::netguard::blocked_reason(url) {
             tracing::warn!("Blocked navigation to {}: {}", url, reason);
@@ -743,7 +1142,20 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
+        let before_url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
         let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()", false).await?;
+        snapshot.url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        if snapshot.url != before_url {
+            return Err("Page navigated while collecting snapshot; observe again".into());
+        }
         enrich_snapshot(&mut snapshot);
         Ok(snapshot)
     }
