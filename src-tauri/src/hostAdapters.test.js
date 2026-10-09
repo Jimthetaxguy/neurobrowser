@@ -30,11 +30,11 @@ test("AppKit keeps snapshots associated with their page and discards closed page
 
     const nextReactPage = await adapter.createPage(sessionId);
     assert.equal(nextReactPage, 1);
-    await adapter.navigate(sessionId, -1, native.url);
-    await adapter.browserAction("browser_back", sessionId, -1);
+    await adapter.navigate(sessionId, -1, native.url, 7);
+    await adapter.browserAction("browser_back", sessionId, -1, 8);
     await adapter.closePage(sessionId, -1);
-    assert.deepEqual(sent.slice(-3).map(({ command, payload }) => [command, payload.pageId]), [
-      ["navigate", -1], ["browser_back", -1], ["close_page", -1],
+    assert.deepEqual(sent.slice(-3).map(({ command, payload }) => [command, payload.pageId, payload.loadGeneration]), [
+      ["navigate", -1, 7], ["browser_back", -1, 8], ["close_page", -1, undefined],
     ]);
   } finally {
     if (previousWindow === undefined) delete globalThis.window;
