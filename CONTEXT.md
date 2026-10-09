@@ -74,5 +74,4 @@ workload checks. `tests/capability_observation.rs` includes a separately invoked
 HTTPS integration test. Credentialed model-provider smoke tests require an explicit run.
 
 The [October assessment checkpoint](docs/research/neurobrowser-capability-20261004/README.md)
-preserves the reviewed development plan and evidence. It records proposed work and
-known gaps; committing it does not change runtime capabilities or release readiness.
+is a frozen record from before #111 merged (baseline d0271f7 / f50f5ae). Slices 2–8 are not built.

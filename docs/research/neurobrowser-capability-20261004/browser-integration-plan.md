@@ -7,7 +7,7 @@ type: implementation-plan
 task: Integrate browser state, authority, native execution and human-agent workflows
 status: reviewed-proposal
 summary: Eight vertical slices build on one Rust-owned browser service, with repaired foundation and native journey tests preceding profile, workflow and external-agent expansion.
-next_steps: [Execute slice 1 against PR 111 after selecting this plan for implementation]
+next_steps: []
 remaining: [All implementation tasks below]
 open_questions: [Native profile and isolated-world support must be established by platform experiments]
 ---
@@ -20,11 +20,11 @@ open_questions: [Native profile and isolated-world support must be established b
 
 **Stack:** Rust/Tokio, existing HTTP extraction, OS WebKit/webviews, Tauri 2 and React 19. No new engine or provider is selected by this plan.
 
-**Inputs:** [original assessment](neurobrowser-lightpanda-assessment-20261003.md), [verified function audit](20261004-browser-function-audit.md), [probe evidence](20261004-browser-dom-probes.json), and the [living record](README.md). Implementation source is `<repository-checkout>`; current feature checkout is `<feature-checkout>`. File paths below are relative to that checkout.
+**Inputs:** [original assessment](neurobrowser-lightpanda-assessment-20261003.md), [verified function audit](20261004-browser-function-audit.md), [probe evidence](20261004-browser-dom-probes.json), and the [folder README](README.md). Implementation source is `<repository-checkout>`; current feature checkout is `<feature-checkout>`. File paths below are relative to that checkout.
 
 ## Starting point and constraints
 
-PR [#111](https://github.com/Jimthetaxguy/neurobrowser/pull/111), head `f50f5ae`, is an additive foundation with locally passing verification. It remains draft. Hosted macOS CI fails before corpus execution at fixture-server startup; the cause has not been established. It is the only open PR observed during this assessment. Prior PRs #108–110 are merged.
+Written against PR [#111](https://github.com/Jimthetaxguy/neurobrowser/pull/111) at head `f50f5ae`, from baseline `d0271f7`. That pull request later merged. This file is the pre-merge proposal. Prior PRs #108–110 were already merged when it was written.
 
 New observations, scoped targets, private single-use approvals and receipts exist. The broader browser audit found input fidelity, shell synchronization, legacy export and lifecycle gaps. Exact-script DOM reproductions are evidence requiring native regression tests, not proof that every native site exhibits identical behavior.
 
@@ -34,7 +34,6 @@ New observations, scoped targets, private single-use approvals and receipts exis
 - HTTP is a static runtime; the headless daemon is currently a stub. Advertise only verified capabilities per runtime/platform.
 - Keep Tauri/React primary. AppKit receives explicit navigation/state parity; advanced controls need not be duplicated before they work in the primary shell.
 - Preserve stored user data and dirty work. Do not delete existing captures, clear profile stores or restore approval grants as a migration shortcut.
-- Start implementation with status/fetch/alignment in an isolated checkout. Enumerate staged files; verify before commits. No merge is authorized by this plan-writing request.
 
 ## One state and authority model
 
@@ -229,6 +228,4 @@ Before every PR checkpoint: align remote state, preserve unrelated work, run req
 
 Rollback follows the ownership boundary: disable the new capability/transport, cancel owned runs, restore the previous executable and preserve native profile stores and durable data. Additive persistence migrations retain backward-readable records or verified backups. Rolling back cannot reverse a website transaction; retain its receipt and present uncertainty where needed.
 
-**Recommended next action:** execute slice 1 and repair PR #111. Its merge requires the repaired native journeys, safe current exports, exact-head local/hosted checks and review. Then make the Rust service/state slice the foundation for profile and lifecycle work; broader browser conveniences and runtime selection follow evidence, rather than blocking the first corrected foundation indefinitely.
-
-Plan review: native-workload and authority specialists reviewed this proposal. Incorporated real React/POST evidence, driver and fixture feasibility, platform-dependent profile refusal, AppKit/search ownership, operation deduplication with durable uncertainty, and baseline measurement before repairs. All implementation checkboxes remain open.
+Plan review: native-workload and authority specialists reviewed this proposal. Incorporated real React/POST evidence, driver and fixture feasibility, platform-dependent profile refusal, AppKit/search ownership, operation deduplication with durable uncertainty, and baseline measurement before repairs.

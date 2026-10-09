@@ -1,6 +1,7 @@
 {
   "recorded_at": "2026-10-04T14:56:16-04:00",
   "source_commit": "f50f5aec9599a8b8926167dc17fcf3d012e6be31",
+  "note": "Measured at f50f5ae, not current. Merged runtime.rs skips non-rendered targets and uses the prototype value setter.",
   "environment": "React DOM + jsdom with exact shipped runtime; not native WebKit",
   "react_controlled_form": {
     "type_receipt": "acknowledged",
