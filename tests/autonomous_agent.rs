@@ -329,8 +329,6 @@ async fn assert_missing_url_reaches_model(invalid: &str) {
 #[tokio::test]
 async fn invalid_tool_call_reports_error_to_model_instead_of_completing() {
     // `navigate` is a real tool, but this call omits its required `url`.
-    // Before the fix the parser dropped it, `tool_calls` came back empty, and
-    // the run reported Completed with the raw tool-call text.
     assert_missing_url_reaches_model(r#"ToolCall: {"name":"navigate","arguments":{}}"#).await;
 }
 
@@ -413,8 +411,6 @@ async fn post_navigation_url_reaches_model_next_iteration() {
     assert_eq!(run.status, AgentRunStatus::Completed);
     let seen = seen.lock().unwrap();
     assert_eq!(seen.len(), 2, "expected two model calls");
-    // The second iteration's context must carry the POST-navigation URL; before
-    // the fix it carried the stale pre-navigation URL.
     assert_eq!(seen[1], "https://after.example");
 }
 
@@ -630,7 +626,8 @@ fn parses_legacy_action_syntax_with_multiple_positional_args() {
 
 #[tokio::test]
 async fn transient_post_tool_snapshot_failure_retries_the_read_and_updates_model_context() {
-    let browser = MutBrowser::new("https://example.com/start").with_snapshot_failures(1);
+    // Navigate reads the landed URL once, so one failure is left for the agent's retry.
+    let browser = MutBrowser::new("https://example.com/start").with_snapshot_failures(2);
     let seen = Arc::new(Mutex::new(Vec::new()));
     let provider = Arc::new(RecordingProvider::new(
         vec![
@@ -664,7 +661,8 @@ async fn transient_post_tool_snapshot_failure_retries_the_read_and_updates_model
 
 #[tokio::test]
 async fn persistent_post_tool_snapshot_failure_keeps_success_and_previous_context() {
-    let browser = MutBrowser::new("https://example.com/start").with_snapshot_failures(2);
+    // Navigate reads once, then the agent tries the refresh twice.
+    let browser = MutBrowser::new("https://example.com/start").with_snapshot_failures(3);
     let seen = Arc::new(Mutex::new(Vec::new()));
     let provider = Arc::new(RecordingProvider::new(
         vec![

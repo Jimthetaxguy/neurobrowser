@@ -227,7 +227,7 @@ impl ReActAgent {
         let mut snapshot = browser.snapshot().await?;
         let (decision, reviewed) = if crate::capability::tools::target_action(&call.name).is_some()
         {
-            let command =
+            let (command, _) =
                 crate::capability::tools::parse_target_command(&call.name, &call.arguments)?;
             let (observation, target) =
                 crate::capability::tools::review_target(browser, &command).await?;
@@ -437,10 +437,13 @@ impl ReActAgent {
             ));
         }
         let command = if crate::capability::tools::target_action(&tool_call.name).is_some() {
-            Some(crate::capability::tools::parse_target_command(
-                &tool_call.name,
-                &tool_call.arguments,
-            )?)
+            Some(
+                crate::capability::tools::parse_target_command(
+                    &tool_call.name,
+                    &tool_call.arguments,
+                )?
+                .0,
+            )
         } else {
             None
         };

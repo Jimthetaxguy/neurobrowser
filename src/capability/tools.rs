@@ -30,7 +30,7 @@ pub fn target_action(name: &str) -> Option<TargetAction> {
 pub fn parse_target_command(
     name: &str,
     args: &HashMap<String, String>,
-) -> Result<TargetCommand, String> {
+) -> Result<(TargetCommand, Option<Postcondition>), String> {
     let action = target_action(name).ok_or("Unknown scoped action")?;
     if args.iter().any(|(key, value)| {
         !matches!(key.as_str(), "document" | "target_id" | "postcondition")
@@ -58,7 +58,7 @@ pub fn parse_target_command(
     {
         return Err("Invalid document identity".into());
     }
-    postcondition(args)?;
+    let predicate = postcondition(args)?;
     let target_id = args
         .get("target_id")
         .filter(|value| !value.is_empty() && value.len() <= 200)
@@ -74,12 +74,15 @@ pub fn parse_target_command(
     } else {
         None
     };
-    Ok(TargetCommand {
-        document,
-        target_id,
-        action,
-        text,
-    })
+    Ok((
+        TargetCommand {
+            document,
+            target_id,
+            action,
+            text,
+        },
+        predicate,
+    ))
 }
 fn postcondition(args: &HashMap<String, String>) -> Result<Option<Postcondition>, String> {
     args.get("postcondition")
@@ -208,8 +211,8 @@ impl BrowserTool for TargetTool {
         args: HashMap<String, String>,
         browser: &dyn BrowserInterface,
     ) -> ToolResult {
-        let command = match parse_target_command(self.name(), &args) {
-            Ok(command) => command,
+        let (command, predicate) = match parse_target_command(self.name(), &args) {
+            Ok(parsed) => parsed,
             Err(error) => return ToolResult::error(self.name(), error),
         };
         let mut receipt = ActionReceipt {
@@ -222,13 +225,6 @@ impl BrowserTool for TargetTool {
             page_ready: false,
             verification: VerificationState::NotRequested,
             message: "Action not dispatched".into(),
-        };
-        let predicate = match postcondition(&args) {
-            Ok(predicate) => predicate,
-            Err(error) => {
-                receipt.message = error;
-                return receipt_result(self.name(), receipt);
-            }
         };
         if let Err(error) = review_target(browser, &command).await {
             receipt.message = error;
