@@ -122,38 +122,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     return isSecretInputType(type);
   };
 
-  // Serializes `root` for the HTML snapshot without leaking credentials or
-  // running page code: a hand-written, read-only walk of the *live* tree,
-  // built from scratch rather than parsing a string or cloning a node.
-  //
-  // Three rounds of "parse or clone a copy, then mutate it" each turned up
-  // a new gap: `root.cloneNode(true)` re-invokes custom element
-  // constructors (real side effects — network calls, thrown exceptions —
-  // from a mere snapshot request); `DOMParser.parseFromString` is a
-  // TrustedHTML sink, so it throws outright on a page whose CSP sets
-  // `require-trusted-types-for 'script'` without a default policy; and
-  // `iframe[srcdoc]` is an opaque attribute string that both of those
-  // leave untouched, since it is not part of the descendant tree
-  // `querySelectorAll` or cloning ever reaches. A read-only serializer
-  // has none of these problems by construction: it never feeds a string
-  // into HTML (no DOMParser / innerHTML / createContextualFragment /
-  // document.write — nothing a Trusted Types policy can object to, and
-  // nothing that would need its own recursive sanitization pass for
-  // srcdoc) and never clones, imports, or otherwise constructs a node (no
-  // custom element reactions), because it only ever *reads* an element's
-  // existing attributes and children and appends to a string.
-  //
-  // `iframe[srcdoc]` is omitted outright rather than sanitized: doing the
-  // latter would mean parsing that srcdoc string into HTML, the exact
-  // TrustedHTML sink this function exists to avoid. That is a fail-closed
-  // choice — the frame's markup (and any secret inside it) is dropped
-  // entirely instead of risked.
-  //
-  // The walk uses an explicit stack instead of recursion so a very deep
-  // page cannot overflow the call stack, and stops once the output has
-  // already passed `max` characters, since limitText truncates to `max`
-  // anyway — the stopping point yields the same prefix limitText would
-  // keep from a full, untruncated serialization.
+  // Read-only live-tree walk, no clone, no HTML parse; drop iframe[srcdoc] and noscript children because escaping does not redact them.
   const serializeSanitizedHtml = (root, max) => {
     if (!root) {
       return null;
@@ -207,21 +176,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
           stack.push({ close: tag });
 
           if (tag === 'noscript') {
-            // Fail closed instead of trusting this engine's parse shape.
-            // WKWebView/WebView2 run with scripting enabled, and their
-            // HTML parser stores noscript's content as ONE raw text node
-            // holding the literal source markup — the same way script's
-            // content is stored. Treating that text node as ordinary
-            // text (escaping it) does not redact it: escaping only
-            // changes how <, >, & display, so a credential's own
-            // characters survive untouched inside the escaped string.
-            // jsdom instead parses noscript's markup into real child
-            // elements, which is a different shape again. Rather than
-            // classify which shape a given engine produced and redact
-            // within it, drop noscript's content outright: the target
-            // runtimes always run JS, so noscript content never renders
-            // in them either way, and dropping it costs nothing. Its own
-            // attributes are unaffected — only children are skipped.
+            // Drop noscript children because escaping does not redact them.
             continue;
           }
 
@@ -603,10 +558,19 @@ pub struct BrowserViewport {
     pub height: f64,
 }
 
+enum NavigationPoll {
+    Pending,
+    Ready,
+    Cancelled(String),
+}
+
 struct RuntimePage {
     runtime_id: String,
     viewport: BrowserViewport,
     loading: bool,
+    /// Netguard refused a hop. Distinct from `loading == false`, which also
+    /// means a load finished, so a waiter can tell cancel from success.
+    navigation_cancel: Option<String>,
 }
 
 struct PendingRuntimeRequest {
@@ -630,6 +594,7 @@ impl BrowserRuntimeRegistry {
                 runtime_id,
                 viewport: BrowserViewport::default(),
                 loading: false,
+                navigation_cancel: None,
             },
         );
     }
@@ -729,13 +694,41 @@ impl BrowserRuntimeRegistry {
         }
     }
 
-    pub fn is_loading(&self, page_id: usize) -> Result<bool, String> {
-        self.pages
-            .lock()
-            .unwrap()
-            .get(&page_id)
-            .map(|page| page.loading)
-            .ok_or_else(|| "Runtime page not found".to_string())
+    /// A finished load clears `loading` and leaves any cancellation recorded.
+    pub fn finish_loading(&self, page_id: usize) {
+        self.set_loading(page_id, false);
+    }
+
+    /// A refused hop is not a finished load. `loading` is cleared so the page
+    /// is not stuck, and the reason stays until a waiter or a new command reads it.
+    pub fn cancel_navigation(&self, page_id: usize, reason: impl Into<String>) {
+        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
+            page.loading = false;
+            page.navigation_cancel = Some(reason.into());
+        }
+    }
+
+    pub fn clear_navigation_cancel(&self, page_id: usize) {
+        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
+            page.navigation_cancel = None;
+        }
+    }
+
+    /// One lock, cancellation first. A cancel that also clears `loading` must
+    /// not look like [`NavigationPoll::Ready`].
+    fn poll_navigation(&self, page_id: usize) -> Result<NavigationPoll, String> {
+        let mut pages = self.pages.lock().unwrap();
+        let page = pages
+            .get_mut(&page_id)
+            .ok_or_else(|| "Runtime page not found".to_string())?;
+        if let Some(reason) = page.navigation_cancel.take() {
+            return Ok(NavigationPoll::Cancelled(reason));
+        }
+        if page.loading {
+            Ok(NavigationPoll::Pending)
+        } else {
+            Ok(NavigationPoll::Ready)
+        }
     }
 
     pub fn set_viewport(&self, page_id: usize, viewport: BrowserViewport) -> Result<(), String> {
@@ -866,18 +859,27 @@ impl TauriBrowserRuntime {
     }
 
     pub async fn wait_for_ready(&self, timeout_ms: u64) -> Result<(), String> {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        while Instant::now() <= deadline {
-            if !self.registry.is_loading(self.page_id)? {
-                return Ok(());
-            }
-            sleep(Duration::from_millis(40)).await;
-        }
-        Err(format!(
-            "Timed out waiting for page {} to finish loading",
-            self.page_id
-        ))
+        wait_for_page_ready(&self.registry, self.page_id, timeout_ms).await
     }
+}
+
+async fn wait_for_page_ready(
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    while Instant::now() <= deadline {
+        match registry.poll_navigation(page_id)? {
+            NavigationPoll::Cancelled(reason) => return Err(reason),
+            NavigationPoll::Ready => return Ok(()),
+            NavigationPoll::Pending => {}
+        }
+        sleep(Duration::from_millis(40)).await;
+    }
+    Err(format!(
+        "Timed out waiting for page {page_id} to finish loading"
+    ))
 }
 
 /// How long a navigation may take before the runtime reports it did not complete.
@@ -996,6 +998,37 @@ mod response_tests {
             assert_eq!(missing_runtime_response(error, false), error);
         }
     }
+
+    #[test]
+    fn cancelled_navigation_wait_returns_error_instead_of_success() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = super::BrowserRuntimeRegistry::default();
+            registry.register_page(4, "page-runtime-4".into());
+            registry.set_loading(4, true);
+            registry
+                .cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
+            // Finish must not erase the cancellation and make the wait succeed.
+            registry.finish_loading(4);
+            let error = super::wait_for_page_ready(&registry, 4, 500)
+                .await
+                .expect_err("cancelled hop");
+            assert!(
+                error.contains("disallowed scheme"),
+                "unexpected wait error: {error}"
+            );
+
+            registry.clear_navigation_cancel(4);
+            registry.set_loading(4, true);
+            registry.finish_loading(4);
+            super::wait_for_page_ready(&registry, 4, 500)
+                .await
+                .expect("finished load");
+        });
+    }
 }
 
 #[async_trait]
@@ -1067,6 +1100,7 @@ impl BrowserInterface for TauriBrowserRuntime {
             return Err(reason.to_string());
         }
         let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
+        self.registry.clear_navigation_cancel(self.page_id);
         self.registry.set_loading(self.page_id, true);
         self.webview()?
             .navigate(parsed)
@@ -1125,6 +1159,7 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn browser_back(&self) -> Result<(), String> {
         // A missing history entry emits no load event. Let real page-load
         // callbacks own loading, as for click/submit, rather than inventing one.
+        self.registry.clear_navigation_cancel(self.page_id);
         self.execute_action("history.back()").await?;
         self.wait_for_navigation().await
     }
@@ -1132,11 +1167,13 @@ impl BrowserInterface for TauriBrowserRuntime {
     async fn browser_forward(&self) -> Result<(), String> {
         // A missing history entry emits no load event. Let real page-load
         // callbacks own loading, as for click/submit, rather than inventing one.
+        self.registry.clear_navigation_cancel(self.page_id);
         self.execute_action("history.forward()").await?;
         self.wait_for_navigation().await
     }
 
     async fn browser_reload(&self) -> Result<(), String> {
+        self.registry.clear_navigation_cancel(self.page_id);
         self.registry.set_loading(self.page_id, true);
         self.webview()?.reload().map_err(|e| e.to_string())
     }
@@ -1183,7 +1220,7 @@ pub fn create_runtime_page(
         .on_navigation(move |url| {
             if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
                 tracing::warn!("Blocked webview navigation to {}: {}", url, reason);
-                registry_for_nav.set_loading(page_id, false);
+                registry_for_nav.cancel_navigation(page_id, reason.to_string());
                 return false;
             }
             registry_for_nav.set_loading(page_id, true);
@@ -1191,7 +1228,7 @@ pub fn create_runtime_page(
         })
         .on_page_load(move |_webview, payload| match payload.event() {
             PageLoadEvent::Started => registry_for_load.set_loading(page_id, true),
-            PageLoadEvent::Finished => registry_for_load.set_loading(page_id, false),
+            PageLoadEvent::Finished => registry_for_load.finish_loading(page_id),
         });
 
     let webview = window

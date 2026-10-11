@@ -25,6 +25,8 @@ async function withApp(check, {
   navigateFails = false,
   browserActionFails = false,
   snapshotFails = false,
+  reloadUnconfirmed = false,
+  lane = "tauri",
 } = {}) {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://shell.example" });
   const globals = {
@@ -38,7 +40,9 @@ async function withApp(check, {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const calls = [];
+  const loadGenerations = [];
   let nextPage = 0;
+  const hostListeners = new Set();
   const adapter = {
     rendersPageInHost: false,
     createSession: async () => "session",
@@ -49,23 +53,44 @@ async function withApp(check, {
       calls.push(["close", session, page]);
       if (closeFails) throw new Error("Host refused close");
     },
-    navigate: async (session, page, url) => {
+    navigate: async (session, page, url, loadGeneration) => {
       calls.push(["navigate", session, page, url]);
+      if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
       if (navigateFails) throw new Error("Host refused navigation");
     },
-    browserAction: async (command, session, page) => {
+    browserAction: async (command, session, page, loadGeneration) => {
       calls.push(["browser", command, session, page]);
+      if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
+      if (command === "browser_reload" && reloadUnconfirmed) {
+        throw new Error(
+          "Reload dispatched; page readiness is unconfirmed: Timed out waiting for page 0 to finish loading. Do not repeat the reload automatically; inspect the page."
+        );
+      }
       if (browserActionFails) throw new Error("Host refused browser action");
     },
     getPageSnapshot: async (session, page) => {
       calls.push(["snapshot", session, page]);
       if (snapshotFails) throw new Error("Browser runtime read timed out");
+      if (lane === "appkit") {
+        return { url: "https://old.example", title: "Old title", link_count: 9 };
+      }
       return {
         url: `https://page${page}.example`,
         title: `Page ${page}`,
         link_count: page + 3,
       };
     },
+    ...(lane === "appkit" ? {
+      onHostEvent(callback) {
+        hostListeners.add(callback);
+        return () => hostListeners.delete(callback);
+      },
+    } : {}),
+  };
+  const dispatch = async (event) => {
+    await act(async () => {
+      for (const listener of hostListeners) listener(event);
+    });
   };
   const root = createRoot(document.getElementById("root"));
   const elementProto = dom.window.HTMLElement.prototype;
@@ -99,8 +124,8 @@ async function withApp(check, {
     await click(button);
   };
   try {
-    await act(async () => { root.render(createElement(App, { adapter, lane: "tauri" })); });
-    await check({ calls, click, document, goTo, toolbar });
+    await act(async () => { root.render(createElement(App, { adapter, lane })); });
+    await check({ calls, click, dispatch, document, goTo, loadGenerations, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();
@@ -213,4 +238,97 @@ test("back, forward, and reload keep an action failure distinct from a page read
     assert.match(status, /Page refresh failed: Browser runtime read timed out/);
     assert.doesNotMatch(status, /Browser action failed/);
   }, { snapshotFails: true });
+});
+
+test("AppKit navigation keeps an in-flight status until a snapshot or rejection for that load", async () => {
+  await withApp(async ({ calls, dispatch, document, goTo, loadGenerations, toolbar }) => {
+    await goTo("https://next.example");
+    assert.equal(calls.some((call) => call[0] === "snapshot"), false);
+    let status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Navigating to https:\/\/next\.example/);
+    assert.doesNotMatch(status, /Loaded:/);
+    assert.equal(document.querySelector(".url-input").value, "https://next.example");
+    const firstGeneration = loadGenerations.at(-1);
+
+    await dispatch({
+      type: "status",
+      message: "Only http and https URLs can be opened",
+      loadGeneration: firstGeneration,
+    });
+    await dispatch({
+      type: "snapshot",
+      pageId: 0,
+      loadGeneration: firstGeneration,
+      snapshot: { url: "https://old.example", title: "Old title" },
+    });
+    status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Only http and https URLs can be opened/);
+    assert.doesNotMatch(status, /Loaded:/);
+    assert.equal(document.querySelector(".url-input").value, "https://next.example");
+
+    await goTo("https://newer.example");
+    const newerGeneration = loadGenerations.at(-1);
+    assert.notEqual(newerGeneration, firstGeneration);
+    await dispatch({
+      type: "snapshot",
+      pageId: 0,
+      loadGeneration: firstGeneration,
+      snapshot: { url: "https://old.example", title: "Old title" },
+    });
+    status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Navigating to https:\/\/newer\.example/);
+    assert.doesNotMatch(status, /Loaded: Old title/);
+    assert.equal(document.querySelector(".url-input").value, "https://newer.example");
+
+    await dispatch({
+      type: "snapshot",
+      pageId: 0,
+      loadGeneration: newerGeneration,
+      snapshot: { url: "https://newer.example/", title: "Newer" },
+    });
+    status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Loaded: Newer/);
+    assert.equal(document.querySelector(".url-input").value, "https://newer.example/");
+
+    const beforeBack = calls.length;
+    await toolbar("Back");
+    assert.equal(calls.slice(beforeBack).some((call) => call[0] === "snapshot"), false);
+    status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Going back…/);
+    assert.doesNotMatch(status, /Loaded:/);
+    await dispatch({
+      type: "snapshot",
+      pageId: 0,
+      loadGeneration: loadGenerations.at(-1) - 1,
+      snapshot: { url: "https://old.example", title: "Old title" },
+    });
+    status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Going back…/);
+    assert.equal(document.querySelector(".url-input").value, "https://newer.example/");
+  }, { lane: "appkit" });
+});
+
+test("a failed snapshot after a tab switch or close reports page refresh failure", async () => {
+  await withApp(async ({ click, document }) => {
+    await click(document.querySelector(".header > button"));
+    await click(document.querySelector(".tab"));
+    assert.match(document.querySelector(".status-bar").textContent, /Page refresh failed: Browser runtime read timed out/);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Tab 1");
+    assert.equal(document.querySelectorAll(".tab").length, 2);
+
+    await click(document.querySelector(".tab.active .tab-close"));
+    assert.match(document.querySelector(".status-bar").textContent, /Page refresh failed: Browser runtime read timed out/);
+    assert.equal(document.querySelectorAll(".tab").length, 1);
+    assert.equal(document.querySelector(".tab-title").textContent, "Tab 2");
+  }, { snapshotFails: true });
+});
+
+test("an unconfirmed reload keeps its own status without the browser-action failure prefix", async () => {
+  await withApp(async ({ calls, document, toolbar }) => {
+    await toolbar("Reload");
+    assert.deepEqual(calls, [["browser", "browser_reload", "session", 0]]);
+    const status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Reload dispatched; page readiness is unconfirmed/);
+    assert.doesNotMatch(status, /Browser action failed/);
+  }, { reloadUnconfirmed: true });
 });
