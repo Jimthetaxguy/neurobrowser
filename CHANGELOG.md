@@ -10,6 +10,9 @@ versions remain 0.1.0 until an actual version bump and release tag.
 
 - Persistent personal memory (`neuro-memory`) and the memory IPC commands in
   `tauri::generate_handler!`.
+- #111: five scoped target tools (`observe_page`, `click_target`, `type_target`,
+  `submit_target`, `scroll_target`), plus desktop commands `get_page_observation`
+  and `execute_browser_tool`.
 
 ### Changed
 

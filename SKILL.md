@@ -66,8 +66,8 @@ cd neurobrowser
 ./verify.sh
 ```
 
-The numbered `./verify.sh` steps are in `docs/RUNBOOK-DEV.md` (One-shot green
-build). Library-only: `cargo test`.
+`./verify.sh` is the chain. Darwin-only steps and the CI-only guards job are
+in `docs/RUNBOOK-DEV.md` (One-shot green build). Library-only: `cargo test`.
 
 Headless daemon:
 
@@ -135,10 +135,10 @@ not a `PageSnapshot` from the crate.
 
 ## Tools
 
-Browser tools are registered by `default_tool_registry()`. The two memory
-tools are registered by `default_tool_registry_with_memory()` /
-`ReActAgent::with_memory`. Browser arguments are CSS selectors (or pixels /
-a key), not element refs.
+`default_tool_registry()` registers 22 browser tools. `default_tool_registry_with_memory()`
+and `ReActAgent::with_memory` add `search_personal_memory` and `inspect_active_page`
+(24). `ReActAgent::new` stays at 22. Names, arguments, and risk are the catalog
+in `docs/AGENT-SURFACE.md`.
 
 Call format is `ToolCall: {"name":"tool_name","arguments":{"key":"value"}}`.
 The model's tool list is built from each tool's `ToolDefinition`. The two
@@ -148,28 +148,6 @@ A call to a registered tool that omits a required argument (or sets it to
 `""`) does not run. The agent records
 `Error: missing required argument(s): …` and shows it to the model on the
 next turn. That turn does not complete the run.
-
-| Tool | Args | Purpose |
-|---|---|---|
-| `navigate` | `url` | Fetch / open a URL |
-| `wait` | — | Wait for navigation to settle |
-| `query_dom` | `selector` | Query elements by CSS selector |
-| `get_text` | `selector` | Read text of matching elements |
-| `get_links` | — | List links on the current page |
-| `get_prices` | — | Extract price-like strings |
-| `get_tables` | — | Extract table summaries |
-| `click` | `selector` | Click an element |
-| `type` | `selector`, `text` | Type into an input |
-| `scroll_to` | `selector` | Scroll an element into view |
-| `scroll_by` | `x`, `y` | Scroll by pixel offset |
-| `submit_form` | `selector` | Submit a form |
-| `keypress` | `key` | Send a key |
-| `screenshot` | — | Registered; interface default is an error |
-| `back` | — | History back |
-| `forward` | — | History forward |
-| `reload` | — | Reload |
-| `search_personal_memory` | `query`, optional `limit` | Search persistent `MemoryService` (not an in-run agent log). Ignores the browser. Registered when a `MemoryService` is attached. |
-| `inspect_active_page` | — | Captured content for the current URL, or a `capture denied` error. Registered when a `MemoryService` is attached. |
 
 `screenshot` is registered. `BrowserInterface::screenshot` defaults to
 `"screenshot is not supported by this browser"`. Neither `BrowserEngine` nor
@@ -211,7 +189,7 @@ domain; allow/deny lists still apply to `navigate` via the argument URL.
 
 Credential tokens (`password`, `token`, `secret`, `api_key`, `authorization`,
 and related), plus every `text` argument, are `[REDACTED]` in decisions and
-agent events. `type` is marked sensitive and requires approval.
+agent events. `type` and `type_target` are marked sensitive and require approval.
 
 ## See also
 

@@ -21,7 +21,7 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 
 ## Quick Start
 
-Run `./verify.sh`. The steps are in [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
+Run `./verify.sh`. Darwin-only steps and the CI-only notes are in [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
 
 Desktop (`npx tauri dev` in `src-tauri/`) is macOS.
 
