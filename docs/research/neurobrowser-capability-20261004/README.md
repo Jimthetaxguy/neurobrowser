@@ -10,16 +10,18 @@ summary: Reviewed browser development plan and dated evidence, preserved in repo
 
 # Browser capability assessment checkpoint
 
+Frozen record from before #111 merged (baseline d0271f7 / f50f5ae). Slices 2–8 are not built.
+
 This package preserves the October 3–4 design assessment, reviewed implementation
-plan and verification evidence associated with draft PR #111. It is a historical
-checkpoint, not an implementation or release-readiness claim. CI states in receipts
+plan, and verification evidence from before that merge. CI states in receipts
 describe their observation time.
 
-Start with the [integrated plan](browser-integration-plan.md), informed by the
-[original assessment](neurobrowser-lightpanda-assessment-20261003.md) and the
-[function audit](20261004-browser-function-audit.md). The JSON probes distinguish
-DOM reproduction from native WebKit verification. Logs retain successful checks
-and prior failures; their presence does not indicate that every run passed.
+The [integrated plan](browser-integration-plan.md), the
+[original assessment](neurobrowser-lightpanda-assessment-20261003.md), and the
+[function audit](20261004-browser-function-audit.md) are that record. The JSON
+probes distinguish DOM reproduction from native WebKit verification. Kept
+verification artifacts are `20261004-verification-receipt.json` and
+`20261004-accepted-verification.log`.
 
 ## Local provenance
 
@@ -30,5 +32,4 @@ journal. Earlier PR-closeout notes and assessment backups remain local.
 portable source links and redact machine-local paths. Build products, dependency
 folders and backup bundles are excluded.
 
-Committing this package does not authorize merging PR #111 or starting a runtime
-replacement. All implementation checkboxes remain open.
+The four intermediate logs are removed from this tree. Their hashes stay in `source-checksums.json`.

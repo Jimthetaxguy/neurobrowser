@@ -7,12 +7,12 @@
   {
     "file": "20261004-browser-dom-probes.json",
     "original_sha256": "c94cd377eba7d90bf96ca731107922cbc3fd2570e82936b8e0453886ccb56a2b",
-    "tracked_sha256": "c94cd377eba7d90bf96ca731107922cbc3fd2570e82936b8e0453886ccb56a2b"
+    "tracked_sha256": "204219a35f3a023e5ed4fab24bcf517e6cf6c81878354bc8bde4dfaf1aaed0cd"
   },
   {
     "file": "20261004-browser-function-audit.md",
     "original_sha256": "8b759b200a8d071369c1ade62d7d0a25e98a35300c2569c71aec8781f20615b3",
-    "tracked_sha256": "8b759b200a8d071369c1ade62d7d0a25e98a35300c2569c71aec8781f20615b3"
+    "tracked_sha256": "14815a6a1099a89e28006548a9ef1e0fb6e6a448e2cb6e06cf2718b832bf03e3"
   },
   {
     "file": "20261004-clippy-repair.log",
@@ -47,11 +47,11 @@
   {
     "file": "browser-integration-plan.md",
     "original_sha256": "ed9cda1b4c7818f1ca74915d44f4c5f00776ca25ae2ac8d9716092a37faae849",
-    "tracked_sha256": "c852d2ee4381b52bb30afc41fb31c6c9ef7b7ccae1151a79b5723f2ef1c35121"
+    "tracked_sha256": "8baf2ef4f5ac19d5a16aa12aa762801105d6e7c022db890c33dbb7e182ec2242"
   },
   {
     "file": "neurobrowser-lightpanda-assessment-20261003.md",
     "original_sha256": "4077450dd513e835108f2401c32f6a686f357d3b1952dca5ac229d9a64fff94f",
-    "tracked_sha256": "f23cfc433f890b634a0226802a9b216f39045153f7c939daef81e065ce9e2bd5"
+    "tracked_sha256": "7fbabc0d4019f7a41d6eef44fd0a56d95c1beca0eb2b8a7ba78584362e95ea31"
   }
 ]
