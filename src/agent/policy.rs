@@ -327,21 +327,8 @@ impl ActionPolicy {
         }
 
         match self.autonomy_level {
-            AutonomyLevel::ReadOnly => match tool_risk.action {
-                ToolAction::Read | ToolAction::Wait | ToolAction::Scroll => {
-                    PolicyDecision::allow(redacted_arguments)
-                }
-                _ => {
-                    reasons.push("Read-only mode blocks this action".to_string());
-                    flags.push(RiskFlag::ReadOnlyMode);
-                    PolicyDecision::with_outcome(
-                        PolicyOutcome::Block,
-                        reasons,
-                        flags,
-                        redacted_arguments,
-                    )
-                }
-            },
+            // Other actions already returned Block above.
+            AutonomyLevel::ReadOnly => PolicyDecision::allow(redacted_arguments),
             AutonomyLevel::Assisted => match tool_risk.action {
                 ToolAction::Read | ToolAction::Wait | ToolAction::Scroll => {
                     PolicyDecision::allow(redacted_arguments)
