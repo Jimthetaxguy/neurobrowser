@@ -5,6 +5,7 @@ use neurobrowser::{
     AutonomyLevel, BrowserInterface, ElementInfo, PageSnapshot, ToolCall,
 };
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 struct TestBrowser {
@@ -692,4 +693,281 @@ async fn persistent_post_tool_snapshot_failure_keeps_success_and_previous_contex
             .count(),
         1
     );
+}
+
+/// Counts readiness waits. The first wait can fail while a later one would
+/// succeed, which is the contradiction a second dispatch wait used to create.
+struct ReadinessBrowser {
+    waits: AtomicUsize,
+    fail_first_wait: bool,
+    url: Mutex<String>,
+}
+
+impl ReadinessBrowser {
+    fn new(fail_first_wait: bool) -> Self {
+        Self {
+            waits: AtomicUsize::new(0),
+            fail_first_wait,
+            url: Mutex::new("https://example.com/start".to_string()),
+        }
+    }
+
+    fn waits(&self) -> usize {
+        self.waits.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl BrowserInterface for ReadinessBrowser {
+    async fn navigate(&self, url: &str) -> Result<(), String> {
+        // Desktop navigate waits before it returns. That is the one wait.
+        self.wait_for_navigation().await?;
+        *self.url.lock().unwrap() = url.to_string();
+        Ok(())
+    }
+    async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
+        Ok(vec![ElementInfo {
+            tag: "main".into(),
+            id: None,
+            classes: Vec::new(),
+            text: String::new(),
+            attributes: HashMap::new(),
+            selector: selector.to_string(),
+        }])
+    }
+    async fn get_text(&self, _selector: &str) -> Result<String, String> {
+        Ok("ready".into())
+    }
+    async fn click(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn type_text(&self, _selector: &str, _text: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn submit_form(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn scroll_to(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn scroll_by(&self, _x: f32, _y: f32) -> Result<(), String> {
+        Ok(())
+    }
+    async fn keypress(&self, _key: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn browser_reload(&self) -> Result<(), String> {
+        Ok(())
+    }
+    async fn browser_back(&self) -> Result<(), String> {
+        Ok(())
+    }
+    async fn snapshot(&self) -> Result<PageSnapshot, String> {
+        Ok(PageSnapshot {
+            url: self.url.lock().unwrap().clone(),
+            title: "Test Page".into(),
+            text: Some("ready".into()),
+            html: Some("<html><body>ready</body></html>".into()),
+            viewport_width: 1280,
+            viewport_height: 720,
+            interactive_ready: true,
+            ..PageSnapshot::default()
+        })
+    }
+    async fn wait_for_navigation(&self) -> Result<(), String> {
+        let index = self.waits.fetch_add(1, Ordering::SeqCst);
+        if self.fail_first_wait && index == 0 {
+            Err("Timed out waiting for page to finish loading".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn high_autonomy() -> ActionPolicy {
+    ActionPolicy {
+        autonomy_level: AutonomyLevel::HighAutonomy,
+        ..ActionPolicy::default()
+    }
+}
+
+fn tool_event(run: &neurobrowser::AgentRunResult) -> (bool, String) {
+    run.events
+        .iter()
+        .find_map(|event| match event {
+            AgentRunEvent::ToolCallResult {
+                result, success, ..
+            } => Some((*success, result.clone())),
+            _ => None,
+        })
+        .expect("tool result event")
+}
+
+/// Run one mutation, then a final answer if dispatch lets the loop continue.
+async fn run_mutation(
+    browser: &ReadinessBrowser,
+    tool_call: ToolCall,
+) -> (neurobrowser::AgentRunResult, Vec<AiContext>) {
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(ContextRecordingProvider {
+        responses: Mutex::new(VecDeque::from([
+            response("act", vec![tool_call]),
+            response("Final Answer: done", vec![]),
+        ])),
+        contexts: contexts.clone(),
+    });
+    let agent = neurobrowser::ReActAgent::new(AgentConfig::default(), provider);
+    let run = agent
+        .execute_with_policy("act", browser, &high_autonomy())
+        .await
+        .expect("run");
+    let seen = contexts.lock().unwrap().clone();
+    (run, seen)
+}
+
+#[tokio::test]
+async fn mutation_that_already_waited_is_not_waited_on_twice() {
+    for (name, args) in [
+        ("click", vec![("selector", "#go")]),
+        ("keypress", vec![("key", "Enter")]),
+        ("reload", vec![]),
+        ("navigate", vec![("url", "https://example.com/next")]),
+    ] {
+        let browser = ReadinessBrowser::new(false);
+        let (run, contexts) = run_mutation(&browser, call(name, &args)).await;
+        assert_eq!(browser.waits(), 1, "{name} waited more than once");
+        assert_eq!(run.status, AgentRunStatus::Completed, "{name}");
+        assert_eq!(contexts.len(), 2, "{name} should reach the next model turn");
+        let seen = &contexts[1].tool_results[0].result;
+        assert!(
+            !seen.contains("unconfirmed"),
+            "{name} told the model the page was not ready: {seen}"
+        );
+        assert!(
+            !run.final_response
+                .as_deref()
+                .unwrap_or("")
+                .contains("unconfirmed"),
+            "{name}"
+        );
+    }
+
+    // The tool wait times out. A second wait would succeed and the run would
+    // continue, telling the model the page was not ready after it was.
+    for (name, args) in [
+        ("click", vec![("selector", "#go")]),
+        ("keypress", vec![("key", "Enter")]),
+        ("reload", vec![]),
+    ] {
+        let browser = ReadinessBrowser::new(true);
+        let (run, contexts) = run_mutation(&browser, call(name, &args)).await;
+        assert_eq!(
+            browser.waits(),
+            1,
+            "{name} waited again after its own timeout"
+        );
+        assert_eq!(run.status, AgentRunStatus::Failed, "{name}");
+        assert_eq!(
+            contexts.len(),
+            1,
+            "{name} continued after an unconfirmed page"
+        );
+        let (success, reported) = tool_event(&run);
+        assert!(success, "{name} dispatch truth");
+        assert!(
+            reported.contains("page readiness is unconfirmed"),
+            "{reported}"
+        );
+        assert!(
+            reported.contains("Timed out waiting for page to finish loading"),
+            "{reported}"
+        );
+        assert_eq!(run.final_response.as_deref(), Some(reported.as_str()));
+    }
+
+    // navigate waits inside the runtime call. A timeout is an action error,
+    // and dispatch must not wait a second time.
+    let browser = ReadinessBrowser::new(true);
+    let (run, contexts) = run_mutation(
+        &browser,
+        call("navigate", &[("url", "https://example.com/next")]),
+    )
+    .await;
+    assert_eq!(browser.waits(), 1);
+    assert_eq!(run.status, AgentRunStatus::Failed);
+    assert_eq!(contexts.len(), 1);
+    let (success, _) = tool_event(&run);
+    assert!(!success);
+    assert_eq!(
+        run.final_response.as_deref(),
+        Some("Legacy action outcome unresolved; inspect the page before any further action")
+    );
+
+    // submit_form waits in the tool, then stops for approval before dispatch.
+    let browser = ReadinessBrowser::new(true);
+    let tool_call = call("submit_form", &[("selector", "form")]);
+    let agent =
+        neurobrowser::ReActAgent::new(AgentConfig::default(), Arc::new(FakeProvider::new(vec![])));
+    let pending = agent
+        .propose_tool_with_policy(tool_call.clone(), &browser, &high_autonomy())
+        .await
+        .expect("proposal");
+    assert_eq!(pending.status, AgentRunStatus::AwaitingApproval);
+    assert_eq!(browser.waits(), 0);
+    let run = agent
+        .execute_approved_tool_with_policy(
+            pending.run_id,
+            pending.approval_id.expect("approval id"),
+            tool_call,
+            &browser,
+            true,
+            None,
+            &high_autonomy(),
+        )
+        .await
+        .expect("approved submit");
+    assert_eq!(browser.waits(), 1);
+    assert_eq!(run.status, AgentRunStatus::Failed);
+    let (success, reported) = tool_event(&run);
+    assert!(success);
+    assert!(reported.contains("page readiness is unconfirmed"));
+    assert!(reported.contains("Timed out waiting for page to finish loading"));
+    assert_eq!(run.final_response.as_deref(), Some(reported.as_str()));
+}
+
+#[tokio::test]
+async fn mutation_that_did_not_wait_still_gets_the_dispatch_wait() {
+    for (name, args) in [("scroll_to", vec![("selector", "#main")]), ("back", vec![])] {
+        let browser = ReadinessBrowser::new(false);
+        let (run, contexts) = run_mutation(&browser, call(name, &args)).await;
+        assert_eq!(browser.waits(), 1, "{name} skipped the dispatch wait");
+        assert_eq!(run.status, AgentRunStatus::Completed, "{name}");
+        assert_eq!(contexts.len(), 2, "{name}");
+        assert!(
+            !contexts[1].tool_results[0].result.contains("unconfirmed"),
+            "{name}"
+        );
+
+        let browser = ReadinessBrowser::new(true);
+        let (run, contexts) = run_mutation(&browser, call(name, &args)).await;
+        assert_eq!(browser.waits(), 1, "{name}");
+        assert_eq!(run.status, AgentRunStatus::Failed, "{name}");
+        assert_eq!(
+            contexts.len(),
+            1,
+            "{name} continued without a readiness wait"
+        );
+        let (success, reported) = tool_event(&run);
+        assert!(success, "{name}");
+        assert!(
+            !reported.contains("unconfirmed"),
+            "{name} tool waited itself: {reported}"
+        );
+        assert_eq!(
+            run.final_response.as_deref(),
+            Some(
+                "Legacy action acknowledged; page readiness unconfirmed. Inspect before any further action"
+            )
+        );
+    }
 }

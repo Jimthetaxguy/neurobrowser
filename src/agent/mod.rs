@@ -571,9 +571,37 @@ impl ReActAgent {
                 events,
             ));
         }
-        if legacy_mutation && browser.wait_for_navigation().await.is_err() {
+        // click, submit_form, keypress, and reload already waited in the tool.
+        // navigate already waited inside the desktop runtime. A second wait can
+        // succeed after the tool reported a timeout, so the model would be told
+        // the page was not ready after this call observed that it was.
+        let already_waited = tool_already_waited_for_readiness(&call.name);
+        if legacy_mutation
+            && already_waited
+            && result.contains(crate::browser::UNCONFIRMED_READINESS)
+        {
+            // Dispatch truth remains success in ToolCallResult. This text is the
+            // only readiness wait, so it is the message the caller keeps.
+            return Ok(run_result(
+                run_id,
+                AgentRunStatus::Failed,
+                Some(result),
+                1,
+                events,
+            ));
+        }
+        if legacy_mutation && !already_waited && browser.wait_for_navigation().await.is_err() {
             // Dispatch truth remains success in ToolCallResult; readiness is a separate fact.
-            return Ok(run_result(run_id, AgentRunStatus::Failed, Some("Legacy action acknowledged; page readiness unconfirmed. Inspect before any further action".into()), 1, events));
+            return Ok(run_result(
+                run_id,
+                AgentRunStatus::Failed,
+                Some(
+                    "Legacy action acknowledged; page readiness unconfirmed. Inspect before any further action"
+                        .into(),
+                ),
+                1,
+                events,
+            ));
         }
         // Refresh labels after a tool; transient loading failures retain the last known labels.
         let post_snapshot = match browser.snapshot().await {
@@ -621,6 +649,16 @@ impl ReActAgent {
         }
         content.to_string()
     }
+}
+
+/// Legacy tools whose execution path already called `wait_for_navigation`.
+///
+/// Other legacy mutations still wait once in `dispatch_call`.
+fn tool_already_waited_for_readiness(name: &str) -> bool {
+    matches!(
+        name,
+        "navigate" | "click" | "submit_form" | "keypress" | "reload"
+    )
 }
 
 fn run_result(
