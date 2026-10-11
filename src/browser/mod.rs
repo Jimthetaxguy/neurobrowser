@@ -1389,6 +1389,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires live public HTTPS access; run explicitly as an integration check"]
     async fn navigate_reports_post_redirect_url_on_http_engine() {
         let requested = "https://httpbingo.org/redirect/1";
         let engine = BrowserEngine::new(PageConfig::default());
