@@ -42,9 +42,54 @@ function appKitSnapshotApplies(loadRef, event) {
   return true;
 }
 
+const TEXT_ENTRY_TYPES = new Set(["email", "number", "password", "search", "tel", "text", "url"]);
+
 function messageText(error) {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function isContentEditableElement(element) {
+  if (element.isContentEditable) return true;
+  for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+    const value = node.getAttribute?.("contenteditable");
+    if (value == null) continue;
+    return value.toLowerCase() !== "false";
+  }
+  return false;
+}
+
+function isTextEntryTarget(target) {
+  const element = target?.nodeType === 1 ? target : target?.parentElement;
+  if (!element || element.nodeType !== 1) return false;
+  if (isContentEditableElement(element)) return true;
+  const tag = element.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag !== "INPUT") return false;
+  return TEXT_ENTRY_TYPES.has((element.getAttribute("type") || "text").toLowerCase());
+}
+
+function typingInTextField(event) {
+  if (isTextEntryTarget(event.target)) return true;
+  return isTextEntryTarget(document.activeElement);
+}
+
+function bracketSide(event) {
+  const key = event.key;
+  if (key === "[" || key === "{") return "left";
+  if (key === "]" || key === "}") return "right";
+  if (event.code === "BracketLeft") return "left";
+  if (event.code === "BracketRight") return "right";
+  return null;
+}
+
+function activateRelativeTab(tabs, currentPageId, delta, activatePage) {
+  if (tabs.length < 2) return;
+  const current = tabs.findIndex((tab) => tab.id === currentPageId);
+  const index = current < 0 ? 0 : current;
+  const next = (index + delta + tabs.length) % tabs.length;
+  const tab = tabs[next];
+  if (tab && tab.id !== currentPageId) activatePage(tab.id);
 }
 
 function countValue(snapshot, key) {
@@ -700,27 +745,61 @@ export default function App({ adapter, lane }) {
   }, [adapter.rendersPageInHost, syncBrowserViewport]);
 
   useEffect(() => {
+    // The page webview does not deliver keys here. These chords run only while
+    // this React chrome is focused; page focus will use native menu accelerators.
     const onKeyDown = (event) => {
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
-      if (event.key.toLowerCase() === "t") {
+      const key = event.key.toLowerCase();
+      if (key === "t") {
         if (compact) return;
         event.preventDefault();
         createNewTab();
+        return;
       }
-      if (event.key.toLowerCase() === "l") {
+      if (key === "l") {
         event.preventDefault();
         document.querySelector(".url-input")?.focus();
+        return;
       }
-      if (event.key.toLowerCase() === "w" && currentPageId != null) {
+      if (key === "w" && currentPageId != null) {
         if (compact) return;
         event.preventDefault();
         closeTab(currentPageId);
+        return;
       }
+
+      if (compact || event.altKey) return;
+
+      if (key === "r" && !event.shiftKey && !event.repeat) {
+        event.preventDefault();
+        runBrowserAction("browser_reload");
+        return;
+      }
+      if (typingInTextField(event)) return;
+
+      const side = bracketSide(event);
+      if (side) {
+        event.preventDefault();
+        const shifted = event.shiftKey || event.key === "{" || event.key === "}";
+        if (shifted) {
+          activateRelativeTab(tabs, currentPageId, side === "left" ? -1 : 1, activatePage);
+        } else if (!event.repeat) {
+          runBrowserAction(side === "left" ? "browser_back" : "browser_forward");
+        }
+        return;
+      }
+
+      if (event.shiftKey || event.repeat || !/^[1-9]$/.test(event.key)) return;
+      event.preventDefault();
+      const index = event.key === "9" ? tabs.length - 1 : Number(event.key) - 1;
+      if (index < 0 || index >= tabs.length) return;
+      const tab = tabs[index];
+      if (tab.id !== currentPageId) activatePage(tab.id);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [closeTab, compact, createNewTab, currentPageId]);
+  }, [activatePage, closeTab, compact, createNewTab, currentPageId, runBrowserAction, tabs]);
 
   const stageText =
     "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";

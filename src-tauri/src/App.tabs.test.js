@@ -123,9 +123,26 @@ async function withApp(check, {
     const button = [...document.querySelectorAll(".browser-toolbar button")].find((item) => item.textContent === label);
     await click(button);
   };
+  const keydown = async (key, { alt = false, code = "", ctrl = false, meta = false, repeat = false, shift = false, target } = {}) => {
+    const event = new window.KeyboardEvent("keydown", {
+      altKey: alt,
+      bubbles: true,
+      cancelable: true,
+      code,
+      ctrlKey: ctrl,
+      key,
+      metaKey: meta,
+      repeat,
+      shiftKey: shift,
+    });
+    await act(async () => {
+      (target || document).dispatchEvent(event);
+    });
+    return event;
+  };
   try {
     await act(async () => { root.render(createElement(App, { adapter, lane })); });
-    await check({ calls, click, dispatch, document, goTo, loadGenerations, toolbar });
+    await check({ calls, click, dispatch, document, goTo, keydown, loadGenerations, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();
@@ -331,4 +348,288 @@ test("an unconfirmed reload keeps its own status without the browser-action fail
     assert.match(status, /Reload dispatched; page readiness is unconfirmed/);
     assert.doesNotMatch(status, /Browser action failed/);
   }, { reloadUnconfirmed: true });
+});
+
+async function openMoreTabs(click, document, count) {
+  for (let index = 0; index < count; index += 1) {
+    await click(document.querySelector(".header > button"));
+  }
+}
+
+test("Cmd/Ctrl-R reloads the active tab", async () => {
+  await withApp(async ({ calls, document, keydown }) => {
+    for (const options of [{ ctrl: true }, { meta: true }]) {
+      calls.length = 0;
+      const event = await keydown("r", options);
+      assert.equal(event.defaultPrevented, true);
+      assert.deepEqual(calls, [
+        ["browser", "browser_reload", "session", 0],
+        ["snapshot", "session", 0],
+      ]);
+      assert.match(document.querySelector(".status-bar").textContent, /Loaded: Page 0/);
+    }
+    for (const options of [
+      { ctrl: true, shift: true },
+      { meta: true, alt: true },
+      { ctrl: true, repeat: true },
+      {},
+    ]) {
+      calls.length = 0;
+      const event = await keydown("r", options);
+      assert.equal(event.defaultPrevented, false);
+      assert.deepEqual(calls, []);
+    }
+  });
+
+  await withApp(async ({ calls, document, keydown }) => {
+    await keydown("r", { meta: true });
+    assert.deepEqual(calls, [["browser", "browser_reload", "session", 0]]);
+    assert.match(document.querySelector(".status-bar").textContent, /Browser action failed: Host refused browser action/);
+  }, { browserActionFails: true });
+
+  await withApp(async ({ calls, document, keydown }) => {
+    await keydown("R", { ctrl: true });
+    assert.deepEqual(calls, [["browser", "browser_reload", "session", 0]]);
+    const status = document.querySelector(".status-bar").textContent;
+    assert.match(status, /Reload dispatched; page readiness is unconfirmed/);
+    assert.doesNotMatch(status, /Browser action failed/);
+  }, { reloadUnconfirmed: true });
+});
+
+test("Cmd/Ctrl-[ goes back and Cmd/Ctrl-] goes forward", async () => {
+  await withApp(async ({ calls, keydown }) => {
+    const cases = [
+      ["[", { ctrl: true }, "browser_back"],
+      ["[", { meta: true }, "browser_back"],
+      ["]", { ctrl: true }, "browser_forward"],
+      ["]", { meta: true }, "browser_forward"],
+      ["Unidentified", { code: "BracketLeft", meta: true }, "browser_back"],
+      ["Unidentified", { code: "BracketRight", ctrl: true }, "browser_forward"],
+    ];
+    for (const [key, options, command] of cases) {
+      calls.length = 0;
+      const event = await keydown(key, options);
+      assert.equal(event.defaultPrevented, true);
+      assert.deepEqual(calls, [
+        ["browser", command, "session", 0],
+        ["snapshot", "session", 0],
+      ]);
+    }
+    for (const [key, options] of [
+      ["[", { ctrl: true, alt: true }],
+      ["[", { meta: true, repeat: true }],
+      ["]", {}],
+      ["]", { ctrl: true, shift: true }],
+    ]) {
+      calls.length = 0;
+      await keydown(key, options);
+      assert.deepEqual(calls, []);
+    }
+  });
+});
+
+test("Cmd/Ctrl-1 through 8 select that tab and 9 selects the last", async () => {
+  await withApp(async ({ calls, click, document, keydown }) => {
+    await openMoreTabs(click, document, 9);
+    for (let number = 1; number <= 8; number += 1) {
+      calls.length = 0;
+      const options = number % 2 === 0 ? { meta: true } : { ctrl: true };
+      await keydown(String(number), options);
+      assert.deepEqual(calls, [
+        ["activate", "session", number - 1],
+        ["snapshot", "session", number - 1],
+      ]);
+      assert.equal(document.querySelector(".tab.active .tab-title").textContent, `Page ${number - 1}`);
+    }
+    calls.length = 0;
+    await keydown("9", { ctrl: true });
+    assert.deepEqual(calls, [
+      ["activate", "session", 9],
+      ["snapshot", "session", 9],
+    ]);
+    calls.length = 0;
+    await keydown("8", { meta: true });
+    assert.deepEqual(calls, [
+      ["activate", "session", 7],
+      ["snapshot", "session", 7],
+    ]);
+    calls.length = 0;
+    const sameTab = await keydown("8", { ctrl: true });
+    assert.equal(sameTab.defaultPrevented, true);
+    assert.deepEqual(calls, []);
+  });
+
+  await withApp(async ({ calls, click, document, keydown }) => {
+    await openMoreTabs(click, document, 2);
+    for (const key of ["4", "8"]) {
+      calls.length = 0;
+      const event = await keydown(key, { meta: true });
+      assert.equal(event.defaultPrevented, true);
+      assert.deepEqual(calls, []);
+      assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Tab 3");
+    }
+    await keydown("1", {});
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Tab 3");
+    await keydown("1", { meta: true });
+    calls.length = 0;
+    await keydown("9", { ctrl: true });
+    assert.deepEqual(calls, [
+      ["activate", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 2");
+  });
+});
+
+test("Cmd/Ctrl-Shift-[ and Shift-] select the previous and next tab", async () => {
+  await withApp(async ({ calls, click, document, keydown }) => {
+    await keydown("[", { ctrl: true, shift: true });
+    await keydown("]", { meta: true, shift: true });
+    assert.deepEqual(calls, []);
+
+    await openMoreTabs(click, document, 2);
+    const expectTab = async (key, options, pageId) => {
+      calls.length = 0;
+      const event = await keydown(key, options);
+      assert.equal(event.defaultPrevented, true);
+      assert.deepEqual(calls, [
+        ["activate", "session", pageId],
+        ["snapshot", "session", pageId],
+      ]);
+      assert.equal(document.querySelector(".tab.active .tab-title").textContent, `Page ${pageId}`);
+    };
+    await expectTab("[", { ctrl: true, shift: true }, 1);
+    await expectTab("{", { meta: true }, 0);
+    await expectTab("[", { code: "BracketLeft", meta: true, shift: true }, 2);
+    await expectTab("]", { ctrl: true, shift: true }, 0);
+    await expectTab("}", { meta: true }, 1);
+    await expectTab("]", { code: "BracketRight", ctrl: true, shift: true }, 2);
+    await expectTab("Unidentified", { code: "BracketLeft", ctrl: true, shift: true }, 1);
+  });
+});
+
+test("text entry keeps history and tab chords quiet, while L, T, W, and R still run", async () => {
+  await withApp(async ({ calls, click, document, keydown }) => {
+    await openMoreTabs(click, document, 2);
+    const urlInput = document.querySelector(".url-input");
+    const chat = document.querySelector(".chat-input");
+    const chords = [
+      ["[", { ctrl: true }],
+      ["]", { meta: true }],
+      ["1", { ctrl: true }],
+      ["9", { meta: true }],
+      ["[", { ctrl: true, shift: true }],
+      ["]", { meta: true, shift: true }],
+      ["{", { ctrl: true }],
+      ["}", { meta: true }],
+    ];
+    const focus = async (element) => {
+      await act(async () => { element.focus(); });
+    };
+    const expectQuiet = async () => {
+      for (const [key, options] of chords) {
+        calls.length = 0;
+        const event = await keydown(key, options);
+        assert.equal(event.defaultPrevented, false);
+        assert.deepEqual(calls, []);
+      }
+    };
+
+    await focus(urlInput);
+    await expectQuiet();
+    await focus(chat);
+    await expectQuiet();
+
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    for (const type of ["search", "email", "password", "tel", "number", "text"]) {
+      field.type = type;
+      await focus(field);
+      await expectQuiet();
+    }
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    editable.tabIndex = 0;
+    document.body.appendChild(editable);
+    await focus(editable);
+    await expectQuiet();
+
+    field.type = "checkbox";
+    await focus(field);
+    calls.length = 0;
+    await keydown("[", { ctrl: true });
+    assert.deepEqual(calls, [
+      ["browser", "browser_back", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+    field.remove();
+    editable.remove();
+
+    await focus(urlInput);
+    calls.length = 0;
+    const reload = await keydown("r", { ctrl: true });
+    assert.equal(reload.defaultPrevented, true);
+    assert.deepEqual(calls, [
+      ["browser", "browser_reload", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+
+    await focus(chat);
+    calls.length = 0;
+    await keydown("R", { meta: true });
+    assert.deepEqual(calls, [
+      ["browser", "browser_reload", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+
+    const tabCount = document.querySelectorAll(".tab").length;
+    await keydown("t", { ctrl: true });
+    assert.equal(document.querySelectorAll(".tab").length, tabCount + 1);
+    await keydown("l", { meta: true });
+    assert.equal(document.activeElement, urlInput);
+    await focus(urlInput);
+    await keydown("w", { ctrl: true });
+    assert.equal(document.querySelectorAll(".tab").length, tabCount);
+  });
+});
+
+test("history and tab chords still run from a button or select", async () => {
+  await withApp(async ({ calls, click, document, keydown }) => {
+    await openMoreTabs(click, document, 1);
+    const back = [...document.querySelectorAll(".browser-toolbar button")].find((item) => item.textContent === "Back");
+    calls.length = 0;
+    await keydown("[", { meta: true, target: back });
+    assert.deepEqual(calls, [
+      ["browser", "browser_back", "session", 1],
+      ["snapshot", "session", 1],
+    ]);
+    calls.length = 0;
+    await keydown("1", { ctrl: true, target: document.querySelector(".provider-select") });
+    assert.deepEqual(calls, [
+      ["activate", "session", 0],
+      ["snapshot", "session", 0],
+    ]);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 0");
+  });
+});
+
+test("AppKit ignores the new chrome chords and still focuses the address field", async () => {
+  await withApp(async ({ calls, document, keydown }) => {
+    for (const [key, options] of [
+      ["r", { ctrl: true }],
+      ["[", { meta: true }],
+      ["]", { ctrl: true }],
+      ["1", { meta: true }],
+      ["9", { ctrl: true }],
+      ["[", { ctrl: true, shift: true }],
+      ["]", { meta: true, shift: true }],
+    ]) {
+      calls.length = 0;
+      await keydown(key, options);
+      assert.deepEqual(calls, []);
+    }
+    assert.equal(document.querySelectorAll(".tab").length, 1);
+    await keydown("l", { meta: true });
+    assert.equal(document.activeElement, document.querySelector(".url-input"));
+  }, { lane: "appkit" });
 });
