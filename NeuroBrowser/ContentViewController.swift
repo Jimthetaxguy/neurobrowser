@@ -460,7 +460,8 @@ extension ContentViewController: WKNavigationDelegate {
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
             return
         }
-        if nsError.domain == WKError.errorDomain && nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
+        // WebKitErrorFrameLoadInterruptedByPolicyChange (102) has no WKError.Code case.
+        if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
             return
         }
         let message = nsError.localizedDescription.isEmpty ? "Page failed to load" : nsError.localizedDescription
