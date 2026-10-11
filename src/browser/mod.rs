@@ -751,6 +751,12 @@ impl BrowserTool for GetTablesTool {
     }
 }
 
+/// Phrase a legacy tool uses after its own readiness wait times out.
+///
+/// `dispatch_call` treats this as the only readiness fact for that call and
+/// does not wait again.
+pub(crate) const UNCONFIRMED_READINESS: &str = "page readiness is unconfirmed";
+
 // Clicks, submissions, keys, and reloads can have external effects when a
 // subsequent load times out. Keep execution success and readiness distinct
 // so the agent does not retry an action merely to recover from a slow page.
@@ -766,7 +772,7 @@ async fn action_result_with_readiness(
     let message = match browser.wait_for_navigation().await {
         Ok(()) => message,
         Err(error) => format!(
-            "{message}. Action executed, but page readiness is unconfirmed: {error}. \
+            "{message}. Action executed, but {UNCONFIRMED_READINESS}: {error}. \
              Do not repeat the action automatically; use wait or inspect the page."
         ),
     };
