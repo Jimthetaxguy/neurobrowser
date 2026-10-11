@@ -10,7 +10,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::webview::{PageLoadEvent, WebviewBuilder};
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Webview, WebviewUrl, Window};
+use tauri::{
+    AppHandle, Emitter, EventTarget, LogicalPosition, LogicalSize, Manager, Runtime, Webview,
+    WebviewUrl, Window,
+};
 use tokio::sync::oneshot;
 use tokio::time::sleep;
 
@@ -571,6 +574,9 @@ struct RuntimePage {
     /// Netguard refused a hop. Distinct from `loading == false`, which also
     /// means a load finished, so a waiter can tell cancel from success.
     navigation_cancel: Option<String>,
+    /// The refused hop must not be emitted as a finished success. Kept apart
+    /// from `navigation_cancel` so a waiter can still take the reason.
+    suppress_finished_event: bool,
 }
 
 struct PendingRuntimeRequest {
@@ -595,6 +601,7 @@ impl BrowserRuntimeRegistry {
                 viewport: BrowserViewport::default(),
                 loading: false,
                 navigation_cancel: None,
+                suppress_finished_event: false,
             },
         );
     }
@@ -705,12 +712,29 @@ impl BrowserRuntimeRegistry {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.loading = false;
             page.navigation_cancel = Some(reason.into());
+            page.suppress_finished_event = true;
         }
     }
 
     pub fn clear_navigation_cancel(&self, page_id: usize) {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.navigation_cancel = None;
+        }
+    }
+
+    /// Peek. Does not take `navigation_cancel`.
+    pub fn suppress_finished_event(&self, page_id: usize) -> bool {
+        self.pages
+            .lock()
+            .unwrap()
+            .get(&page_id)
+            .is_some_and(|page| page.suppress_finished_event)
+    }
+
+    /// An allowed hop may report Finished. Does not clear a recorded refusal.
+    pub fn note_navigation_allowed(&self, page_id: usize) {
+        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
+            page.suppress_finished_event = false;
         }
     }
 
@@ -887,6 +911,69 @@ async fn wait_for_page_ready(
 /// as an error the agent can act on rather than an indefinite hang.
 const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
 
+/// One event for load start, load finish, and document title changes.
+/// The main webview listens; child page webviews are not granted that.
+pub const PAGE_LIFECYCLE_EVENT: &str = "page-lifecycle";
+
+/// Default label of the control webview created from `tauri.conf.json`.
+const MAIN_WEBVIEW_LABEL: &str = "main";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PageLifecyclePhase {
+    Started,
+    Finished,
+    Title,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageLifecyclePayload {
+    pub page_id: usize,
+    pub phase: PageLifecyclePhase,
+    pub url: String,
+    pub title: String,
+}
+
+/// Build the shell event payload. A finished load is omitted when netguard
+/// already refused the hop, or when the URL's scheme is one netguard always
+/// refuses, so cancel is not reported as success. `Started` and `Title` are
+/// still built; only `Finished` is dropped.
+pub fn page_lifecycle_payload(
+    page_id: usize,
+    phase: PageLifecyclePhase,
+    url: impl Into<String>,
+    title: impl Into<String>,
+    navigation_cancelled: bool,
+) -> Option<PageLifecyclePayload> {
+    let url = url.into();
+    let title = title.into();
+    let refused_scheme = neurobrowser::netguard::disallowed_scheme(&url).is_some();
+    if phase == PageLifecyclePhase::Finished && (navigation_cancelled || refused_scheme) {
+        return None;
+    }
+    Some(PageLifecyclePayload {
+        page_id,
+        phase,
+        url,
+        title,
+    })
+}
+
+fn emit_page_lifecycle<R: Runtime>(webview: &Webview<R>, payload: Option<PageLifecyclePayload>) {
+    let Some(payload) = payload else {
+        return;
+    };
+    let page_id = payload.page_id;
+    if let Err(error) = webview.emit_to(
+        EventTarget::labeled(MAIN_WEBVIEW_LABEL),
+        PAGE_LIFECYCLE_EVENT,
+        payload,
+    ) {
+        tracing::warn!("failed to emit {PAGE_LIFECYCLE_EVENT} for page {page_id}: {error}");
+    }
+}
+
 fn missing_runtime_response(error: &str, action_request: bool) -> String {
     if action_request {
         format!(
@@ -1028,6 +1115,142 @@ mod response_tests {
                 .await
                 .expect("finished load");
         });
+    }
+
+    #[test]
+    fn page_lifecycle_payload_shapes_and_cancelled_finish() {
+        let started = super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Started,
+            "https://example.com/next",
+            "",
+            true,
+        )
+        .expect("started is not a success claim");
+        assert_eq!(
+            serde_json::to_value(&started).unwrap(),
+            serde_json::json!({
+                "pageId": 3,
+                "phase": "started",
+                "url": "https://example.com/next",
+                "title": ""
+            })
+        );
+
+        let finished = super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/next",
+            "Example",
+            false,
+        )
+        .expect("allowed finish");
+        assert_eq!(finished.phase, super::PageLifecyclePhase::Finished);
+        assert_eq!(
+            serde_json::to_value(&finished).unwrap(),
+            serde_json::json!({
+                "pageId": 3,
+                "phase": "finished",
+                "url": "https://example.com/next",
+                "title": "Example"
+            })
+        );
+        assert!(super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Finished,
+            "javascript:alert(1)",
+            "Example",
+            true,
+        )
+        .is_none());
+        assert!(
+            super::page_lifecycle_payload(
+                3,
+                super::PageLifecyclePhase::Finished,
+                "javascript:alert(1)",
+                "Example",
+                false,
+            )
+            .is_none(),
+            "a disallowed scheme is not a successful finish"
+        );
+        assert!(super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Finished,
+            "about:blank",
+            "",
+            false,
+        )
+        .is_some());
+
+        let title = super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Title,
+            "https://example.com/next",
+            "Renamed",
+            true,
+        )
+        .expect("title is not a success claim");
+        assert_eq!(
+            serde_json::to_value(&title).unwrap(),
+            serde_json::json!({
+                "pageId": 3,
+                "phase": "title",
+                "url": "https://example.com/next",
+                "title": "Renamed"
+            })
+        );
+    }
+
+    #[test]
+    fn netguard_cancel_blocks_finished_event_until_a_later_hop_is_allowed() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(4, "page-runtime-4".into());
+        registry.set_loading(4, true);
+        registry.cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
+        assert!(registry.suppress_finished_event(4));
+        assert!(super::page_lifecycle_payload(
+            4,
+            super::PageLifecyclePhase::Finished,
+            "javascript:alert(1)",
+            "",
+            registry.suppress_finished_event(4),
+        )
+        .is_none());
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            registry.finish_loading(4);
+            let error = super::wait_for_page_ready(&registry, 4, 200)
+                .await
+                .expect_err("cancelled hop");
+            assert!(error.contains("disallowed scheme"), "{error}");
+        });
+        // The waiter took the reason. The finished event stays suppressed.
+        assert!(registry.suppress_finished_event(4));
+        assert!(super::page_lifecycle_payload(
+            4,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/",
+            "Example",
+            registry.suppress_finished_event(4),
+        )
+        .is_none());
+
+        registry.note_navigation_allowed(4);
+        assert!(!registry.suppress_finished_event(4));
+        let allowed = super::page_lifecycle_payload(
+            4,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/",
+            "Example",
+            registry.suppress_finished_event(4),
+        )
+        .expect("later allowed hop");
+        assert_eq!(allowed.phase, super::PageLifecyclePhase::Finished);
     }
 }
 
@@ -1223,12 +1446,47 @@ pub fn create_runtime_page(
                 registry_for_nav.cancel_navigation(page_id, reason.to_string());
                 return false;
             }
+            registry_for_nav.note_navigation_allowed(page_id);
             registry_for_nav.set_loading(page_id, true);
             true
         })
-        .on_page_load(move |_webview, payload| match payload.event() {
-            PageLoadEvent::Started => registry_for_load.set_loading(page_id, true),
-            PageLoadEvent::Finished => registry_for_load.finish_loading(page_id),
+        .on_page_load(move |webview, payload| {
+            let url = payload.url().to_string();
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    registry_for_load.set_loading(page_id, true);
+                    emit_page_lifecycle(
+                        &webview,
+                        page_lifecycle_payload(
+                            page_id,
+                            PageLifecyclePhase::Started,
+                            url,
+                            String::new(),
+                            false,
+                        ),
+                    );
+                }
+                PageLoadEvent::Finished => {
+                    registry_for_load.finish_loading(page_id);
+                    emit_page_lifecycle(
+                        &webview,
+                        page_lifecycle_payload(
+                            page_id,
+                            PageLifecyclePhase::Finished,
+                            url,
+                            String::new(),
+                            registry_for_load.suppress_finished_event(page_id),
+                        ),
+                    );
+                }
+            }
+        })
+        .on_document_title_changed(move |webview, title| {
+            let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+            emit_page_lifecycle(
+                &webview,
+                page_lifecycle_payload(page_id, PageLifecyclePhase::Title, url, title, false),
+            );
         });
 
     let webview = window

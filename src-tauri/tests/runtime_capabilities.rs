@@ -112,3 +112,49 @@ fn reports_require_a_page_webview_and_an_allowed_document() {
         );
     }
 }
+
+#[test]
+fn page_lifecycle_listen_is_main_webview_only() {
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    for command in ["plugin:event|listen", "plugin:event|unlisten"] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &Origin::Local)
+                .is_some(),
+            "main webview lost {command}"
+        );
+        for origin in [
+            Origin::Local,
+            remote("about:blank"),
+            remote("https://example.com/"),
+            remote("http://example.com/"),
+        ] {
+            assert!(
+                authority
+                    .resolve_access(command, "main", "page-runtime-1", &origin)
+                    .is_none(),
+                "page webview gained {command} from {origin}"
+            );
+        }
+    }
+    for command in ["plugin:event|emit", "plugin:event|emit_to"] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &Origin::Local)
+                .is_none(),
+            "main webview gained {command}"
+        );
+        assert!(
+            authority
+                .resolve_access(
+                    command,
+                    "main",
+                    "page-runtime-1",
+                    &remote("https://example.com/")
+                )
+                .is_none(),
+            "page webview gained {command}"
+        );
+    }
+}
