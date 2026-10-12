@@ -708,6 +708,16 @@ impl BrowserRuntimeRegistry {
         }
     }
 
+    /// Netguard allowed a new hop. A refusal recorded for an earlier hop
+    /// belongs to that navigation, so it is cleared here instead of being
+    /// reported by the next wait after this load finishes.
+    pub fn begin_allowed_navigation(&self, page_id: usize) {
+        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
+            page.navigation_cancel = None;
+            page.loading = true;
+        }
+    }
+
     pub fn clear_navigation_cancel(&self, page_id: usize) {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.navigation_cancel = None;
@@ -1029,6 +1039,38 @@ mod response_tests {
                 .expect("finished load");
         });
     }
+
+    #[test]
+    fn allowed_navigation_clears_an_earlier_refusal() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = super::BrowserRuntimeRegistry::default();
+            registry.register_page(5, "page-runtime-5".into());
+            // A page-initiated hop is refused while nobody is waiting.
+            registry.cancel_navigation(5, "Refusing to navigate to disallowed scheme 'file:'");
+            // The next hop is allowed and finishes; its wait must not read the old refusal.
+            registry.begin_allowed_navigation(5);
+            registry.finish_loading(5);
+            super::wait_for_page_ready(&registry, 5, 500)
+                .await
+                .expect("allowed load after an earlier refusal");
+
+            // A refusal during the current load is still reported.
+            registry.begin_allowed_navigation(5);
+            registry.cancel_navigation(5, "Refusing to navigate to disallowed scheme 'file:'");
+            registry.finish_loading(5);
+            let error = super::wait_for_page_ready(&registry, 5, 500)
+                .await
+                .expect_err("refused redirect");
+            assert!(
+                error.contains("disallowed scheme"),
+                "unexpected wait error: {error}"
+            );
+        });
+    }
 }
 
 #[async_trait]
@@ -1223,7 +1265,7 @@ pub fn create_runtime_page(
                 registry_for_nav.cancel_navigation(page_id, reason.to_string());
                 return false;
             }
-            registry_for_nav.set_loading(page_id, true);
+            registry_for_nav.begin_allowed_navigation(page_id);
             true
         })
         .on_page_load(move |_webview, payload| match payload.event() {
