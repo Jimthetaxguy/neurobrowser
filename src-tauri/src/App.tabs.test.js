@@ -40,6 +40,7 @@ async function withApp(check, {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const calls = [];
+  const loadGenerations = [];
   let nextPage = 0;
   const hostListeners = new Set();
   const adapter = {
@@ -52,12 +53,14 @@ async function withApp(check, {
       calls.push(["close", session, page]);
       if (closeFails) throw new Error("Host refused close");
     },
-    navigate: async (session, page, url) => {
+    navigate: async (session, page, url, loadGeneration) => {
       calls.push(["navigate", session, page, url]);
+      if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
       if (navigateFails) throw new Error("Host refused navigation");
     },
-    browserAction: async (command, session, page) => {
+    browserAction: async (command, session, page, loadGeneration) => {
       calls.push(["browser", command, session, page]);
+      if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
       if (command === "browser_reload" && reloadUnconfirmed) {
         throw new Error(
           "Reload dispatched; page readiness is unconfirmed: Timed out waiting for page 0 to finish loading. Do not repeat the reload automatically; inspect the page."
@@ -140,7 +143,6 @@ async function withApp(check, {
   try {
     await act(async () => { root.render(createElement(App, { adapter, lane })); });
     await check({ calls, click, dispatch, document, goTo, keydown, loadGenerations, toolbar });
-    await check({ calls, click, dispatch, document, goTo, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();

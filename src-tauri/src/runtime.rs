@@ -1228,7 +1228,6 @@ mod response_tests {
         )
         .is_none());
 
-    fn allowed_navigation_clears_an_earlier_refusal() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -1262,6 +1261,15 @@ mod response_tests {
         )
         .expect("later allowed hop");
         assert_eq!(allowed.phase, super::PageLifecyclePhase::Finished);
+    }
+
+    #[test]
+    fn allowed_navigation_clears_an_earlier_refusal() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
             let registry = super::BrowserRuntimeRegistry::default();
             registry.register_page(5, "page-runtime-5".into());
             // A page-initiated hop is refused while nobody is waiting.
