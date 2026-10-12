@@ -235,7 +235,7 @@ Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
 |---|---|---|
 | `ReadOnly` | `Read`, `Wait`, `Scroll` | `Block`, including `Navigate` |
 | `Assisted` | `Read`, `Wait`, `Scroll`, `Navigate` that is not cross-domain; a hostless current page (`about:blank`, empty URL) is not cross-domain | `RequireApproval` |
-| `HighAutonomy` | remaining non-high-impact actions | submit / purchase / auth / upload / message / destructive require approval |
+| `HighAutonomy` | remaining non-high-impact actions | submit / purchase / auth / upload / message / destructive require approval. Tools with `ToolRisk.externally_visible` (for example `click_target`) still need approval first, while the CSS `click` tool does not. |
 
 This table applies only after the common gates. Denied tools/domains, off-list
 domains, unsafe navigation schemes, and detected prompt injection block first.
