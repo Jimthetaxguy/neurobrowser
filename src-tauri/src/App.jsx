@@ -39,15 +39,6 @@ const APPKIT_ACTION_STATUS = {
   browser_reload: "Reloading…",
 };
 
-function appKitSnapshotApplies(loadRef, event) {
-  const load = loadRef.current;
-  if (load.blocked) return false;
-  if (!load.expecting) return true;
-  if (event?.loadGeneration !== load.epoch) return false;
-  loadRef.current = { epoch: load.epoch, expecting: false, blocked: false };
-  return true;
-}
-
 const TEXT_ENTRY_TYPES = new Set(["email", "number", "password", "search", "tel", "text", "url"]);
 
 function messageText(error) {
