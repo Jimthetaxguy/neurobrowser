@@ -2,6 +2,7 @@
 name = "neurobrowser-tauri"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 # Without this, `tauri-cli` (and the macOS bundler, which scans `src/bin/*.rs`
 # and ignores `required-features`) picks the first bin in cargo-metadata
 # order — which can be `neurobrowser-headless` — and bundles/launches that

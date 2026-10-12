@@ -2,6 +2,7 @@
 name = "neuro-memory"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 description = "Persistent page memory for NeuroBrowser"
 
 # Independent crate. Not a Cargo workspace member.

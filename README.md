@@ -102,3 +102,12 @@ not a `PageSnapshot`. It does not read a browser. Its migration requires
 attaching a real session/runtime, applying policy before tool execution, and
 testing that connection against real pages. Until then use the Tauri runtime
 for interactive browser work.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
