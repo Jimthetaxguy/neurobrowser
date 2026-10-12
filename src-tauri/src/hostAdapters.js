@@ -1,4 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+import { bindPageLifecycle } from "./nativePageEvents.js";
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message;
@@ -13,7 +15,7 @@ function postToAppKit(command, payload = {}) {
   handler.postMessage({ command, payload });
 }
 
-export function createTauriHostAdapter() {
+export function createTauriHostAdapter({ listen = tauriListen } = {}) {
   const invoke = (command, payload = {}) => {
     if (!window.__TAURI_INTERNALS__) {
       throw new Error("Tauri IPC bridge is unavailable. Run this app through the Tauri desktop runtime.");
@@ -76,6 +78,9 @@ export function createTauriHostAdapter() {
     },
     async setProvider(provider) {
       return invoke("set_provider", { provider });
+    },
+    onPageLifecycle(callback) {
+      return bindPageLifecycle(listen, callback);
     },
     async searchLocalMemory(query, limit = 8) {
       return invoke("search_local_memory", { query, limit });

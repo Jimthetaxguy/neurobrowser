@@ -58,6 +58,45 @@ textarea {
   padding: 12px;
 }
 
+.location {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.location:has(.security-indicator) {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.location .url-bar {
+  min-width: 0;
+}
+
+.security-indicator {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.security-indicator.insecure {
+  color: #ffb2a0;
+}
+
+.security-indicator.secure {
+  color: #9ddeb6;
+}
+
+.security-lock {
+  display: block;
+  height: 16px;
+  width: 16px;
+}
+
 .brand {
   align-items: center;
   display: flex;
@@ -319,7 +358,7 @@ textarea {
   border: 1px solid transparent;
   border-radius: 999px;
   color: var(--text);
-  cursor: pointer;
+  cursor: grab;
   display: inline-flex;
   gap: 10px;
   min-width: 96px;
@@ -329,6 +368,15 @@ textarea {
 .tab.active {
   background: rgba(255, 91, 91, 0.18);
   border-color: rgba(255, 165, 82, 0.7);
+}
+
+.tab.dragging {
+  opacity: 0.55;
+}
+
+.tab.drop-target {
+  outline: 1px dashed rgba(255, 165, 82, 0.9);
+  outline-offset: 2px;
 }
 
 .tab-title {
@@ -574,39 +622,39 @@ main {
   padding: 10px 18px;
 }
 
-.loading-overlay {
-  align-items: center;
-  background: rgba(10, 15, 28, 0.55);
-  backdrop-filter: blur(8px);
-  display: flex;
-  inset: 0;
-  justify-content: center;
+.status-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.load-progress {
+  background: rgba(255, 165, 82, 0.2);
+  height: 3px;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
   position: fixed;
-  z-index: 1000;
+  right: 0;
+  top: 0;
+  z-index: 40;
 }
 
-.loading-card {
-  background: rgba(11, 18, 33, 0.94);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 26px 30px;
-  text-align: center;
-  width: min(380px, calc(100vw - 48px));
+.load-progress::after {
+  animation: load-progress 1s ease-in-out infinite;
+  background: var(--accent-2);
+  content: "";
+  display: block;
+  height: 100%;
+  width: 35%;
 }
 
-.spinner {
-  animation: spin 1s linear infinite;
-  border: 3px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  border-top-color: var(--accent-2);
-  height: 28px;
-  margin: 0 auto 14px;
-  width: 28px;
-}
+@keyframes load-progress {
+  0% {
+    transform: translateX(-100%);
+  }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+  100% {
+    transform: translateX(320%);
   }
 }
 

@@ -23,6 +23,7 @@ after(async () => {
 async function withApp(check, {
   closeFails = false,
   navigateFails = false,
+  navigateError = "Host refused navigation",
   browserActionFails = false,
   snapshotFails = false,
   reloadUnconfirmed = false,
@@ -43,6 +44,7 @@ async function withApp(check, {
   const loadGenerations = [];
   let nextPage = 0;
   const hostListeners = new Set();
+  const lifecycleListeners = new Set();
   const adapter = {
     rendersPageInHost: false,
     createSession: async () => "session",
@@ -56,7 +58,7 @@ async function withApp(check, {
     navigate: async (session, page, url, loadGeneration) => {
       calls.push(["navigate", session, page, url]);
       if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
-      if (navigateFails) throw new Error("Host refused navigation");
+      if (navigateFails) throw new Error(navigateError);
     },
     browserAction: async (command, session, page, loadGeneration) => {
       calls.push(["browser", command, session, page]);
@@ -80,6 +82,10 @@ async function withApp(check, {
         link_count: page + 3,
       };
     },
+    onPageLifecycle(callback) {
+      lifecycleListeners.add(callback);
+      return () => lifecycleListeners.delete(callback);
+    },
     ...(lane === "appkit" ? {
       onHostEvent(callback) {
         hostListeners.add(callback);
@@ -90,6 +96,11 @@ async function withApp(check, {
   const dispatch = async (event) => {
     await act(async () => {
       for (const listener of hostListeners) listener(event);
+    });
+  };
+  const dispatchLifecycle = async (event) => {
+    await act(async () => {
+      for (const listener of lifecycleListeners) listener(event);
     });
   };
   const root = createRoot(document.getElementById("root"));
@@ -142,7 +153,7 @@ async function withApp(check, {
   };
   try {
     await act(async () => { root.render(createElement(App, { adapter, lane })); });
-    await check({ calls, click, dispatch, document, goTo, keydown, loadGenerations, toolbar });
+    await check({ calls, click, dispatch, dispatchLifecycle, document, goTo, keydown, loadGenerations, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();
@@ -610,6 +621,141 @@ test("history and tab chords still run from a button or select", async () => {
       ["snapshot", "session", 0],
     ]);
     assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 0");
+  });
+});
+
+test("a netguard refusal is shown on the status line", async () => {
+  const reason = "Refusing to fetch internal/loopback address (host '127.0.0.1')";
+  await withApp(async ({ calls, document, goTo }) => {
+    await goTo("http://127.0.0.1/");
+    assert.deepEqual(calls, [["navigate", "session", 0, "http://127.0.0.1/"]]);
+    assert.match(document.querySelector(".status-line").textContent, /Navigation failed: Refusing to fetch internal\/loopback address \(host '127\.0\.0\.1'\)/);
+    assert.equal(document.querySelector(".load-progress"), null);
+    assert.equal(document.querySelector(".loading-overlay"), null);
+  }, { navigateError: reason, navigateFails: true });
+});
+
+test("page lifecycle updates the address bar, tab title, security indicator, and progress bar", async () => {
+  await withApp(async ({ dispatchLifecycle, document }) => {
+    assert.equal(document.querySelector(".load-progress"), null);
+    assert.equal(document.querySelector("[data-security]"), null);
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "http://inpage.example/next",
+      title: "",
+    });
+    assert.equal(document.querySelector(".url-input").value, "http://inpage.example/next");
+    assert.equal(document.querySelector("[data-security='insecure']").textContent.trim(), "Not secure");
+    assert.ok(document.querySelector(".load-progress"));
+    assert.equal(document.querySelector(".loading-overlay"), null);
+    assert.equal(document.querySelector(".tab-title").textContent, "Tab 1");
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "title",
+      url: "http://inpage.example/next",
+      title: "In-page title",
+    });
+    assert.equal(document.querySelector(".tab-title").textContent, "In-page title");
+    assert.equal(document.querySelector(".url-input").value, "http://inpage.example/next");
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "finished",
+      url: "https://inpage.example/landed",
+      title: "",
+    });
+    assert.equal(document.querySelector(".load-progress"), null);
+    assert.equal(document.querySelector(".url-input").value, "https://inpage.example/landed");
+    assert.equal(document.querySelector(".tab-title").textContent, "In-page title");
+    assert.ok(document.querySelector("[data-security='secure'] svg"));
+    assert.equal(document.querySelector("[data-security='insecure']"), null);
+  });
+});
+
+test("an address draft survives lifecycle and a background tab keeps its own title", async () => {
+  await withApp(async ({ click, dispatchLifecycle, document }) => {
+    await click(document.querySelector(".header > button"));
+    await click(document.querySelector(".tab"));
+    const input = document.querySelector(".url-input");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      input.focus();
+      const tracker = input._valueTracker;
+      if (tracker) tracker.setValue("");
+      setter.call(input, "https://draft.example/keep");
+      input.dispatchEvent(new window.Event("keyup", { bubbles: true }));
+    });
+    assert.equal(input.value, "https://draft.example/keep");
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "http://replaced.example/",
+      title: "",
+    });
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "title",
+      url: "http://replaced.example/",
+      title: "Edited around",
+    });
+    await dispatchLifecycle({
+      pageId: 1,
+      phase: "title",
+      url: "https://other.example/",
+      title: "Background",
+    });
+    assert.equal(input.value, "https://draft.example/keep");
+    assert.ok(document.querySelector("[data-security='secure']"));
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Edited around");
+    assert.equal(document.querySelectorAll(".tab-title")[1].textContent, "Background");
+    assert.ok(document.querySelector(".load-progress"));
+
+    await act(async () => { input.blur(); });
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "finished",
+      url: "https://after-blur.example/",
+      title: "",
+    });
+    assert.equal(input.value, "https://after-blur.example/");
+    assert.equal(document.querySelector(".load-progress"), null);
+    assert.equal(document.querySelectorAll(".tab-title")[1].textContent, "Background");
+  });
+});
+
+async function dragTab(document, from, to) {
+  const tabs = [...document.querySelectorAll(".tab")];
+  const store = new Map();
+  const dataTransfer = {
+    effectAllowed: "move",
+    dropEffect: "none",
+    setData(type, value) { store.set(type, String(value)); },
+    getData(type) { return store.get(type) ?? ""; },
+  };
+  const fire = async (element, type) => {
+    const event = new window.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    await act(async () => { element.dispatchEvent(event); });
+  };
+  await fire(tabs[from], "dragstart");
+  await fire(tabs[to], "dragover");
+  await fire(tabs[to], "drop");
+  await fire(tabs[from], "dragend");
+}
+
+test("dragging a tab reorders the strip", async () => {
+  await withApp(async ({ click, document }) => {
+    await click(document.querySelector(".header > button"));
+    await click(document.querySelector(".header > button"));
+    assert.deepEqual([...document.querySelectorAll(".tab-title")].map((node) => node.textContent), ["Tab 1", "Tab 2", "Tab 3"]);
+    await dragTab(document, 0, 2);
+    assert.deepEqual([...document.querySelectorAll(".tab-title")].map((node) => node.textContent), ["Tab 2", "Tab 3", "Tab 1"]);
+    await dragTab(document, 2, 0);
+    assert.deepEqual([...document.querySelectorAll(".tab-title")].map((node) => node.textContent), ["Tab 1", "Tab 2", "Tab 3"]);
   });
 });
 
