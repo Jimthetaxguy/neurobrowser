@@ -3,6 +3,12 @@ import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { nativePageUpdates } from "./nativePageEvents.js";
+import {
+  createNativeNavigationState,
+  forgetNativePage,
+  nativeStatusUpdate,
+  notePanelNavigation,
+} from "./nativeNavigationState.js";
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -389,7 +395,7 @@ export default function App({ adapter, lane }) {
       text: "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
     },
   ]);
-  const hostLoadRef = useRef({ epoch: 0, expecting: false, blocked: false });
+  const nativeNavigationRef = useRef(createNativeNavigationState());
 
   const appendMessage = useCallback((role, text) => {
     const id = nextMessageId.current;
@@ -428,11 +434,10 @@ export default function App({ adapter, lane }) {
     return nextSnapshot;
   }, [adapter, currentPageId, sessionId, updateSnapshot]);
 
-  const beginHostLoad = useCallback(() => {
-    if (!compact) return undefined;
-    const epoch = hostLoadRef.current.epoch + 1;
-    hostLoadRef.current = { epoch, expecting: true, blocked: false };
-    return epoch;
+  // AppKit: the native host reports the outcome of this action as navigation,
+  // status, and snapshot events for the page.
+  const expectNativeNavigation = useCallback((pageId) => {
+    if (compact) notePanelNavigation(nativeNavigationRef.current, pageId);
   }, [compact]);
 
   // A completed navigation or toolbar action must not look failed merely because
@@ -445,9 +450,6 @@ export default function App({ adapter, lane }) {
       if (message.startsWith(RELOAD_UNCONFIRMED_STATUS)) {
         setStatus(message);
         return;
-      }
-      if (compact) {
-        hostLoadRef.current = { ...hostLoadRef.current, expecting: false, blocked: true };
       }
       setStatus(`${failureLabel}: ${message}`);
       return;
@@ -468,6 +470,9 @@ export default function App({ adapter, lane }) {
       setActivePageId(pageId);
       await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
+      // AppKit sends the selected tab's live state itself; a cached snapshot
+      // may belong to an earlier load.
+      if (compact) return;
       try {
         const nextSnapshot = await adapter.getPageSnapshot(sessionId, pageId);
         updateSnapshot(pageId, nextSnapshot);
@@ -475,7 +480,7 @@ export default function App({ adapter, lane }) {
         setStatus(`Page refresh failed: ${messageText(error)}`);
       }
     },
-    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
+    [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
   );
 
   const createNewTab = useCallback(async () => {
@@ -496,6 +501,7 @@ export default function App({ adapter, lane }) {
       if (tabs.length <= 1 || !sessionId) return;
       try {
         await adapter.closePage(sessionId, pageId);
+        forgetNativePage(nativeNavigationRef.current, pageId);
         const closingIndex = tabs.findIndex((tab) => tab.id === pageId);
         const nextTabs = tabs.filter((tab) => tab.id !== pageId);
         setTabs(nextTabs);
@@ -504,18 +510,20 @@ export default function App({ adapter, lane }) {
           setActivePageId(nextTab.id);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
-          try {
-            const nextSnapshot = await adapter.getPageSnapshot(sessionId, nextTab.id);
-            updateSnapshot(nextTab.id, nextSnapshot);
-          } catch (error) {
-            setStatus(`Page refresh failed: ${messageText(error)}`);
+          if (!compact) {
+            try {
+              const nextSnapshot = await adapter.getPageSnapshot(sessionId, nextTab.id);
+              updateSnapshot(nextTab.id, nextSnapshot);
+            } catch (error) {
+              setStatus(`Page refresh failed: ${messageText(error)}`);
+            }
           }
         }
       } catch (error) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
+    [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
 
   const navigateCurrentPage = useCallback(async (nextUrl) => {
@@ -525,29 +533,29 @@ export default function App({ adapter, lane }) {
 
     setStatus(`Navigating to ${rawUrl}`);
     setLoading(`Opening ${rawUrl}...`);
-    const loadGeneration = beginHostLoad();
+    expectNativeNavigation(currentPageId);
 
     try {
       await performPageAction(
-        () => adapter.navigate(sessionId, currentPageId, rawUrl, loadGeneration),
+        () => adapter.navigate(sessionId, currentPageId, rawUrl),
         "Navigation failed"
       );
     } finally {
       setLoading(null);
     }
-  }, [adapter, beginHostLoad, currentPageId, performPageAction, sessionId, url]);
+  }, [adapter, currentPageId, expectNativeNavigation, performPageAction, sessionId, url]);
 
   const runBrowserAction = useCallback(
     async (command) => {
       if (currentPageId == null || !sessionId) return;
       if (compact) setStatus(APPKIT_ACTION_STATUS[command] || "Working…");
-      const loadGeneration = beginHostLoad();
+      expectNativeNavigation(currentPageId);
       await performPageAction(
-        () => adapter.browserAction(command, sessionId, currentPageId, loadGeneration),
+        () => adapter.browserAction(command, sessionId, currentPageId),
         "Browser action failed"
       );
     },
-    [adapter, beginHostLoad, compact, currentPageId, performPageAction, sessionId]
+    [adapter, compact, currentPageId, expectNativeNavigation, performPageAction, sessionId]
   );
 
   const askAssistant = useCallback(async () => {
@@ -696,24 +704,13 @@ export default function App({ adapter, lane }) {
           setActivePageId(updates.activePageId);
           if ("url" in updates) setUrl(updates.url);
         }
-        if (updates.snapshot && appKitSnapshotApplies(hostLoadRef, event)) {
-          updateSnapshot(event.pageId, updates.snapshot);
-        }
-      }
-      if (event.type === "status") {
-        if (!compact) {
-          setStatus(event.message);
-        } else {
-          const load = hostLoadRef.current;
-          const generation = event.loadGeneration;
-          const stale = load.expecting && Number.isInteger(generation) && generation !== load.epoch;
-          if (!stale) {
-            if (load.expecting) {
-              hostLoadRef.current = { epoch: load.epoch, expecting: false, blocked: true };
-            }
-            setStatus(event.message);
-          }
-        }
+        // Status follows the active tab's newest WebKit navigation only.
+        const next = nativeStatusUpdate(nativeNavigationRef.current, event, currentPageIdRef.current);
+        if ("url" in next) setUrl(next.url);
+        if (next.snapshot) updateSnapshot(event.pageId, next.snapshot);
+        else if (next.status) setStatus(next.status);
+      } else if (event.type === "status") {
+        setStatus(event.message);
       }
     });
     return unsubscribe;
