@@ -40,7 +40,6 @@ async function withApp(check, {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const calls = [];
-  const loadGenerations = [];
   let nextPage = 0;
   const hostListeners = new Set();
   const adapter = {
@@ -53,14 +52,12 @@ async function withApp(check, {
       calls.push(["close", session, page]);
       if (closeFails) throw new Error("Host refused close");
     },
-    navigate: async (session, page, url, loadGeneration) => {
+    navigate: async (session, page, url) => {
       calls.push(["navigate", session, page, url]);
-      if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
       if (navigateFails) throw new Error("Host refused navigation");
     },
-    browserAction: async (command, session, page, loadGeneration) => {
+    browserAction: async (command, session, page) => {
       calls.push(["browser", command, session, page]);
-      if (Number.isInteger(loadGeneration)) loadGenerations.push(loadGeneration);
       if (command === "browser_reload" && reloadUnconfirmed) {
         throw new Error(
           "Reload dispatched; page readiness is unconfirmed: Timed out waiting for page 0 to finish loading. Do not repeat the reload automatically; inspect the page."
@@ -143,6 +140,7 @@ async function withApp(check, {
   try {
     await act(async () => { root.render(createElement(App, { adapter, lane })); });
     await check({ calls, click, dispatch, document, goTo, keydown, loadGenerations, toolbar });
+    await check({ calls, click, dispatch, document, goTo, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();
@@ -257,71 +255,127 @@ test("back, forward, and reload keep an action failure distinct from a page read
   }, { snapshotFails: true });
 });
 
-test("AppKit navigation keeps an in-flight status until a snapshot or rejection for that load", async () => {
-  await withApp(async ({ calls, dispatch, document, goTo, loadGenerations, toolbar }) => {
+const statusText = (document) => document.querySelector(".status-bar").textContent;
+
+test("AppKit panel navigation stays in flight until a newer native load reports", async () => {
+  await withApp(async ({ calls, dispatch, document, goTo, toolbar }) => {
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 1, url: "https://old.example/" });
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://old.example/", title: "Old title" },
+    });
+    assert.match(statusText(document), /Loaded: Old title/);
+
     await goTo("https://next.example");
     assert.equal(calls.some((call) => call[0] === "snapshot"), false);
-    let status = document.querySelector(".status-bar").textContent;
-    assert.match(status, /Navigating to https:\/\/next\.example/);
-    assert.doesNotMatch(status, /Loaded:/);
-    assert.equal(document.querySelector(".url-input").value, "https://next.example");
-    const firstGeneration = loadGenerations.at(-1);
-
+    assert.match(statusText(document), /Navigating to https:\/\/next\.example/);
+    // A late report from the load that was already finished does not settle the panel action.
     await dispatch({
-      type: "status",
-      message: "Only http and https URLs can be opened",
-      loadGeneration: firstGeneration,
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://old.example/", title: "Old title" },
     });
-    await dispatch({
-      type: "snapshot",
-      pageId: 0,
-      loadGeneration: firstGeneration,
-      snapshot: { url: "https://old.example", title: "Old title" },
-    });
-    status = document.querySelector(".status-bar").textContent;
-    assert.match(status, /Only http and https URLs can be opened/);
-    assert.doesNotMatch(status, /Loaded:/);
+    assert.match(statusText(document), /Navigating to https:\/\/next\.example/);
     assert.equal(document.querySelector(".url-input").value, "https://next.example");
 
-    await goTo("https://newer.example");
-    const newerGeneration = loadGenerations.at(-1);
-    assert.notEqual(newerGeneration, firstGeneration);
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 2, url: "https://next.example/" });
+    assert.match(statusText(document), /Loading https:\/\/next\.example\/…/);
     await dispatch({
-      type: "snapshot",
-      pageId: 0,
-      loadGeneration: firstGeneration,
-      snapshot: { url: "https://old.example", title: "Old title" },
+      type: "snapshot", pageId: 0, navigationId: 2, reason: "finish", loading: false,
+      snapshot: { url: "https://next.example/", title: "Next" },
     });
-    status = document.querySelector(".status-bar").textContent;
-    assert.match(status, /Navigating to https:\/\/newer\.example/);
-    assert.doesNotMatch(status, /Loaded: Old title/);
-    assert.equal(document.querySelector(".url-input").value, "https://newer.example");
+    assert.match(statusText(document), /Loaded: Next/);
+    assert.equal(document.querySelector(".url-input").value, "https://next.example/");
 
-    await dispatch({
-      type: "snapshot",
-      pageId: 0,
-      loadGeneration: newerGeneration,
-      snapshot: { url: "https://newer.example/", title: "Newer" },
-    });
-    status = document.querySelector(".status-bar").textContent;
-    assert.match(status, /Loaded: Newer/);
-    assert.equal(document.querySelector(".url-input").value, "https://newer.example/");
-
-    const beforeBack = calls.length;
     await toolbar("Back");
-    assert.equal(calls.slice(beforeBack).some((call) => call[0] === "snapshot"), false);
-    status = document.querySelector(".status-bar").textContent;
-    assert.match(status, /Going back…/);
-    assert.doesNotMatch(status, /Loaded:/);
+    assert.match(statusText(document), /Going back…/);
     await dispatch({
-      type: "snapshot",
-      pageId: 0,
-      loadGeneration: loadGenerations.at(-1) - 1,
-      snapshot: { url: "https://old.example", title: "Old title" },
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://old.example/", title: "Old title" },
     });
-    status = document.querySelector(".status-bar").textContent;
-    assert.match(status, /Going back…/);
-    assert.equal(document.querySelector(".url-input").value, "https://newer.example/");
+    assert.match(statusText(document), /Going back…/);
+    assert.equal(document.querySelector(".url-input").value, "https://next.example/");
+  }, { lane: "appkit" });
+});
+
+test("AppKit native loads update the panel after a rejected URL", async () => {
+  await withApp(async ({ dispatch, document, goTo }) => {
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 1, url: "https://old.example/" });
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://old.example/", title: "Old title" },
+    });
+    await goTo("ftp://files.example");
+    await dispatch({
+      type: "status", pageId: 0, navigationId: 1, message: "Only http and https URLs can be opened",
+    });
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://old.example/", title: "Old title" },
+    });
+    assert.match(statusText(document), /Only http and https URLs can be opened/);
+
+    // Native address bar, back/forward, or reload: a load the panel did not start.
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 2, url: "https://native.example/" });
+    assert.match(statusText(document), /Loading https:\/\/native\.example\/…/);
+    assert.equal(document.querySelector(".url-input").value, "https://native.example/");
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 2, reason: "finish", loading: false,
+      snapshot: { url: "https://native.example/", title: "Native" },
+    });
+    assert.match(statusText(document), /Loaded: Native/);
+
+    // A rejection on the native side, then a native tab selection of the same page.
+    await dispatch({
+      type: "status", pageId: 0, navigationId: 2, message: "Only http and https URLs can be opened",
+    });
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 2, reason: "select", loading: false,
+      snapshot: { url: "https://native.example/", title: "Native" },
+    });
+    assert.match(statusText(document), /Loaded: Native/);
+  }, { lane: "appkit" });
+});
+
+test("AppKit tab selection during a slow load does not report the old page as loaded", async () => {
+  await withApp(async ({ click, dispatch, document }) => {
+    await click(document.querySelector(".header > button"));
+    await click(document.querySelector(".tab"));
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 1, url: "https://first.example/" });
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://first.example/", title: "First" },
+    });
+    assert.match(statusText(document), /Loaded: First/);
+
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 2, url: "https://slow.example/" });
+    // Re-selecting the active tab (or switching away and back) while it loads.
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 2, reason: "select", loading: true,
+      snapshot: { url: "https://first.example/", title: "First" },
+    });
+    assert.match(statusText(document), /Loading/);
+    assert.doesNotMatch(statusText(document), /Loaded: First/);
+    // A selection snapshot taken before the newer load started is older and is dropped.
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "select", loading: false,
+      snapshot: { url: "https://first.example/", title: "First" },
+    });
+    assert.doesNotMatch(statusText(document), /Loaded: First/);
+    // A background tab's finished load does not touch the active tab's status.
+    await dispatch({ type: "navigation", pageId: 1, navigationId: 3, url: "https://background.example/" });
+    await dispatch({
+      type: "snapshot", pageId: 1, navigationId: 3, reason: "finish", loading: false,
+      snapshot: { url: "https://background.example/", title: "Background" },
+    });
+    await dispatch({ type: "status", pageId: 1, navigationId: 3, message: "Background failed" });
+    assert.match(statusText(document), /Loading/);
+    assert.equal(document.querySelector(".url-input").value, "https://slow.example/");
+
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 2, reason: "finish", loading: false,
+      snapshot: { url: "https://slow.example/", title: "Slow" },
+    });
+    assert.match(statusText(document), /Loaded: Slow/);
   }, { lane: "appkit" });
 });
 
