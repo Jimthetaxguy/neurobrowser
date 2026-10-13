@@ -1489,7 +1489,6 @@ pub fn create_runtime_page(
                 return false;
             }
             registry_for_nav.note_navigation_allowed(page_id);
-            registry_for_nav.set_loading(page_id, true);
             registry_for_nav.begin_allowed_navigation(page_id);
             true
         })
