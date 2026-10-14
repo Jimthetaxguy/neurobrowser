@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { bindContextCopy } from "./contextCopy.js";
 import { bindDownloads } from "./downloads.js";
 import { bindMenuCommand } from "./menuCommands.js";
 import { bindPageLifecycle, bindPageNewWindow } from "./nativePageEvents.js";
@@ -106,6 +107,9 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     },
     onMenuCommand(callback) {
       return bindMenuCommand(listen, callback);
+    },
+    onContextCopy(callback) {
+      return bindContextCopy(listen, callback);
     },
     async searchBrowsingHistory(query = "", limit = 8) {
       return invoke("search_browsing_history", { query, limit });

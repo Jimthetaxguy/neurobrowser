@@ -1,5 +1,8 @@
+mod context_menu;
 mod downloads;
 mod find_page;
+mod native_context_click;
+mod native_image_download;
 mod runtime;
 mod zoom;
 
@@ -16,9 +19,9 @@ use neurobrowser::{
 };
 use runtime::{
     blocked_popup_payload, close_runtime_page, create_runtime_page, emit_page_new_window,
-    hide_unbrowsed_runtime_page, page_id_from_runtime_label, reveal_runtime_page,
-    set_active_runtime_page, sync_runtime_viewport, BrowserRuntimeRegistry, BrowserViewport,
-    RuntimeReportPayload, TauriBrowserRuntime, POPUP_BLOCKED_REQUEST,
+    foreground_tab_payload, hide_unbrowsed_runtime_page, page_id_from_runtime_label,
+    reveal_runtime_page, set_active_runtime_page, sync_runtime_viewport, BrowserRuntimeRegistry,
+    BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime, POPUP_BLOCKED_REQUEST,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -48,6 +51,8 @@ struct AppState {
     zoom: Arc<zoom::SiteZoomMemory>,
     /// Which find-in-page match each page last showed.
     find: Arc<find_page::PageFind>,
+    /// The page hit under the context menu that is currently showing.
+    context_menu: context_menu::ContextMenuSession,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
 }
 
@@ -326,9 +331,32 @@ async fn create_page(
     })();
 
     if let Err(error) = result {
+        state.context_menu.forget_page(page.id);
+        native_context_click::forget(page.id);
         let _ = close_runtime_page(&app, state.runtimes.as_ref(), page.id);
         let _ = state.session_manager.close_page(&session_id, page.id);
         return Err(error);
+    }
+
+    let app_for_click = app.clone();
+    let runtime_id = page.runtime_id.clone();
+    let page_id = page.id;
+    if let Err(error) = app.run_on_main_thread(move || {
+        let Some(webview) = app_for_click.get_webview(&runtime_id) else {
+            return;
+        };
+        native_context_click::arm(
+            &webview,
+            page_id,
+            std::sync::Arc::new(move || {
+                app_for_click
+                    .state::<AppState>()
+                    .context_menu
+                    .note_native_click(page_id);
+            }),
+        );
+    }) {
+        tracing::warn!("could not arm the page context menu: {error}");
     }
 
     Ok(page.id)
@@ -619,6 +647,8 @@ fn close_page(
         .map_err(|e| e.to_string())?
         .retain(|_, pending| pending.session_id != session_id || pending.page_id != page_id);
     state.find.clear(page_id);
+    state.context_menu.forget_page(page_id);
+    native_context_click::forget(page_id);
     close_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 
@@ -753,6 +783,24 @@ fn browser_runtime_report(
     state: State<'_, AppState>,
     payload: RuntimeReportPayload,
 ) -> Result<(), String> {
+    if payload.request_id == context_menu::CONTEXT_MENU_REQUEST {
+        // Never accept a caller-supplied hit, even during a real right-click.
+        let caller = webview.clone();
+        return native_context_click::read_snapshot(&webview, move |result| {
+            let Some(body) = context_menu::context_snapshot_from_eval(&result) else {
+                return;
+            };
+            let app = caller.app_handle().clone();
+            let caller = caller.clone();
+            let _ = app.clone().run_on_main_thread(move || {
+                if let Err(error) =
+                    present_context_menu(&caller, app.state::<AppState>().inner(), Some(body))
+                {
+                    tracing::warn!("could not present context menu: {error}");
+                }
+            });
+        });
+    }
     if payload.request_id == POPUP_BLOCKED_REQUEST {
         let page_id = page_id_from_runtime_label(webview.label())
             .ok_or("Runtime report caller does not own this page")?;
@@ -772,6 +820,120 @@ fn browser_runtime_report(
         payload.payload,
         payload.error,
     )
+}
+
+fn present_context_menu(
+    webview: &tauri::Webview,
+    state: &AppState,
+    body: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let page_id = page_id_from_runtime_label(webview.label())
+        .ok_or("Runtime report caller does not own this page")?;
+    if state.runtimes.page_runtime_id(page_id).ok().as_deref() != Some(webview.label()) {
+        return Err("Runtime report caller does not own this page".into());
+    }
+    let page_url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+    let mut hit = context_menu::context_hit_from_report(&page_url, body.as_ref());
+    hit.page_id = page_id;
+    let window = webview.window();
+    let scale = window
+        .scale_factor()
+        .ok()
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .unwrap_or(1.0);
+    let size = webview.size().unwrap_or_default();
+    let (x, y) = context_menu::clamp_menu_point(
+        hit.x,
+        hit.y,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    );
+    hit.x = x;
+    hit.y = y;
+    let Some(menu_id) =
+        state
+            .context_menu
+            .try_open(page_id, state.runtimes.active_page(), hit.clone())
+    else {
+        return Ok(());
+    };
+    let menu = match context_menu::build_menu(&window, menu_id, &hit) {
+        Ok(menu) => menu,
+        Err(error) => {
+            state.context_menu.finish_showing(menu_id);
+            return Err(error.to_string());
+        }
+    };
+    let origin = webview.position().unwrap_or_default();
+    let position = tauri::PhysicalPosition::new(
+        origin.x as f64 + hit.x * scale,
+        origin.y as f64 + hit.y * scale,
+    );
+    let shown = window.popup_menu_at(&menu, position);
+    state.context_menu.finish_showing(menu_id);
+    shown.map_err(|error| error.to_string())
+}
+
+fn open_context_tab(app: &AppHandle, page_id: usize, url: &str) {
+    let Some(payload) = foreground_tab_payload(page_id, url) else {
+        return;
+    };
+    emit_page_new_window(app, &payload);
+}
+
+fn emit_context_copy(app: &AppHandle, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if let Err(error) = app.emit_to(
+        EventTarget::labeled(runtime::MAIN_WEBVIEW_LABEL),
+        context_menu::CONTEXT_COPY_EVENT,
+        context_menu::ContextCopy { text },
+    ) {
+        let event = context_menu::CONTEXT_COPY_EVENT;
+        tracing::warn!("failed to emit {event}: {error}");
+    }
+}
+
+fn save_context_image(app: &AppHandle, page_id: usize, url: &str) {
+    if neurobrowser::netguard::blocked_reason(url).is_some() {
+        return;
+    }
+    let runtime_id = {
+        let state = app.state::<AppState>();
+        state.runtimes.page_runtime_id(page_id).ok()
+    };
+    let Some(runtime_id) = runtime_id else {
+        return;
+    };
+    let Some(webview) = app.get_webview(&runtime_id) else {
+        return;
+    };
+    if let Err(error) = native_image_download::start(&webview, url) {
+        tracing::warn!("could not save image: {error}");
+    }
+}
+
+fn on_context_menu_item(app: &AppHandle, id: &str) -> bool {
+    if !context_menu::is_context_item(id) {
+        return false;
+    }
+    let Some(command) = app.state::<AppState>().context_menu.command(id) else {
+        return true;
+    };
+    match command {
+        context_menu::ContextCommand::OpenTab { page_id, url } => {
+            open_context_tab(app, page_id, &url);
+        }
+        context_menu::ContextCommand::Copy { text } => emit_context_copy(app, &text),
+        context_menu::ContextCommand::SaveImage { page_id, url } => {
+            save_context_image(app, page_id, &url);
+        }
+        context_menu::ContextCommand::Back => emit_menu_command(app, "back"),
+        context_menu::ContextCommand::Forward => emit_menu_command(app, "forward"),
+        context_menu::ContextCommand::Reload => emit_menu_command(app, "reload"),
+    }
+    true
 }
 
 fn normalize_and_guard_url(url: String) -> Result<String, String> {
@@ -1430,6 +1592,9 @@ fn install_app_menu(app: &tauri::App, runtimes: &BrowserRuntimeRegistry) -> taur
     }));
     handle.set_menu(menu)?;
     handle.on_menu_event(|app, event| {
+        if on_context_menu_item(app, event.id().as_ref()) {
+            return;
+        }
         if let Some(command) = menu_command(event.id().as_ref()) {
             emit_menu_command(app, command);
         }
@@ -1480,6 +1645,7 @@ fn main() {
                 downloads: Arc::new(DownloadBook::default()),
                 zoom,
                 find: Arc::new(find_page::PageFind::default()),
+                context_menu: context_menu::ContextMenuSession::default(),
                 pending_approvals: Mutex::new(HashMap::new()),
             });
             Ok(())
@@ -1561,6 +1727,25 @@ mod tests {
             "reopen closed tab is not a menu accelerator"
         );
         assert_eq!(menu_command("reopen-closed-tab"), None);
+        for action in [
+            "open-link",
+            "copy-link",
+            "open-image",
+            "save-image",
+            "copy-image",
+            "copy-selection",
+            "search-selection",
+            "back",
+            "forward",
+            "reload",
+        ] {
+            let context_item = super::context_menu::item_id(4, action);
+            assert_eq!(
+                menu_command(&context_item),
+                None,
+                "{context_item} is not an application menu command"
+            );
+        }
         for edit in [
             "undo",
             "redo",

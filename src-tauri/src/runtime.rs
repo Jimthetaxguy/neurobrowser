@@ -657,6 +657,99 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   window.open = shellOpen;
   if (typeof Window === 'function' && Window.prototype) Window.prototype.open = shellOpen;
 
+  // Only this document-start closure can write a hit. IPC reports merely wake
+  // the host, which reads the snapshot via native evaluation completion.
+  // Pages can drain it (deny their own menu), but cannot replace its contents.
+  const stringifyContext = JSON.stringify.bind(JSON);
+  const contextClock = performance.now.bind(performance);
+  // Independent of native-click freshness: iframe clicks do not bubble here.
+  const contextLifetimeMs = 400;
+  const contextHits = new WeakMap();
+  const rememberContext = contextHits.set.bind(contextHits);
+  const readContext = contextHits.get.bind(contextHits);
+  const deleteContext = contextHits.delete.bind(contextHits);
+  const readSelection = window.getSelection.bind(window);
+  const selectionString = Function.prototype.call.bind(Selection.prototype.toString);
+  const closestContext = Function.prototype.call.bind(Element.prototype.closest);
+  const contextTarget = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Event.prototype, 'target').get);
+  const linkHref = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'href').get);
+  const imageSrc = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').get);
+  const imageCurrentSrc = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'currentSrc').get);
+  const contextX = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientX').get);
+  const contextY = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientY').get);
+  let pendingContext = null;
+  // A later click must never consume a snapshot left by an earlier event.
+  window.addEventListener('mousedown', (event) => {
+    if (trustedClick(event)) pendingContext = null;
+  }, true);
+  Object.defineProperty(window, '__NEUROBROWSER_TAKE_CONTEXT__', {
+    value: () => {
+      const hit = pendingContext;
+      pendingContext = null;
+      if (!hit) return null;
+      const age = contextClock() - hit.at;
+      return age >= 0 && age <= contextLifetimeMs ? hit.text : null;
+    }, writable: false, configurable: false
+  });
+
+  const contextNodeType = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType').get);
+  const contextParent = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype, 'parentElement').get);
+  const contextTag = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Element.prototype, 'tagName').get);
+  const contextCanceled = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Event.prototype, 'defaultPrevented').get);
+  const contextTrim = Function.prototype.call.bind(String.prototype.trim);
+  const contextSlice = Function.prototype.call.bind(String.prototype.slice);
+  const inputGetters = ['type', 'value', 'selectionStart', 'selectionEnd'].map(key =>
+    Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, key).get));
+  const areaGetters = ['type', 'value', 'selectionStart', 'selectionEnd'].map(key =>
+    Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, key).get));
+  const fieldSelection = (node) => {
+    if (!node || contextNodeType(node) !== 1) return '';
+    const tag = contextTag(node);
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') return '';
+    const getters = tag === 'INPUT' ? inputGetters : areaGetters;
+    const type = getters[0](node);
+    if (type === 'password' || type === 'hidden' || type === 'file') return '';
+    const start = getters[2](node);
+    const end = getters[3](node);
+    if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return '';
+    return contextSlice(contextTrim(contextSlice(getters[1](node), start, end)), 0, 2000);
+  };
+  // Capture before page handlers can replace DOM methods or change the target.
+  window.addEventListener('contextmenu', (event) => {
+    if (!trustedClick(event)) return;
+    pendingContext = null;
+    const capturedAt = contextClock();
+    const target = contextTarget(event);
+    const element = target && (contextNodeType(target) === 1 ? target : contextParent(target));
+    const link = element && closestContext(element, 'a[href]');
+    const image = element && closestContext(element, 'img');
+    const fieldType = element && contextTag(element) === 'INPUT' ? inputGetters[0](element) : '';
+    const excludedField = fieldType === 'password' || fieldType === 'hidden' || fieldType === 'file';
+    let selection = fieldSelection(element);
+    if (!selection && !excludedField) {
+      const selected = readSelection();
+      selection = selected ? contextSlice(contextTrim(selectionString(selected)), 0, 2000) : '';
+    }
+    rememberContext(event, { __proto__: null, at: capturedAt, text: stringifyContext({
+      __proto__: null,
+      linkUrl: link ? linkHref(link) : '',
+      imageUrl: image ? imageCurrentSrc(image) || imageSrc(image) : '',
+      selection,
+      x: contextX(event), y: contextY(event)
+    }) });
+  }, true);
+  window.addEventListener('contextmenu', (event) => {
+    const hit = readContext(event);
+    deleteContext(event);
+    if (!hit || contextCanceled(event) || typeof invoke !== 'function') return;
+    event.preventDefault();
+    pendingContext = hit;
+    const notice = invoke('browser_runtime_report', {
+      payload: { page_id: 0, request_id: 'context-menu', payload: null, error: null }
+    });
+    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
+  }, false);
+
   Object.defineProperty(window, '__NEUROBROWSER_RUNTIME__', {
     value: Object.freeze(runtime), writable: false, configurable: false
   });
@@ -1384,6 +1477,20 @@ pub fn page_new_window_payload(page_id: usize, raw_url: &str) -> Option<PageNewW
         page_id,
         url,
         disposition: request.disposition,
+    })
+}
+
+/// A context-menu open. The address is not parsed as a new-window carrier,
+/// so a page cannot hide a disposition inside the link it asked to open.
+pub fn foreground_tab_payload(page_id: usize, url: &str) -> Option<PageNewWindowPayload> {
+    let url = match classify_popup_target(url) {
+        PopupTarget::Allowed(url) => url,
+        PopupTarget::Blank | PopupTarget::Refused => return None,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: NewWindowDisposition::Foreground,
     })
 }
 
@@ -2319,7 +2426,23 @@ mod response_tests {
         assert!(super::RUNTIME_INIT_SCRIPT.contains(super::NEW_WINDOW_CARRIER_HOST));
         assert!(super::RUNTIME_INIT_SCRIPT.contains(super::POPUP_BLOCKED_REQUEST));
         assert!(super::RUNTIME_INIT_SCRIPT.contains("browser_runtime_report"));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(crate::context_menu::CONTEXT_MENU_REQUEST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains("__NEUROBROWSER_TAKE_CONTEXT__"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("savePath"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("showSaveFilePicker"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("open_popup"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("create_popup"));
+        let image =
+            super::foreground_tab_payload(3, "https://8.8.8.8/pic.png").expect("public image");
+        assert_eq!(image.page_id, 3);
+        assert_eq!(image.url, "https://8.8.8.8/pic.png");
+        assert_eq!(image.disposition, super::NewWindowDisposition::Foreground);
+        assert!(super::foreground_tab_payload(3, "file:///tmp/pic.png").is_none());
+        assert!(super::foreground_tab_payload(3, "javascript:alert(1)").is_none());
+        assert!(super::foreground_tab_payload(
+            3,
+            "https://new-window.neurobrowser.invalid/?disposition=background&url=https://8.8.8.8/"
+        )
+        .is_none());
     }
 }

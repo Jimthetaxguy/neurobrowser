@@ -388,7 +388,7 @@ test("snapshot html drops noscript content entirely when it arrives as one raw t
   }
 });
 
-function installPopupPage(html, { gesture = true } = {}) {
+function installPopupPage(html, { gesture = true, beforeInstall } = {}) {
   const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
     url: "https://example.test/page",
     runScripts: "outside-only",
@@ -409,6 +409,7 @@ function installPopupPage(html, { gesture = true } = {}) {
     configurable: true,
     value: { isActive: gesture },
   });
+  if (beforeInstall) beforeInstall(dom.window);
   dom.window.eval(runtimeInitScript);
   return { dom, opened, reports };
 }
@@ -465,6 +466,183 @@ test("window.open without a user gesture is reported and does not open", () => {
   assert.equal(reports[0].command, "browser_runtime_report");
   assert.equal(reports[0].args.payload.request_id, "popup-blocked");
   assert.equal(reports[0].args.payload.payload.url, "https://example.com/popup");
+  dom.window.close();
+});
+
+test("a trusted right-click reports the link, image, and selection without a file path", () => {
+  const { dom, reports } = installPopupPage(
+    '<a id="link" href="/next"><img id="pic" src="/pic.png" alt=""></a><textarea id="box">hello cats</textarea>',
+  );
+  const box = dom.window.document.getElementById("box");
+  box.focus();
+  box.setSelectionRange(6, 10);
+  const event = trustedMouse(dom, "contextmenu", { button: 2, clientX: 18, clientY: 24 });
+  box.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].command, "browser_runtime_report");
+  assert.equal(reports[0].args.payload.request_id, "context-menu");
+  const payload = JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__());
+  assert.equal(payload.linkUrl, "");
+  assert.equal(payload.imageUrl, "");
+  assert.equal(payload.selection, "cats");
+  assert.equal(payload.x, 18);
+  assert.equal(payload.y, 24);
+  assert.equal("path" in payload, false);
+  assert.equal("destination" in payload, false);
+  assert.equal("filename" in payload, false);
+  assert.equal("token" in payload, false);
+  assert.equal("nonce" in payload, false);
+
+  const pic = dom.window.document.getElementById("pic");
+  pic.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2, clientX: 4, clientY: 5 }));
+  const hit = JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__());
+  assert.equal(hit.linkUrl, "https://example.test/next");
+  assert.equal(hit.imageUrl, "https://example.test/pic.png");
+  assert.equal("path" in hit, false);
+  dom.window.close();
+});
+
+test("a script-dispatched context menu does not open the shell menu", () => {
+  const { dom, reports } = installPopupPage('<a href="https://example.com/next">Next</a>');
+  const link = dom.window.document.querySelector("a");
+  const event = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
+  assert.equal(event.isTrusted, false);
+  link.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(reports.length, 0);
+  dom.window.close();
+});
+
+test("a page that prevents the context menu keeps it", () => {
+  const { dom, reports } = installPopupPage('<a href="https://example.com/next">Next</a>');
+  dom.window.document.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+  const link = dom.window.document.querySelector("a");
+  const event = trustedMouse(dom, "contextmenu", { button: 2 });
+  link.dispatchEvent(event);
+  assert.equal(reports.length, 0);
+  dom.window.close();
+});
+
+test("password and file fields are not copied into the context menu", () => {
+  const { dom, reports } = installPopupPage(
+    '<p id="selected">do not copy</p><input id="secret" type="password" value="hunter2"><input id="file" type="file">',
+  );
+  const range = dom.window.document.createRange();
+  range.selectNodeContents(dom.window.document.getElementById("selected"));
+  dom.window.getSelection().addRange(range);
+  const secret = dom.window.document.getElementById("secret");
+  secret.focus();
+  secret.setSelectionRange(0, 7);
+  secret.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).selection, "");
+  const file = dom.window.document.getElementById("file");
+  file.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).selection, "");
+  assert.equal(JSON.stringify(reports[1].args.payload.payload).includes("hunter2"), false);
+  dom.window.close();
+});
+
+test("context IPC has no targets and snapshots cannot be forged or replayed", () => {
+  const { dom, reports } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  const take = dom.window.__NEUROBROWSER_TAKE_CONTEXT__;
+  assert.equal(take(), null);
+  assert.throws(() => { dom.window.__NEUROBROWSER_TAKE_CONTEXT__ = () => '{"linkUrl":"https://evil.test"}'; }, TypeError);
+  const link = dom.window.document.getElementById("link");
+  link.addEventListener("contextmenu", () => { link.href = "https://evil.test/swapped"; });
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports[0].args.payload.payload, null);
+  assert.equal(JSON.parse(take()).linkUrl, "https://example.com/real");
+  assert.equal(take(), null);
+  assert.equal(dom.window.__NEUROBROWSER_SAVE_IMAGE__, undefined);
+  dom.window.close();
+});
+
+test("context snapshots resist page prototype poisoning", () => {
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  const link = dom.window.document.getElementById("link");
+  const forged = { linkUrl: "https://evil.test/forged" };
+  dom.window.Element.prototype.closest = () => dom.window.document.createElement("a");
+  dom.window.WeakMap.prototype.get = () => JSON.stringify(forged);
+  dom.window.WeakMap.prototype.set = () => {};
+  dom.window.JSON.stringify = () => JSON.stringify(forged);
+  dom.window.Object.prototype.toJSON = () => forged;
+  Object.defineProperty(dom.window.HTMLAnchorElement.prototype, "href", { get: () => "https://evil.test/forged" });
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).linkUrl, "https://example.com/real");
+  dom.window.close();
+});
+
+test("unread context snapshots expire despite later iframe clicks and clock poisoning", () => {
+  let now = 100;
+  const { dom, reports } = installPopupPage('<a id="link" href="https://example.com/old">Old</a><iframe></iframe>', {
+    beforeInstall: window => { window.performance.now = () => now; },
+  });
+  dom.window.document.getElementById("link").dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports.length, 1);
+  now = 501;
+  // Native click freshness can be renewed by a frame without a top-level event.
+  const frame = dom.window.document.querySelector("iframe").contentWindow;
+  frame.document.body.dispatchEvent(trustedMouse({ window: frame }, "contextmenu", { button: 2 }));
+  assert.equal(reports.length, 1, "iframe event must not clear or replace top-level snapshot");
+  // A page cannot extend the lifetime by replacing the clock after installation.
+  dom.window.performance.now = () => 100;
+  dom.window.__TAURI_INTERNALS__.invoke("browser_runtime_report", {
+    payload: { request_id: "context-menu", payload: { linkUrl: "https://evil.test" } }
+  });
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  now = 100;
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null, "expired read consumes stale data");
+  dom.window.close();
+});
+
+test("snapshot lifetime starts at capture before a slow page handler", () => {
+  let now = 100;
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>', {
+    beforeInstall: window => { window.performance.now = () => now; },
+  });
+  const link = dom.window.document.getElementById("link");
+  link.addEventListener("contextmenu", () => { now += 401; });
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  dom.window.close();
+});
+
+test("a context snapshot remains readable at the 400ms lifetime boundary", () => {
+  let now = 100;
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>', {
+    beforeInstall: window => { window.performance.now = () => now; },
+  });
+  dom.window.document.getElementById("link").dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  now = 500;
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).linkUrl, "https://example.com/real");
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  dom.window.close();
+});
+
+test("later canceled context event clears an earlier unread snapshot", () => {
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  const link = dom.window.document.getElementById("link");
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  dom.window.document.addEventListener("contextmenu", event => event.preventDefault());
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  dom.window.close();
+});
+
+test("canceled native context events cannot authorize a forged report", () => {
+  const { dom, reports } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  dom.window.document.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    dom.window.__TAURI_INTERNALS__.invoke("browser_runtime_report", {
+      payload: { request_id: "context-menu", payload: { linkUrl: "https://evil.test" } }
+    });
+  });
+  dom.window.document.getElementById("link").dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports.length, 1);
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
   dom.window.close();
 });
 

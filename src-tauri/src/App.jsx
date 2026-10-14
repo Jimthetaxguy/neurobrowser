@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
+import { writeClipboardText } from "./contextCopy.js";
 import { applyDownloadUpdate, downloadProgressText } from "./downloads.js";
 import { isBlankDocument } from "./historySuggestions.js";
 import { NewTabPage } from "./NewTabPage.jsx";
@@ -1084,6 +1085,15 @@ export default function App({ adapter, lane }) {
     if (typeof adapter.onDownload !== "function") return undefined;
     return adapter.onDownload((event) => {
       setDownloads((current) => applyDownloadUpdate(current, event));
+    });
+  }, [adapter]);
+
+  useEffect(() => {
+    if (typeof adapter.onContextCopy !== "function") return undefined;
+    return adapter.onContextCopy((text) => {
+      writeClipboardText(text).catch((error) => {
+        setStatus(`Could not copy: ${messageText(error)}`);
+      });
     });
   }, [adapter]);
 

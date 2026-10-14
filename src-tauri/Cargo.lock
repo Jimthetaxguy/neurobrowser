@@ -2187,9 +2187,16 @@ name = "neurobrowser-tauri"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "block2",
+ "gtk",
  "muda",
  "neuro-memory",
+ "javascriptcore-rs",
  "neurobrowser",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-web-kit",
  "serde",
  "serde_json",
  "tauri",
@@ -2198,6 +2205,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "webkit2gtk",
 ]
 
 [[package]]
