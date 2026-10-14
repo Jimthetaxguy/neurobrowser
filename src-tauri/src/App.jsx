@@ -693,7 +693,7 @@ export default function App({ adapter, lane }) {
       await syncBrowserViewportForPage(pageId);
       if (url) {
         setStatus(`Navigating to ${url}`);
-        setLoading(`Opening ${url}...`);
+        setLoading(true);
       } else {
         setStatus("New tab ready");
         if (!compact) document.querySelector(".location .url-input")?.focus();
@@ -764,7 +764,7 @@ export default function App({ adapter, lane }) {
         ? `Searching DuckDuckGo for ${destination.query}`
         : `Navigating to ${destination.url}`
     );
-    setLoading(`Opening ${destination.url}...`);
+    setLoading(true);
     expectNativeNavigation(currentPageId);
 
     try {

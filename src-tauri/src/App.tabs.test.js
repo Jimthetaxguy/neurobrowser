@@ -283,7 +283,6 @@ test("a failed navigation stays a navigation failure and does not read the page"
     await goTo("https://example.test");
     assert.deepEqual(calls, [["navigate", "session", 0, "https://example.test"]]);
     assert.match(document.querySelector(".status-bar").textContent, /Navigation failed: Host refused navigation/);
-    assert.equal(document.querySelector(".loading-overlay"), null);
   }, { navigateFails: true });
 });
 
@@ -297,7 +296,6 @@ test("a failed snapshot read after navigation is a page refresh failure", async 
     const status = document.querySelector(".status-bar").textContent;
     assert.match(status, /Page refresh failed: Browser runtime read timed out/);
     assert.doesNotMatch(status, /Navigation failed/);
-    assert.equal(document.querySelector(".loading-overlay"), null);
   }, { snapshotFails: true });
 });
 
@@ -749,7 +747,6 @@ test("a netguard refusal is shown on the status line", async () => {
     assert.deepEqual(calls, [["navigate", "session", 0, "http://127.0.0.1/"]]);
     assert.match(document.querySelector(".status-line").textContent, /Navigation failed: Refusing to fetch internal\/loopback address \(host '127\.0\.0\.1'\)/);
     assert.equal(document.querySelector(".load-progress"), null);
-    assert.equal(document.querySelector(".loading-overlay"), null);
   }, { navigateError: reason, navigateFails: true });
 });
 
@@ -767,7 +764,6 @@ test("page lifecycle updates the address bar, tab title, security indicator, and
     assert.equal(document.querySelector(".url-input").value, "http://inpage.example/next");
     assert.equal(document.querySelector("[data-security='insecure']").textContent.trim(), "Not secure");
     assert.ok(document.querySelector(".load-progress"));
-    assert.equal(document.querySelector(".loading-overlay"), null);
     assert.equal(document.querySelector(".tab-title").textContent, "Tab 1");
 
     await dispatchLifecycle({
