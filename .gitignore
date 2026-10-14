@@ -1,5 +1,6 @@
 # Rust generated files
 target/
+src-tauri/gen/schemas/linux-schema.json
 
 # IDE
 .idea/
