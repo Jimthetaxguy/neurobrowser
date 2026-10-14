@@ -387,6 +387,26 @@ fn recent_and_search_rank_by_last_visited_then_visit_count() {
 }
 
 #[test]
+fn get_reads_one_canonical_entry() {
+    let (_dir, store) = open_store();
+    let at = at_secs(1_700_000_000);
+    assert!(store.get("https://example.com/missing").is_none());
+    assert!(store.get("about:blank").is_none());
+    assert!(store.get("ftp://example.com/file").is_none());
+
+    store
+        .record_visit("HTTPS://Example.COM/Docs", "Docs", at)
+        .expect("record");
+    let entry = store.get("https://example.com/Docs").expect("canonical");
+    assert_eq!(entry.url, "https://example.com/Docs");
+    assert_eq!(entry.title, "Docs");
+    assert_eq!(
+        store.get("  https://example.com/Docs  ").unwrap().title,
+        "Docs"
+    );
+}
+
+#[test]
 fn clear_and_clear_since_drop_entries_by_last_visited() {
     let (dir, store) = open_store();
     let early = at_secs(1_000);

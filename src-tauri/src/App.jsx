@@ -1,10 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
+import { applyDownloadUpdate, downloadProgressText } from "./downloads.js";
+import { isBlankDocument } from "./historySuggestions.js";
+import { NewTabPage } from "./NewTabPage.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { classifyOmniboxInput } from "./omniboxInput.js";
 import { createMenuEchoGuard, numberedTabCommand } from "./menuCommands.js";
-import { moveTab, nativePageUpdates, pageLifecycleUpdates, securityState } from "./nativePageEvents.js";
+import { FindBar, chromeShortcut } from "./pageFind.js";
+import {
+  blockedPopupLabel,
+  focusAfterClose,
+  forgetBlockedPopups,
+  insertOpenedTab,
+  moveTab,
+  nativePageUpdates,
+  pageLifecycleUpdates,
+  pageNewWindowRequest,
+  rememberBlockedPopup,
+  securityState,
+  takeBlockedPopup,
+} from "./nativePageEvents.js";
 import {
   createNativeNavigationState,
   forgetNativePage,
@@ -110,6 +126,18 @@ function Message({ item }) {
   );
 }
 
+function PopupBlockedIndicator({ count, onDismiss, onOpen }) {
+  const label = blockedPopupLabel(count);
+  if (!label) return null;
+  return (
+    <span className="popup-blocked" role="status">
+      <span>{label}</span>
+      <button onClick={onOpen} type="button">Open</button>
+      <button aria-label="Dismiss blocked popup" onClick={onDismiss} type="button">×</button>
+    </span>
+  );
+}
+
 function SecurityIndicator({ url }) {
   const state = securityState(url);
   if (state === "secure") {
@@ -137,6 +165,48 @@ function SecurityIndicator({ url }) {
 function LoadProgress({ active }) {
   if (!active) return null;
   return <div aria-label="Loading page" className="load-progress" role="progressbar" />;
+}
+
+function Downloads({ items, onOpen, onShow }) {
+  if (!items.length) return null;
+  return (
+    <section aria-label="Downloads" className="downloads">
+      <div className="downloads-title">Downloads</div>
+      <ul>
+        {items.map((item) => {
+          const progress = item.phase === "progress" ? downloadProgressText(item) : "";
+          const percent = progress.endsWith("%") ? Number(progress.slice(0, -1)) : null;
+          return (
+            <li data-phase={item.phase} key={item.id}>
+              <span className="download-name" title={item.url}>{item.filename}</span>
+              {item.phase === "progress" ? (
+                <span
+                  aria-label={`Downloading ${item.filename}`}
+                  aria-valuemax={percent == null ? undefined : 100}
+                  aria-valuemin={percent == null ? undefined : 0}
+                  aria-valuenow={percent == null ? undefined : percent}
+                  className={`download-progress${percent == null ? " indeterminate" : ""}`}
+                  role="progressbar"
+                >
+                  {progress}
+                </span>
+              ) : null}
+              {item.phase === "done" ? (
+                <>
+                  <span className="download-state">Done</span>
+                  <button onClick={() => onOpen(item.id)} type="button">Open</button>
+                  <button onClick={() => onShow(item.id)} type="button">Show in folder</button>
+                </>
+              ) : null}
+              {item.phase === "failed" ? (
+                <span className="download-state">Failed{item.error ? `: ${item.error}` : ""}</span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 }
 
 function TabStrip({ tabs, currentPageId, onActivate, onClose, onReorder }) {
@@ -240,7 +310,7 @@ function StatsRow({ snapshot }) {
   );
 }
 
-function BrowserToolbar({ loading, onAction, onStop }) {
+function BrowserToolbar({ loading, onAction, onStop, zoomPercent }) {
   return (
     <div className="browser-toolbar">
       <button className="btn btn-secondary" onClick={() => onAction("browser_back")} type="button">
@@ -258,6 +328,9 @@ function BrowserToolbar({ loading, onAction, onStop }) {
           Reload
         </button>
       )}
+      {Number.isFinite(zoomPercent) ? (
+        <span aria-label={`Page zoom ${zoomPercent}%`} className="zoom-level">{zoomPercent}%</span>
+      ) : null}
     </div>
   );
 }
@@ -390,9 +463,12 @@ function ChatPanel({
 
 function Header({
   adapter,
+  blockedCount,
   compact,
+  onDismissBlocked,
   onNavigate,
   onNewTab,
+  onOpenBlocked,
   onStatus,
   policyMode,
   provider,
@@ -442,6 +518,7 @@ function Header({
           setUrl={setUrl}
           url={url}
         />
+        <PopupBlockedIndicator count={blockedCount} onDismiss={onDismissBlocked} onOpen={onOpenBlocked} />
       </div>
       <button className="btn btn-secondary" onClick={onNewTab} type="button">
         New Tab
@@ -462,6 +539,8 @@ export default function App({ adapter, lane }) {
     setCurrentPageId(pageId);
   }, []);
   const [tabs, setTabs] = useState([]);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const [url, setUrl] = useState("");
   const addressDirtyRef = useRef(false);
   const commandLoadToken = useRef(0);
@@ -482,6 +561,22 @@ export default function App({ adapter, lane }) {
   const [status, setStatus] = useState("Starting session...");
   const [loading, setLoading] = useState(null);
   const [pageLoading, setPageLoading] = useState(false);
+  const [blockedPopups, setBlockedPopups] = useState({});
+  const [downloads, setDownloads] = useState([]);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findHit, setFindHit] = useState({ total: 0, current: 0 });
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const findInputRef = useRef(null);
+  const findOpenRef = useRef(false);
+  const findQueryRef = useRef("");
+  const findToken = useRef(0);
+  findOpenRef.current = findOpen;
+  findQueryRef.current = findQuery;
+  const blockedPopupsRef = useRef({});
+  const sessionIdRef = useRef(null);
+  sessionIdRef.current = sessionId;
+  const popupQueue = useRef(Promise.resolve());
   const [prompt, setPrompt] = useState("");
   const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState([
@@ -506,7 +601,13 @@ export default function App({ adapter, lane }) {
     setUrlFromPage(nextSnapshot.url || "");
     setTabs((items) =>
       items.map((tab) =>
-        tab.id === pageId ? { ...tab, title: nextSnapshot.title || tab.title || "Untitled" } : tab
+        tab.id === pageId
+          ? {
+              ...tab,
+              title: nextSnapshot.title || tab.title || "Untitled",
+              url: typeof nextSnapshot.url === "string" ? nextSnapshot.url : tab.url,
+            }
+          : tab
       )
     );
     setStatus(nextSnapshot.title ? `Loaded: ${nextSnapshot.title}` : "Ready");
@@ -565,6 +666,8 @@ export default function App({ adapter, lane }) {
     async (pageId) => {
       if (pageId == null || !sessionId) return;
       setActivePageId(pageId);
+      const known = tabsRef.current.find((tab) => tab.id === pageId);
+      if (known && typeof known.url === "string") setUrlFromPage(known.url);
       await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
       // AppKit sends the selected tab's live state itself; a cached snapshot
@@ -576,22 +679,25 @@ export default function App({ adapter, lane }) {
       } catch (error) {
         setStatus(`Page refresh failed: ${messageText(error)}`);
       }
+      refreshZoomRef.current(pageId);
     },
-    [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
+    [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updateSnapshot]
   );
 
   const createNewTab = useCallback(async () => {
     if (!sessionId) return;
     try {
       const pageId = await adapter.createPage(sessionId);
-      setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}` }]);
+      setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}`, url: "" }]);
       setActivePageId(pageId);
+      setUrlFromPage("");
       await syncBrowserViewportForPage(pageId);
       setStatus("New tab ready");
+      if (!compact) document.querySelector(".location .url-input")?.focus();
     } catch (error) {
       setStatus(`New tab failed: ${messageText(error)}`);
     }
-  }, [adapter, sessionId, setActivePageId, syncBrowserViewportForPage]);
+  }, [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage]);
 
   const closeTab = useCallback(
     async (pageId) => {
@@ -599,12 +705,18 @@ export default function App({ adapter, lane }) {
       try {
         await adapter.closePage(sessionId, pageId);
         forgetNativePage(nativeNavigationRef.current, pageId);
-        const closingIndex = tabs.findIndex((tab) => tab.id === pageId);
+        const nextId = focusAfterClose(tabs, pageId, currentPageId);
         const nextTabs = tabs.filter((tab) => tab.id !== pageId);
         setTabs(nextTabs);
-        const nextTab = nextTabs[closingIndex] || nextTabs[closingIndex - 1] || nextTabs[0];
+        setBlockedPopups((current) => {
+          const next = forgetBlockedPopups(current, pageId);
+          blockedPopupsRef.current = next;
+          return next;
+        });
+        const nextTab = nextTabs.find((tab) => tab.id === nextId);
         if (nextTab) {
           setActivePageId(nextTab.id);
+          if (typeof nextTab.url === "string") setUrlFromPage(nextTab.url);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
           if (!compact) {
@@ -620,8 +732,78 @@ export default function App({ adapter, lane }) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
+    [adapter, compact, currentPageId, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
+
+  const openFromOpener = useCallback(async (openerId, url, background) => {
+    const activeSession = sessionIdRef.current;
+    if (!activeSession) return;
+    let pageId;
+    try {
+      pageId = await adapter.createPage(activeSession, background ? { activate: false } : undefined);
+    } catch (error) {
+      setStatus(`New tab failed: ${messageText(error)}`);
+      return;
+    }
+    setTabs((items) => insertOpenedTab(items, openerId, pageId, url));
+    if (!background) {
+      setActivePageId(pageId);
+      setUrlFromPage(url || "");
+      await syncBrowserViewportForPage(pageId);
+      if (url) {
+        setStatus(`Navigating to ${url}`);
+        setLoading(true);
+      } else {
+        setStatus("New tab ready");
+        if (!compact) document.querySelector(".location .url-input")?.focus();
+      }
+    } else {
+      await syncBrowserViewportForPage(pageId);
+    }
+    if (!url) return;
+    try {
+      await adapter.navigate(activeSession, pageId, url);
+      if (!background && !compact) {
+        try {
+          const nextSnapshot = await adapter.getPageSnapshot(activeSession, pageId);
+          updateSnapshot(pageId, nextSnapshot);
+        } catch (error) {
+          setStatus(`Page refresh failed: ${messageText(error)}`);
+        }
+      }
+    } catch (error) {
+      setStatus(`Navigation failed: ${messageText(error)}`);
+    } finally {
+      if (!background) {
+        setLoading(null);
+        setPageLoading(false);
+      }
+    }
+  }, [adapter, compact, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updateSnapshot]);
+
+  const enqueuePopup = useCallback((job) => {
+    popupQueue.current = popupQueue.current.then(job, job);
+  }, []);
+
+  const openBlockedPopup = useCallback(() => {
+    const pageId = currentPageIdRef.current;
+    if (pageId == null) return;
+    const taken = takeBlockedPopup(blockedPopupsRef.current, pageId);
+    blockedPopupsRef.current = taken.popups;
+    setBlockedPopups(taken.popups);
+    if (taken.url == null) return;
+    enqueuePopup(() => openFromOpener(pageId, taken.url, false));
+  }, [enqueuePopup, openFromOpener]);
+
+  const dismissBlockedPopup = useCallback(() => {
+    const pageId = currentPageIdRef.current;
+    if (pageId == null) return;
+    setBlockedPopups((current) => {
+      const next = forgetBlockedPopups(current, pageId);
+      blockedPopupsRef.current = next;
+      return next;
+    });
+  }, []);
 
   const reorderTabs = useCallback((fromIndex, toIndex) => {
     setTabs((items) => moveTab(items, fromIndex, toIndex));
@@ -641,7 +823,7 @@ export default function App({ adapter, lane }) {
         ? `Searching DuckDuckGo for ${destination.query}`
         : `Navigating to ${destination.url}`
     );
-    setLoading(`Opening ${destination.url}...`);
+    setLoading(true);
     expectNativeNavigation(currentPageId);
 
     try {
@@ -792,8 +974,9 @@ export default function App({ adapter, lane }) {
         setSessionId(nextSessionId);
         const pageId = await adapter.createPage(nextSessionId);
         if (disposed) return;
-        setTabs([{ id: pageId, title: "Tab 1" }]);
+        setTabs([{ id: pageId, title: "Tab 1", url: "" }]);
         setActivePageId(pageId);
+        if (!compact) document.querySelector(".location .url-input")?.focus();
         if (!compact) {
           try {
             const policy = await adapter.getActionPolicy();
@@ -855,36 +1038,202 @@ export default function App({ adapter, lane }) {
       if (updates.loading === true) setPageLoading(true);
       if (updates.loading === false) setPageLoading(false);
       if (typeof updates.url === "string") setUrlFromPage(updates.url);
-      if (typeof updates.title === "string") {
-        const pageId = updates.pageId;
-        const title = updates.title;
-        setTabs((items) => items.map((tab) => (tab.id === pageId ? { ...tab, title } : tab)));
+      if (updates.phase === "finished" && updates.pageId === currentPageIdRef.current) {
+        refreshZoomRef.current(updates.pageId);
+      }
+      const pageId = updates.pageId;
+      const title = typeof updates.title === "string" ? updates.title : null;
+      const nextPageUrl = typeof event.url === "string" && event.url ? event.url : null;
+      if (title || nextPageUrl) {
+        setTabs((items) =>
+          items.map((tab) => {
+            if (tab.id !== pageId) return tab;
+            return {
+              ...tab,
+              ...(title ? { title } : {}),
+              ...(nextPageUrl ? { url: nextPageUrl } : {}),
+            };
+          })
+        );
       }
     });
   }, [adapter, setUrlFromPage]);
 
   useEffect(() => {
+    if (typeof adapter.onPageNewWindow !== "function") return undefined;
+    return adapter.onPageNewWindow((event) => {
+      const request = pageNewWindowRequest(event);
+      if (!request) return;
+      if (request.disposition === "blocked") {
+        setBlockedPopups((current) => {
+          const next = rememberBlockedPopup(current, request.pageId, request.url);
+          blockedPopupsRef.current = next;
+          return next;
+        });
+        return;
+      }
+      enqueuePopup(() => openFromOpener(
+        request.pageId,
+        request.url,
+        request.disposition === "background",
+      ));
+    });
+  }, [adapter, enqueuePopup, openFromOpener]);
+
+  useEffect(() => {
+    if (typeof adapter.onDownload !== "function") return undefined;
+    return adapter.onDownload((event) => {
+      setDownloads((current) => applyDownloadUpdate(current, event));
+    });
+  }, [adapter]);
+
+  const openDownload = useCallback(async (id) => {
+    if (typeof adapter.openDownload !== "function") return;
+    try {
+      await adapter.openDownload(id);
+    } catch (error) {
+      setStatus(`Could not open download: ${messageText(error)}`);
+    }
+  }, [adapter]);
+
+  const showDownload = useCallback(async (id) => {
+    if (typeof adapter.showDownloadInFolder !== "function") return;
+    try {
+      await adapter.showDownloadInFolder(id);
+    } catch (error) {
+      setStatus(`Could not show download: ${messageText(error)}`);
+    }
+  }, [adapter]);
+
+  const refreshZoom = useCallback(async (pageId = currentPageId) => {
+    if (compact || typeof adapter.adjustPageZoom !== "function") return;
+    if (pageId == null || sessionId == null) return;
+    try {
+      const result = await adapter.adjustPageZoom(sessionId, pageId, "get");
+      if (pageId === currentPageIdRef.current && Number.isFinite(result?.percent)) {
+        setZoomPercent(result.percent);
+      }
+    } catch (error) {
+      console.warn("zoom read failed", messageText(error));
+    }
+  }, [adapter, compact, currentPageId, sessionId]);
+  const refreshZoomRef = useRef(refreshZoom);
+  refreshZoomRef.current = refreshZoom;
+
+  const changeZoom = useCallback(async (action) => {
+    if (compact || typeof adapter.adjustPageZoom !== "function") return;
+    if (currentPageId == null || sessionId == null) return;
+    try {
+      const result = await adapter.adjustPageZoom(sessionId, currentPageId, action);
+      if (Number.isFinite(result?.percent)) setZoomPercent(result.percent);
+    } catch (error) {
+      setStatus(`Zoom failed: ${messageText(error)}`);
+    }
+  }, [adapter, compact, currentPageId, sessionId]);
+
+  const runFind = useCallback(async (query, direction, pageId = currentPageId) => {
+    if (compact || typeof adapter.findInPage !== "function") return;
+    if (pageId == null || sessionId == null) return;
+    const token = ++findToken.current;
+    try {
+      const result = await adapter.findInPage(sessionId, pageId, query, direction);
+      if (token !== findToken.current || pageId !== currentPageIdRef.current) return;
+      setFindHit({
+        total: Number(result?.total) || 0,
+        current: Number(result?.current) || 0,
+      });
+    } catch (error) {
+      if (token !== findToken.current || pageId !== currentPageIdRef.current) return;
+      setStatus(`Find failed: ${messageText(error)}`);
+    }
+  }, [adapter, compact, currentPageId, sessionId]);
+
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    const focusField = () => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(focusField);
+    } else {
+      queueMicrotask(focusField);
+    }
+  }, []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindHit({ total: 0, current: 0 });
+    runFind("", "start");
+  }, [runFind]);
+
+  const onFindQuery = useCallback((value) => {
+    setFindQuery(value);
+    runFind(value, "start");
+  }, [runFind]);
+
+  const closeFindRef = useRef(closeFind);
+  closeFindRef.current = closeFind;
+  const chromeActionRef = useRef(() => {});
+  chromeActionRef.current = (shortcut) => {
+    if (shortcut === "find") {
+      openFind();
+      return;
+    }
+    if (shortcut === "find-next" || shortcut === "find-previous") {
+      setFindOpen(true);
+      const query = findQueryRef.current;
+      const direction = !query ? "start" : shortcut === "find-next" ? "next" : "previous";
+      runFind(query, direction);
+      return;
+    }
+    if (shortcut === "zoom-in") changeZoom("in");
+    else if (shortcut === "zoom-out") changeZoom("out");
+    else if (shortcut === "zoom-reset") changeZoom("reset");
+  };
+
+  const activeTab = tabs.find((tab) => tab.id === currentPageId);
+  const showStartPage =
+    !compact &&
+    activeTab != null &&
+    isBlankDocument(activeTab.url) &&
+    loading == null &&
+    !pageLoading;
+
+  useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
     let frame = null;
+    let frameKind = null;
     const queueSync = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(async () => {
+      if (frame != null) return;
+      const run = async () => {
         frame = null;
+        frameKind = null;
         try {
           await syncBrowserViewport();
         } catch (error) {
           console.warn("viewport sync failed", messageText(error));
         }
-      });
+      };
+      if (typeof window.requestAnimationFrame === "function") {
+        frameKind = "animation";
+        frame = window.requestAnimationFrame(run);
+      } else {
+        frameKind = "timeout";
+        frame = setTimeout(run, 16);
+      }
     };
     window.addEventListener("resize", queueSync);
-    const observer = new ResizeObserver(queueSync);
-    if (browserStageRef.current) observer.observe(browserStageRef.current);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(queueSync) : null;
+    if (browserStageRef.current) observer?.observe(browserStageRef.current);
     queueSync();
     return () => {
       window.removeEventListener("resize", queueSync);
-      observer.disconnect();
-      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      if (frame == null) return;
+      if (frameKind === "animation") window.cancelAnimationFrame(frame);
+      else clearTimeout(frame);
     };
   }, [adapter.rendersPageInHost, syncBrowserViewport]);
 
@@ -894,6 +1243,11 @@ export default function App({ adapter, lane }) {
     // the menu echo of this key so chrome focus does not run it twice.
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
+        if (findOpenRef.current && !compact && !event.repeat && !event.altKey && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
+          closeFindRef.current();
+          return;
+        }
         if (compact || event.repeat || event.altKey || event.metaKey || event.ctrlKey) return;
         menuEcho.current.mark("stop");
         if (event.defaultPrevented) return;
@@ -925,6 +1279,14 @@ export default function App({ adapter, lane }) {
         if (event.repeat) return;
         event.preventDefault();
         runBrowserAction(forward ? "browser_forward" : "browser_back");
+        return;
+      }
+
+      const shortcut = chromeShortcut(event);
+      if (shortcut && !compact) {
+        menuEcho.current.mark(shortcut);
+        event.preventDefault();
+        chromeActionRef.current(shortcut);
         return;
       }
 
@@ -1029,6 +1391,10 @@ export default function App({ adapter, lane }) {
         document.querySelector(".url-input")?.focus();
         return;
       }
+      if (command === "find" || command === "find-next" || command === "find-previous" || command === "zoom-in" || command === "zoom-out" || command === "zoom-reset") {
+        chromeActionRef.current(command);
+        return;
+      }
       if (command === "reload") {
         runBrowserAction("browser_reload");
         return;
@@ -1054,6 +1420,8 @@ export default function App({ adapter, lane }) {
     });
   }, [activatePage, adapter, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
 
+  const blockedCount = Array.isArray(blockedPopups[currentPageId]) ? blockedPopups[currentPageId].length : 0;
+
   const stageText =
     "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
 
@@ -1063,9 +1431,12 @@ export default function App({ adapter, lane }) {
         <LoadProgress active={loading != null || pageLoading} />
         <Header
           adapter={adapter}
+          blockedCount={blockedCount}
           compact
+          onDismissBlocked={dismissBlockedPopup}
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
+          onOpenBlocked={openBlockedPopup}
           onStatus={setStatus}
           setUrl={setUrlFromUser}
           url={url}
@@ -1086,8 +1457,11 @@ export default function App({ adapter, lane }) {
       <LoadProgress active={loading != null || pageLoading} />
       <Header
         adapter={adapter}
+        blockedCount={blockedCount}
+        onDismissBlocked={dismissBlockedPopup}
         onNavigate={navigateCurrentPage}
         onNewTab={createNewTab}
+        onOpenBlocked={openBlockedPopup}
         onStatus={setStatus}
         policyMode={policyMode}
         provider={provider}
@@ -1099,13 +1473,32 @@ export default function App({ adapter, lane }) {
       <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
       <main>
         <section className="browser-panel">
-          <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} />
+          <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} zoomPercent={zoomPercent} />
+          {findOpen ? (
+            <FindBar
+              current={findHit.current}
+              inputRef={findInputRef}
+              onClose={closeFind}
+              onNext={() => runFind(findQuery, findQuery ? "next" : "start")}
+              onPrevious={() => runFind(findQuery, findQuery ? "previous" : "start")}
+              onQuery={onFindQuery}
+              query={findQuery}
+              total={findHit.total}
+            />
+          ) : null}
           <StatsRow snapshot={snapshot} />
+          <div className="downloads-slot">
+            <Downloads items={downloads} onOpen={openDownload} onShow={showDownload} />
+          </div>
           <div className="browser-stage" ref={browserStageRef}>
-            <div className="stage-placeholder">
-              <h2>{snapshot?.title || "Native page rendering"}</h2>
-              <p>{stageText}</p>
-            </div>
+            {showStartPage ? (
+              <NewTabPage adapter={adapter} onNavigate={navigateCurrentPage} />
+            ) : (
+              <div className="stage-placeholder">
+                <h2>{snapshot?.title || "Native page rendering"}</h2>
+                <p>{stageText}</p>
+              </div>
+            )}
           </div>
         </section>
         <ChatPanel

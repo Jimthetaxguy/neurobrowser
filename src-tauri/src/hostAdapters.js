@@ -1,7 +1,8 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { bindDownloads } from "./downloads.js";
 import { bindMenuCommand } from "./menuCommands.js";
-import { bindPageLifecycle } from "./nativePageEvents.js";
+import { bindPageLifecycle, bindPageNewWindow } from "./nativePageEvents.js";
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message;
@@ -29,8 +30,10 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     async createSession() {
       return invoke("create_session");
     },
-    async createPage(sessionId) {
-      return invoke("create_page", { sessionId });
+    async createPage(sessionId, options = {}) {
+      const payload = { sessionId };
+      if (options.activate === false) payload.activate = false;
+      return invoke("create_page", payload);
     },
     async closePage(sessionId, pageId) {
       return invoke("close_page", { sessionId, pageId });
@@ -83,8 +86,29 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     onPageLifecycle(callback) {
       return bindPageLifecycle(listen, callback);
     },
+    onPageNewWindow(callback) {
+      return bindPageNewWindow(listen, callback);
+    },
+    onDownload(callback) {
+      return bindDownloads(listen, callback);
+    },
+    async openDownload(id) {
+      return invoke("open_download", { id });
+    },
+    async showDownloadInFolder(id) {
+      return invoke("show_download_in_folder", { id });
+    },
+    async findInPage(sessionId, pageId, query, direction) {
+      return invoke("find_in_page", { sessionId, pageId, query, direction });
+    },
+    async adjustPageZoom(sessionId, pageId, action) {
+      return invoke("adjust_page_zoom", { sessionId, pageId, action });
+    },
     onMenuCommand(callback) {
       return bindMenuCommand(listen, callback);
+    },
+    async searchBrowsingHistory(query = "", limit = 8) {
+      return invoke("search_browsing_history", { query, limit });
     },
     async searchLocalMemory(query, limit = 8) {
       return invoke("search_local_memory", { query, limit });

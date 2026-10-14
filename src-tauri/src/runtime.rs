@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::webview::{PageLoadEvent, WebviewBuilder};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, EventTarget, LogicalPosition, LogicalSize, Manager, Runtime, Webview,
     WebviewUrl, Window,
@@ -547,6 +547,116 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     }
   };
 
+  // Links and window.open ask the shell for a tab. The carrier URL is not a
+  // page: the new-window handler reads it and refuses the real OS window.
+  // A call with no user gesture never reaches that handler on this webview,
+  // so it is reported on the existing report command instead.
+  const nativeOpen = typeof window.open === 'function' ? window.open.bind(window) : () => null;
+  const userOpened = () => {
+    const activation = navigator.userActivation;
+    if (!activation || typeof activation.isActive !== 'boolean') return true;
+    return activation.isActive === true;
+  };
+  const popupTarget = (value) => {
+    if (value == null || value === '') return 'about:blank';
+    try {
+      return new URL(String(value), location.href).href;
+    } catch (_) {
+      return String(value);
+    }
+  };
+  const shellCarrier = (target, disposition) => {
+    const params = new URLSearchParams();
+    params.set('disposition', disposition);
+    params.set('url', target);
+    return 'https://new-window.neurobrowser.invalid/?' + params.toString();
+  };
+  const reportBlockedPopup = (target) => {
+    if (typeof invoke !== 'function') return;
+    const notice = invoke('browser_runtime_report', {
+      payload: {
+        page_id: 0,
+        request_id: 'popup-blocked',
+        payload: { url: target },
+        error: null
+      }
+    });
+    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
+  };
+  const requestOpen = (target, background) => {
+    if (!userOpened()) {
+      reportBlockedPopup(target);
+      return null;
+    }
+    try {
+      return nativeOpen(shellCarrier(target, background ? 'background' : 'foreground'), '_blank');
+    } catch (_) {
+      return null;
+    }
+  };
+  const linkOpenKind = (event) => {
+    const node = event.target && event.target.closest && event.target.closest('a[href]');
+    if (!node || !node.href) return null;
+    const modified = event.metaKey === true || event.ctrlKey === true || event.button === 1;
+    const target = (node.getAttribute('target') || '').toLowerCase();
+    if (!modified && target !== '_blank') return null;
+    return { href: node.href, background: modified };
+  };
+  let pointerClaimed = false;
+  const trustedClick = (event) => event.isTrusted === true;
+  document.addEventListener('pointerdown', (event) => {
+    const kind = linkOpenKind(event);
+    if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    pointerClaimed = true;
+    event.preventDefault();
+    event.stopPropagation();
+    requestOpen(kind.href, kind.background);
+  }, true);
+  document.addEventListener('click', (event) => {
+    const kind = linkOpenKind(event);
+    if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (pointerClaimed) {
+      pointerClaimed = false;
+      return;
+    }
+    requestOpen(kind.href, kind.background);
+  }, true);
+  document.addEventListener('auxclick', (event) => {
+    if (event.button !== 1) return;
+    const kind = linkOpenKind(event);
+    if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (pointerClaimed) {
+      pointerClaimed = false;
+      return;
+    }
+    requestOpen(kind.href, true);
+  }, true);
+  const shellOpen = function(url) {
+    const target = arguments.length === 0 ? 'about:blank' : popupTarget(url);
+    return requestOpen(target, false);
+  };
+  window.open = shellOpen;
+  if (typeof Window === 'function' && Window.prototype) Window.prototype.open = shellOpen;
+
   Object.defineProperty(window, '__NEUROBROWSER_RUNTIME__', {
     value: Object.freeze(runtime), writable: false, configurable: false
   });
@@ -961,6 +1071,28 @@ impl TauriBrowserRuntime {
         );
         Ok(())
     }
+
+    pub fn page_url(&self) -> Result<String, String> {
+        self.webview()?
+            .url()
+            .map(|url| url.to_string())
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn set_page_zoom(&self, factor: f64) -> Result<(), String> {
+        self.webview()?
+            .set_zoom(factor)
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn find_in_page(
+        &self,
+        query: &str,
+        index: usize,
+    ) -> Result<crate::find_page::FindHit, String> {
+        self.request_json(&crate::find_page::search_expression(query, index), false)
+            .await
+    }
 }
 
 async fn wait_for_page_ready(
@@ -1053,6 +1185,58 @@ fn stopped_page_payload(
     )
 }
 
+/// `http` and `https` documents are shown in the page webview.
+/// `about:blank` stays hidden so the shell can draw the new-tab page.
+pub(crate) fn is_browsed_document(url: &str) -> bool {
+    let url = url.trim();
+    starts_with_ignore_ascii_case(url, "https://") || starts_with_ignore_ascii_case(url, "http://")
+}
+
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value.len() >= prefix.len()
+        && value
+            .as_bytes()
+            .iter()
+            .zip(prefix.as_bytes())
+            .all(|(left, right)| left.to_ascii_lowercase() == *right)
+}
+
+fn apply_remembered_zoom(webview: &Webview<impl Runtime>, url: &str) {
+    let Some(state) = webview.try_state::<crate::AppState>() else {
+        return;
+    };
+    let factor = state.zoom.factor_for_url(url);
+    if let Err(error) = webview.set_zoom(factor) {
+        tracing::warn!("page zoom was not applied: {error}");
+    }
+}
+
+fn show_if_browsed(webview: &Webview<impl Runtime>, url: &str, active: bool) {
+    // A background tab must stay hidden while it loads, or it covers the page
+    // the user is looking at. The visible page keeps the previous rule.
+    if !active {
+        if let Err(error) = webview.hide() {
+            tracing::warn!("failed to keep a background page hidden: {error}");
+        }
+        return;
+    }
+    let result = if is_browsed_document(url) {
+        webview.show()
+    } else {
+        webview.hide()
+    };
+    if let Err(error) = result {
+        tracing::warn!("failed to update page webview visibility: {error}");
+    }
+}
+
+fn note_browsing_visit<R: Runtime>(webview: &Webview<R>, url: &str, title: &str) {
+    let Some(state) = webview.try_state::<super::AppState>() else {
+        return;
+    };
+    super::record_browsing_visit(&state.history, url, title);
+}
+
 fn emit_page_lifecycle<R: Runtime>(webview: &Webview<R>, payload: Option<PageLifecyclePayload>) {
     let Some(payload) = payload else {
         return;
@@ -1064,6 +1248,204 @@ fn emit_page_lifecycle<R: Runtime>(webview: &Webview<R>, payload: Option<PageLif
         payload,
     ) {
         tracing::warn!("failed to emit {PAGE_LIFECYCLE_EVENT} for page {page_id}: {error}");
+    }
+}
+
+/// The main webview listens. Page webviews are not granted a popup command.
+pub const PAGE_NEW_WINDOW_EVENT: &str = "page-new-window";
+
+/// Report id the page script uses when `window.open` has no user gesture.
+/// It is not a pending runtime request id.
+pub const POPUP_BLOCKED_REQUEST: &str = "popup-blocked";
+
+/// Host the page script uses so the new-window handler can see foreground,
+/// background, or blocked. The handler never loads this host.
+const NEW_WINDOW_CARRIER_HOST: &str = "new-window.neurobrowser.invalid";
+
+/// Drop a second delivery of the same open, such as a click the script
+/// handled and the webview also reported.
+const NEW_WINDOW_DEDUPE: Duration = Duration::from_millis(400);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NewWindowDisposition {
+    Foreground,
+    Background,
+    Blocked,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageNewWindowPayload {
+    pub page_id: usize,
+    pub url: String,
+    pub disposition: NewWindowDisposition,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NewWindowRequest {
+    url: String,
+    disposition: NewWindowDisposition,
+}
+
+enum PopupTarget {
+    Blank,
+    Allowed(String),
+    Refused,
+}
+
+/// `page-runtime-N` is the label `SessionManager` gives a page webview.
+pub fn page_id_from_runtime_label(label: &str) -> Option<usize> {
+    label.strip_prefix("page-runtime-")?.parse().ok()
+}
+
+fn normalize_popup_target(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("about:blank") {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Empty is a blank tab. Anything else must be a URL netguard will load.
+fn classify_popup_target(url: &str) -> PopupTarget {
+    let url = normalize_popup_target(url);
+    if url.is_empty() {
+        return PopupTarget::Blank;
+    }
+    if url.len() > 16_384 {
+        return PopupTarget::Refused;
+    }
+    if neurobrowser::netguard::blocked_reason(&url).is_some() {
+        return PopupTarget::Refused;
+    }
+    PopupTarget::Allowed(url)
+}
+
+fn parse_carrier(raw: &str) -> Option<NewWindowRequest> {
+    let parsed = tauri::Url::parse(raw).ok()?;
+    if !parsed.scheme().eq_ignore_ascii_case("https") {
+        return None;
+    }
+    if parsed.host_str()? != NEW_WINDOW_CARRIER_HOST {
+        return None;
+    }
+    let mut disposition = None;
+    let mut target = None;
+    for (key, value) in parsed.query_pairs() {
+        match key.as_ref() {
+            "disposition" => {
+                disposition = match value.as_ref() {
+                    "foreground" => Some(NewWindowDisposition::Foreground),
+                    "background" => Some(NewWindowDisposition::Background),
+                    "blocked" => Some(NewWindowDisposition::Blocked),
+                    _ => return None,
+                };
+            }
+            "url" => target = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+    Some(NewWindowRequest {
+        url: normalize_popup_target(&target.unwrap_or_default()),
+        disposition: disposition?,
+    })
+}
+
+/// A carrier URL keeps the script's disposition. Any other URL is a
+/// user-gesture open of that URL in the foreground. A broken carrier is
+/// refused here so it is never looked up as a real host.
+fn parse_new_window_url(raw: &str) -> Option<NewWindowRequest> {
+    if let Ok(parsed) = tauri::Url::parse(raw) {
+        if parsed.host_str() == Some(NEW_WINDOW_CARRIER_HOST) {
+            return parse_carrier(raw);
+        }
+    }
+    Some(NewWindowRequest {
+        url: normalize_popup_target(raw),
+        disposition: NewWindowDisposition::Foreground,
+    })
+}
+
+/// Decide what the shell should hear. `None` means netguard refused the URL,
+/// so no tab and no indicator are created.
+pub fn page_new_window_payload(page_id: usize, raw_url: &str) -> Option<PageNewWindowPayload> {
+    let request = parse_new_window_url(raw_url)?;
+    let url = match classify_popup_target(&request.url) {
+        PopupTarget::Refused => {
+            tracing::warn!("Blocked new window from page {page_id} to {}", request.url);
+            return None;
+        }
+        PopupTarget::Blank => String::new(),
+        PopupTarget::Allowed(url) => url,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: request.disposition,
+    })
+}
+
+/// A blocked `window.open` reported by the page script. Disposition is
+/// always blocked; the page does not get to choose it here.
+pub fn blocked_popup_payload(
+    runtime_label: &str,
+    body: Option<&serde_json::Value>,
+) -> Option<PageNewWindowPayload> {
+    let page_id = page_id_from_runtime_label(runtime_label)?;
+    let url = body
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let url = match classify_popup_target(url) {
+        PopupTarget::Refused => return None,
+        PopupTarget::Blank => String::new(),
+        PopupTarget::Allowed(url) => url,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: NewWindowDisposition::Blocked,
+    })
+}
+
+#[derive(Default)]
+struct NewWindowCoalescer {
+    recent: Vec<(usize, String, NewWindowDisposition, Instant)>,
+}
+
+impl NewWindowCoalescer {
+    fn accept(&mut self, page_id: usize, url: &str, disposition: NewWindowDisposition) -> bool {
+        let now = Instant::now();
+        self.recent
+            .retain(|(_, _, _, at)| now.duration_since(*at) < NEW_WINDOW_DEDUPE);
+        // Disposition is not part of the key. A click the script already
+        // classified must not also open when the webview reports the raw URL.
+        if self
+            .recent
+            .iter()
+            .any(|(id, seen, _, _)| *id == page_id && seen == url)
+        {
+            return false;
+        }
+        self.recent
+            .push((page_id, url.to_string(), disposition, now));
+        true
+    }
+}
+
+pub fn emit_page_new_window<R: Runtime>(
+    emitter: &impl tauri::Emitter<R>,
+    payload: &PageNewWindowPayload,
+) {
+    let page_id = payload.page_id;
+    if let Err(error) = emitter.emit_to(
+        EventTarget::labeled(MAIN_WEBVIEW_LABEL),
+        PAGE_NEW_WINDOW_EVENT,
+        payload.clone(),
+    ) {
+        tracing::warn!("failed to emit {PAGE_NEW_WINDOW_EVENT} for page {page_id}: {error}");
     }
 }
 
@@ -1260,9 +1642,21 @@ pub fn create_runtime_page(
         .map_err(|e| e.to_string())?;
     let registry_for_nav = registry.clone();
     let registry_for_load = registry.clone();
+    let opener_for_window = window.clone();
+    let new_window_coalescer = Arc::new(Mutex::new(NewWindowCoalescer::default()));
 
     let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
         .initialization_script(RUNTIME_INIT_SCRIPT)
+        // Never let the webview open an OS window. The shell opens a tab.
+        .on_new_window(move |url, _features| {
+            if let Some(payload) = page_new_window_payload(page_id, url.as_str()) {
+                let mut recent = new_window_coalescer.lock().unwrap();
+                if recent.accept(page_id, &payload.url, payload.disposition) {
+                    emit_page_new_window(&opener_for_window, &payload);
+                }
+            }
+            NewWindowResponse::Deny
+        })
         // Cancel hops the shared netguard rejects (redirects, JS, clicked links).
         .on_navigation(move |url| {
             if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
@@ -1274,11 +1668,18 @@ pub fn create_runtime_page(
             registry_for_nav.begin_allowed_navigation(page_id);
             true
         })
+        .on_download(crate::downloads::handle_download_event)
         .on_page_load(move |webview, payload| {
             let url = payload.url().to_string();
             match payload.event() {
                 PageLoadEvent::Started => {
                     registry_for_load.set_loading(page_id, true);
+                    apply_remembered_zoom(&webview, &url);
+                    show_if_browsed(
+                        &webview,
+                        &url,
+                        registry_for_load.active_page() == Some(page_id),
+                    );
                     emit_page_lifecycle(
                         &webview,
                         page_lifecycle_payload(
@@ -1292,21 +1693,30 @@ pub fn create_runtime_page(
                 }
                 PageLoadEvent::Finished => {
                     registry_for_load.finish_loading(page_id);
-                    emit_page_lifecycle(
-                        &webview,
-                        page_lifecycle_payload(
-                            page_id,
-                            PageLifecyclePhase::Finished,
-                            url,
-                            String::new(),
-                            registry_for_load.suppress_finished_event(page_id),
-                        ),
+                    apply_remembered_zoom(&webview, &url);
+                    let payload = page_lifecycle_payload(
+                        page_id,
+                        PageLifecyclePhase::Finished,
+                        url.as_str(),
+                        String::new(),
+                        registry_for_load.suppress_finished_event(page_id),
                     );
+                    // A refused hop is not a visit and does not change visibility.
+                    if let Some(payload) = &payload {
+                        note_browsing_visit(&webview, &payload.url, &payload.title);
+                        show_if_browsed(
+                            &webview,
+                            &payload.url,
+                            registry_for_load.active_page() == Some(page_id),
+                        );
+                    }
+                    emit_page_lifecycle(&webview, payload);
                 }
             }
         })
         .on_document_title_changed(move |webview, title| {
             let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+            note_browsing_visit(&webview, &url, &title);
             emit_page_lifecycle(
                 &webview,
                 page_lifecycle_payload(page_id, PageLifecyclePhase::Title, url, title, false),
@@ -1361,12 +1771,60 @@ pub fn set_active_runtime_page(
                     viewport.height.max(1.0),
                 ))
                 .map_err(|e| e.to_string())?;
-            webview.show().map_err(|e| e.to_string())?;
+            let show = webview
+                .url()
+                .map(|url| is_browsed_document(url.as_str()))
+                .unwrap_or(true);
+            if show {
+                webview.show().map_err(|e| e.to_string())?;
+            } else {
+                webview.hide().map_err(|e| e.to_string())?;
+            }
         } else {
             webview.hide().map_err(|e| e.to_string())?;
         }
     }
     Ok(())
+}
+
+/// Show the page webview for a navigation that is leaving the new-tab page.
+/// A background tab stays hidden until the shell selects it.
+pub fn reveal_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    if registry.active_page() != Some(page_id) {
+        return Ok(());
+    }
+    let runtime_id = registry.page_runtime_id(page_id)?;
+    let webview = app
+        .get_webview(&runtime_id)
+        .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
+    webview.show().map_err(|e| e.to_string())
+}
+
+/// Hide the page webview when it is still a blank document.
+///
+/// A URL that cannot be read stays visible, so a real page is not covered by
+/// the new-tab page just because the webview refused to report its location.
+pub fn hide_unbrowsed_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    let runtime_id = registry.page_runtime_id(page_id)?;
+    let webview = app
+        .get_webview(&runtime_id)
+        .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
+    let browsed = webview
+        .url()
+        .map(|url| is_browsed_document(url.as_str()))
+        .unwrap_or(true);
+    if browsed {
+        return Ok(());
+    }
+    webview.hide().map_err(|e| e.to_string())
 }
 
 pub fn sync_runtime_viewport(
@@ -1398,6 +1856,17 @@ pub fn sync_runtime_viewport(
 mod response_tests {
     use super::missing_runtime_response;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn blank_documents_stay_off_the_page_webview() {
+        assert!(super::is_browsed_document("https://example.com/"));
+        assert!(super::is_browsed_document(" HTTP://Example.COM/a "));
+        assert!(!super::is_browsed_document("about:blank"));
+        assert!(!super::is_browsed_document(""));
+        assert!(!super::is_browsed_document("about:blankevil"));
+        assert!(!super::is_browsed_document("file:///tmp/x"));
+        assert!(!super::is_browsed_document("http:/example.com"));
+    }
 
     #[test]
     fn stop_menu_hook_tracks_only_the_active_page() {
@@ -1778,5 +2247,79 @@ mod response_tests {
                 "unexpected wait error: {error}"
             );
         });
+    }
+
+    #[test]
+    fn new_window_requests_keep_disposition_and_refuse_blocked_urls() {
+        let foreground = super::page_new_window_payload(2, "about:blank").expect("blank tab");
+        assert_eq!(foreground.page_id, 2);
+        assert_eq!(foreground.url, "");
+        assert_eq!(
+            foreground.disposition,
+            super::NewWindowDisposition::Foreground
+        );
+
+        let carrier =
+            "https://new-window.neurobrowser.invalid/?disposition=background&url=about%3Ablank";
+        let background = super::page_new_window_payload(2, carrier).expect("background blank");
+        assert_eq!(
+            background.disposition,
+            super::NewWindowDisposition::Background
+        );
+        assert_eq!(background.url, "");
+
+        assert!(super::page_new_window_payload(2, "javascript:alert(1)").is_none());
+        assert!(super::page_new_window_payload(2, "http://127.0.0.1/secret").is_none());
+        assert!(super::page_new_window_payload(
+            2,
+            "https://new-window.neurobrowser.invalid/?disposition=foreground&url=http%3A%2F%2F127.0.0.1%2F"
+        )
+        .is_none());
+        assert!(super::page_new_window_payload(
+            2,
+            "https://new-window.neurobrowser.invalid/?disposition=nope&url=about%3Ablank"
+        )
+        .is_none());
+
+        let blocked = super::blocked_popup_payload(
+            "page-runtime-4",
+            Some(&serde_json::json!({ "url": "about:blank" })),
+        )
+        .expect("blocked blank");
+        assert_eq!(blocked.page_id, 4);
+        assert_eq!(blocked.disposition, super::NewWindowDisposition::Blocked);
+        assert!(super::blocked_popup_payload(
+            "page-runtime-4",
+            Some(&serde_json::json!({ "url": "file:///tmp/x" })),
+        )
+        .is_none());
+        assert!(super::blocked_popup_payload("main", None).is_none());
+        assert_eq!(super::page_id_from_runtime_label("page-runtime-4"), Some(4));
+
+        let mut recent = super::NewWindowCoalescer::default();
+        assert!(recent.accept(
+            1,
+            "https://example.test/",
+            super::NewWindowDisposition::Foreground
+        ));
+        assert!(!recent.accept(
+            1,
+            "https://example.test/",
+            super::NewWindowDisposition::Foreground
+        ));
+        assert!(!recent.accept(
+            1,
+            "https://example.test/",
+            super::NewWindowDisposition::Background
+        ));
+    }
+
+    #[test]
+    fn init_script_asks_the_shell_for_tabs_without_a_new_command() {
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(super::NEW_WINDOW_CARRIER_HOST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(super::POPUP_BLOCKED_REQUEST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains("browser_runtime_report"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("open_popup"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("create_popup"));
     }
 }

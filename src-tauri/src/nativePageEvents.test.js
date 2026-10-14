@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   bindPageLifecycle,
+  bindPageNewWindow,
+  blockedPopupLabel,
+  focusAfterClose,
+  forgetBlockedPopups,
+  insertOpenedTab,
   moveTab,
   nativePageUpdates,
   pageLifecycleUpdates,
+  pageNewWindowRequest,
+  rememberBlockedPopup,
   securityState,
+  takeBlockedPopup,
 } from "./nativePageEvents.js";
 
 test("background tab updates preserve the active page URL draft", () => {
@@ -111,6 +119,63 @@ test("bindPageLifecycle forwards a dispatched page-lifecycle payload", async () 
   await Promise.resolve();
   await Promise.resolve();
   const payload = { pageId: 4, phase: "started", url: "http://example.test", title: "" };
+  handler({ payload });
+  assert.deepEqual(seen, [payload]);
+  stop();
+  assert.equal(handler, null);
+});
+
+test("a new window request keeps the opener, the url, and foreground or background", () => {
+  const tabs = [{ id: 0, title: "Here", url: "https://here.example" }];
+  const request = pageNewWindowRequest({
+    pageId: 0,
+    url: "https://next.example/a",
+    disposition: "background",
+  });
+  assert.deepEqual(request, { pageId: 0, url: "https://next.example/a", disposition: "background" });
+  const opened = insertOpenedTab(tabs, 0, 3, request.url);
+  assert.deepEqual(opened.map((tab) => tab.id), [0, 3]);
+  assert.equal(opened[1].openerId, 0);
+  assert.equal(opened[1].url, "https://next.example/a");
+  assert.equal(pageNewWindowRequest({ pageId: 0, disposition: "sideways", url: "https://x" }), null);
+  assert.equal(pageNewWindowRequest(null), null);
+});
+
+test("closing the active opened tab returns to its opener", () => {
+  const tabs = [
+    { id: 0, url: "https://opener.example" },
+    { id: 1, url: "https://child.example", openerId: 0 },
+    { id: 2, url: "https://other.example" },
+  ];
+  assert.equal(focusAfterClose(tabs, 1, 1), 0);
+  assert.equal(focusAfterClose(tabs, 2, 2), 1);
+  assert.equal(focusAfterClose(tabs, 0, 1), 1);
+});
+
+test("blocked popups stay with the opener and open from the oldest", () => {
+  let popups = rememberBlockedPopup({}, 4, "https://one.example");
+  popups = rememberBlockedPopup(popups, 4, "https://two.example");
+  assert.equal(blockedPopupLabel(2), "2 popups blocked");
+  assert.equal(blockedPopupLabel(1), "Popup blocked");
+  const first = takeBlockedPopup(popups, 4);
+  assert.equal(first.url, "https://one.example");
+  const cleared = forgetBlockedPopups(first.popups, 4);
+  assert.deepEqual(cleared, {});
+  assert.equal(takeBlockedPopup(cleared, 4).url, null);
+});
+
+test("bindPageNewWindow forwards a page-new-window payload", async () => {
+  let handler = null;
+  const listen = (name, next) => {
+    assert.equal(name, "page-new-window");
+    handler = next;
+    return () => { handler = null; };
+  };
+  const seen = [];
+  const stop = bindPageNewWindow(listen, (payload) => seen.push(payload));
+  await Promise.resolve();
+  await Promise.resolve();
+  const payload = { pageId: 1, url: "https://popup.example", disposition: "foreground" };
   handler({ payload });
   assert.deepEqual(seen, [payload]);
   stop();

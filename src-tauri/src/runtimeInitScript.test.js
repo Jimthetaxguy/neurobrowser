@@ -1,9 +1,34 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { JSDOM } from "jsdom";
+
+const require = createRequire(import.meta.url);
+const { implForWrapper } = require("jsdom/lib/generated/idl/utils.js");
+const { implementation: EventTargetImpl } = require("jsdom/lib/jsdom/living/events/EventTarget-impl.js");
+
+// jsdom's dispatchEvent forces isTrusted false, and the getter is not configurable.
+// Mark the impl and restore the flag inside dispatch, before listeners run.
+const trustedEventImpls = new WeakSet();
+const originalDispatchEvent = EventTargetImpl.prototype.dispatchEvent;
+EventTargetImpl.prototype.dispatchEvent = function dispatchEvent(eventImpl) {
+  if (!trustedEventImpls.has(eventImpl)) {
+    return originalDispatchEvent.call(this, eventImpl);
+  }
+  const dispatch = this._dispatch;
+  this._dispatch = function (impl, ...rest) {
+    impl.isTrusted = true;
+    return dispatch.call(this, impl, ...rest);
+  };
+  try {
+    return originalDispatchEvent.call(this, eventImpl);
+  } finally {
+    this._dispatch = dispatch;
+  }
+};
 
 // RUNTIME_INIT_SCRIPT is a JS string embedded in a Rust raw string literal
 // (it runs inside a Tauri webview, not under Node), so there is nothing to
@@ -361,6 +386,96 @@ test("snapshot html drops noscript content entirely when it arrives as one raw t
   } finally {
     dom.window.close();
   }
+});
+
+function installPopupPage(html, { gesture = true } = {}) {
+  const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
+    url: "https://example.test/page",
+    runScripts: "outside-only",
+  });
+  const opened = [];
+  const reports = [];
+  dom.window.open = (...args) => {
+    opened.push(args);
+    return { closed: false };
+  };
+  dom.window.__TAURI_INTERNALS__ = {
+    invoke: (command, args) => {
+      reports.push({ command, args });
+      return Promise.resolve();
+    },
+  };
+  Object.defineProperty(dom.window.navigator, "userActivation", {
+    configurable: true,
+    value: { isActive: gesture },
+  });
+  dom.window.eval(runtimeInitScript);
+  return { dom, opened, reports };
+}
+
+function trustedMouse(dom, type, init) {
+  const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+  trustedEventImpls.add(implForWrapper(event));
+  return event;
+}
+
+test("target=_blank and modified clicks ask the shell for a tab", () => {
+  const { dom, opened } = installPopupPage(
+    '<a id="blank" href="https://example.com/next" target="_blank">Next</a><a id="same" href="https://example.com/same">Same</a>',
+  );
+  const blank = dom.window.document.getElementById("blank");
+  const same = dom.window.document.getElementById("same");
+  blank.dispatchEvent(trustedMouse(dom, "pointerdown", { button: 0 }));
+  blank.dispatchEvent(trustedMouse(dom, "click", { button: 0 }));
+  same.dispatchEvent(trustedMouse(dom, "pointerdown", { button: 0 }));
+  assert.equal(opened.length, 1);
+  assert.match(opened[0][0], /disposition=foreground/);
+  assert.match(opened[0][0], /url=https%3A%2F%2Fexample\.com%2Fnext/);
+
+  const modified = trustedMouse(dom, "pointerdown", { button: 0, ctrlKey: true });
+  same.dispatchEvent(modified);
+  assert.equal(modified.defaultPrevented, true);
+  assert.match(opened[1][0], /disposition=background/);
+
+  const middle = trustedMouse(dom, "pointerdown", { button: 1 });
+  same.dispatchEvent(middle);
+  assert.match(opened[2][0], /disposition=background/);
+  dom.window.close();
+});
+
+test("a script-dispatched click on a target=_blank link opens no tab", () => {
+  const { dom, opened } = installPopupPage(
+    '<a id="blank" href="https://example.com/next" target="_blank">Next</a>',
+  );
+  const blank = dom.window.document.getElementById("blank");
+  const event = new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+  assert.equal(event.isTrusted, false);
+  blank.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(opened.length, 0);
+  dom.window.close();
+});
+
+test("window.open without a user gesture is reported and does not open", () => {
+  const { dom, opened, reports } = installPopupPage("<p>Hi</p>", { gesture: false });
+  const result = dom.window.open("https://example.com/popup");
+  assert.equal(result, null);
+  assert.equal(opened.length, 0);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].command, "browser_runtime_report");
+  assert.equal(reports[0].args.payload.request_id, "popup-blocked");
+  assert.equal(reports[0].args.payload.payload.url, "https://example.com/popup");
+  dom.window.close();
+});
+
+test("window.open from a user gesture asks for a foreground tab", () => {
+  const { dom, opened, reports } = installPopupPage("<p>Hi</p>", { gesture: true });
+  dom.window.open("https://example.com/popup");
+  assert.equal(reports.length, 0);
+  assert.equal(opened.length, 1);
+  assert.match(opened[0][0], /disposition=foreground/);
+  assert.match(opened[0][0], /url=https%3A%2F%2Fexample\.com%2Fpopup/);
+  dom.window.close();
 });
 
 test("snapshot html drops noscript content entirely when it parses into real child elements (jsdom's parse shape)", () => {

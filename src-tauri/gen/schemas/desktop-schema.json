@@ -177,6 +177,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the adjust_page_zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-adjust-page-zoom",
+          "markdownDescription": "Enables the adjust_page_zoom command without any pre-configured scope."
+        },
+        {
           "description": "Enables the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "allow-browser-back",
@@ -237,6 +243,12 @@
           "markdownDescription": "Enables the explain_memory_result command without any pre-configured scope."
         },
         {
+          "description": "Enables the find_in_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-find-in-page",
+          "markdownDescription": "Enables the find_in_page command without any pre-configured scope."
+        },
+        {
           "description": "Enables the forget_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-forget-memory",
@@ -267,6 +279,18 @@
           "markdownDescription": "Enables the navigate command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_download command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-download",
+          "markdownDescription": "Enables the open_download command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_browsing_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-browsing-history",
+          "markdownDescription": "Enables the search_browsing_history command without any pre-configured scope."
+        },
+        {
           "description": "Enables the search_local_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-search-local-memory",
@@ -291,6 +315,12 @@
           "markdownDescription": "Enables the set_provider command without any pre-configured scope."
         },
         {
+          "description": "Enables the show_download_in_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-download-in-folder",
+          "markdownDescription": "Enables the show_download_in_folder command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start_agent_run command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start-agent-run",
@@ -313,6 +343,12 @@
           "type": "string",
           "const": "allow-sync-browser-viewport",
           "markdownDescription": "Enables the sync_browser_viewport command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the adjust_page_zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-adjust-page-zoom",
+          "markdownDescription": "Denies the adjust_page_zoom command without any pre-configured scope."
         },
         {
           "description": "Denies the browser_back command without any pre-configured scope.",
@@ -375,6 +411,12 @@
           "markdownDescription": "Denies the explain_memory_result command without any pre-configured scope."
         },
         {
+          "description": "Denies the find_in_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-find-in-page",
+          "markdownDescription": "Denies the find_in_page command without any pre-configured scope."
+        },
+        {
           "description": "Denies the forget_memory command without any pre-configured scope.",
           "type": "string",
           "const": "deny-forget-memory",
@@ -405,6 +447,18 @@
           "markdownDescription": "Denies the navigate command without any pre-configured scope."
         },
         {
+          "description": "Denies the open_download command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-download",
+          "markdownDescription": "Denies the open_download command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_browsing_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-browsing-history",
+          "markdownDescription": "Denies the search_browsing_history command without any pre-configured scope."
+        },
+        {
           "description": "Denies the search_local_memory command without any pre-configured scope.",
           "type": "string",
           "const": "deny-search-local-memory",
@@ -427,6 +481,12 @@
           "type": "string",
           "const": "deny-set-provider",
           "markdownDescription": "Denies the set_provider command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show_download_in_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-download-in-folder",
+          "markdownDescription": "Denies the show_download_in_folder command without any pre-configured scope."
         },
         {
           "description": "Denies the start_agent_run command without any pre-configured scope.",

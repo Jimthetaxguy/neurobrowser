@@ -1,6 +1,7 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "adjust_page_zoom",
             "browser_back",
             "browser_forward",
             "browser_reload",
@@ -10,16 +11,20 @@ fn main() {
             "create_page",
             "create_session",
             "explain_memory_result",
+            "find_in_page",
             "forget_memory",
             "get_action_policy",
             "get_page_snapshot",
             "get_page_observation",
             "execute_browser_tool",
             "navigate",
+            "open_download",
+            "search_browsing_history",
             "search_local_memory",
             "set_action_policy",
             "set_active_page",
             "set_provider",
+            "show_download_in_folder",
             "start_agent_run",
             "stop_page_load",
             "submit_approval",
