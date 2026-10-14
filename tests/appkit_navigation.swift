@@ -1,10 +1,18 @@
 import AppKit
 import WebKit
 
+private final class NavigationProbe: ContentViewController {
+    var starts = 0
+    override func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        starts += 1
+        super.webView(webView, didStartProvisionalNavigation: navigation)
+    }
+}
+
 @main
 struct ReloadRegression {
     static func realNavigation(base: String) {
-        let controller = ContentViewController()
+        let controller = NavigationProbe()
         _ = controller.view
         controller.addNewTab(pageId: 10)
         let page = controller.webViews[0]
@@ -55,9 +63,9 @@ struct ReloadRegression {
         precondition(controller.reloadButton.title == "↻")
         load("/recovered")
         events.removeAll()
+        let beforeCancel = controller.starts
         controller.navigateCurrentTab(to: base + "/slow")
-        wait("slow start") { events.contains { $0["type"] as? String == "navigation" } }
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        wait("slow WebKit start") { controller.starts > beforeCancel }
         page.stopLoading()
         wait("cancel") { events.contains { $0["message"] as? String == "Navigation cancelled" } }
         precondition(controller.reloadButton.title == "↻")
@@ -67,9 +75,9 @@ struct ReloadRegression {
         controller.selectTab(pageId: 10)
         wait("cancel selection") { events.contains { $0["reason"] as? String == "select" && $0["message"] as? String == "Navigation cancelled" } }
         events.removeAll()
+        let beforeReplacement = controller.starts
         controller.navigateCurrentTab(to: base + "/slow")
-        wait("replacement start") { events.contains { $0["type"] as? String == "navigation" } }
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        wait("replacement WebKit start") { controller.starts > beforeReplacement }
         events.removeAll()
         controller.navigateCurrentTab(to: base + "/replacement")
         wait("replacement finish") { finished("/replacement") }
