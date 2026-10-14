@@ -61,20 +61,21 @@ cargo test --all-targets
 cargo test --manifest-path crates/neuro-memory/Cargo.toml
 ```
 
-Integration tests live in `tests/`:
+Integration tests live in `tests/`. These are examples, not the full list:
 
 - `action_policy.rs` — deny-wins-over-allow, assisted-mode click approval,
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
 - `memory_tools.rs` — personal-memory tools over `MemoryService`.
 - `real_provider_smoke.rs` — `#[ignore]` real HTTP; outside `verify.sh` and CI.
-- Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
-  and run explicitly with the `headless` feature.
+
+Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
+and run explicitly with the `headless` feature.
 
 ## Tauri IPC
 
-The desktop app exposes 22 commands (`tauri::generate_handler!` in
-`src-tauri/src/main.rs`), including `get_page_observation` and
+The desktop app exposes the commands registered by `tauri::generate_handler!`
+in `src-tauri/src/main.rs`, including `get_page_observation` and
 `execute_browser_tool`. From the React frontend:
 
 ```javascript
