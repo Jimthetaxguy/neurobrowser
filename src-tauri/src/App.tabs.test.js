@@ -30,6 +30,7 @@ async function withApp(check, {
   lane = "tauri",
   history = null,
   keepStartFocus = false,
+  memory = null,
 } = {}) {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://shell.example" });
   const globals = {
@@ -90,6 +91,20 @@ async function withApp(check, {
       searchBrowsingHistory: async (query, limit) => {
         calls.push(["history", query, limit]);
         return typeof history === "function" ? history(query, limit) : history;
+      },
+    }),
+    ...(memory == null ? {} : {
+      searchLocalMemory: async (query, limit) => {
+        calls.push(["memory", query, limit]);
+        return typeof memory.search === "function" ? memory.search(query, limit) : memory.search;
+      },
+      explainMemoryResult: async (query, result, limit) => {
+        calls.push(["explain", query, result?.block_id, limit]);
+        return typeof memory.explain === "function" ? memory.explain(query, result, limit) : memory.explain;
+      },
+      forgetMemory: async (pageUrl) => {
+        calls.push(["forget", pageUrl]);
+        if (typeof memory.forget === "function") await memory.forget(pageUrl);
       },
     }),
     ...(lane === "appkit" ? {
@@ -1397,6 +1412,67 @@ test("address suggestions open history and Escape closes them without stopping",
       ["browser", "stop_page_load", "session", 0],
     ]);
   }, { history: sampleHistory });
+});
+
+test("address suggestions show history and memory, and Forget still removes the page", async () => {
+  const memoryHit = {
+    block_id: "block-1",
+    page_url: "https://notes.example/page",
+    heading_path: ["Meeting notes"],
+    text: "Quarterly plan for the team",
+  };
+  await withApp(async ({ calls, click, document, keydown }) => {
+    const input = document.querySelector(".location .url-input");
+    await setInput(input, "docs");
+    await settle(350);
+
+    const labels = [...document.querySelectorAll(".omnibox-suggestions-label")].map((label) => label.textContent);
+    assert.deepEqual(labels, ["History", "Memory"]);
+    const rows = [...document.querySelectorAll(".omnibox-suggestion")];
+    assert.equal(rows[0].dataset.kind, "action");
+    assert.equal(rows[0].textContent, "Search DuckDuckGo for docs");
+    assert.equal(rows[1].dataset.kind, "history");
+    assert.match(rows[1].textContent, /Guide/);
+    assert.match(rows[1].textContent, /docs\.example/);
+    assert.equal(rows[2].dataset.kind, "memory");
+    assert.match(rows[2].textContent, /Meeting notes/);
+    assert.match(rows[2].textContent, /https:\/\/notes\.example\/page/);
+    assert.equal(rows[0].classList.contains("active"), true);
+
+    await keydown("ArrowDown", { target: input });
+    await keydown("ArrowDown", { target: input });
+    const moved = [...document.querySelectorAll(".omnibox-suggestion")];
+    assert.equal(moved[1].classList.contains("active"), false);
+    assert.equal(moved[2].classList.contains("active"), true);
+
+    const why = [...moved[2].querySelectorAll("button")].find((button) => button.textContent === "Why");
+    await click(why);
+    assert.match(document.querySelector(".omnibox-explain").textContent, /matched the heading/);
+    assert.equal(document.querySelector(".omnibox-explain-score").textContent, "title 1.50");
+    assert.ok(calls.some((call) => call[0] === "explain" && call[1] === "docs" && call[2] === "block-1"));
+
+    const forget = [...document.querySelectorAll(".omnibox-suggestion-action")].find((button) => button.textContent === "Forget");
+    await click(forget);
+    assert.equal(document.querySelector(".omnibox-forget-prompt").textContent, "Stop capturing notes.example?");
+    calls.length = 0;
+    await click(document.querySelector(".omnibox-suggestion-action.danger"));
+    assert.deepEqual(calls.filter((call) => call[0] === "forget"), [["forget", "https://notes.example/page"]]);
+    assert.equal(document.querySelector("[data-kind='memory']"), null);
+    assert.ok(document.querySelector("[data-kind='history']"));
+    assert.match(
+      document.querySelector(".status-bar").textContent,
+      /Forgot notes\.example and blocked further capture for that site\./
+    );
+  }, {
+    history: sampleHistory,
+    memory: {
+      search: [memoryHit],
+      explain: {
+        snippets: ["matched the heading"],
+        breakdown: [{ field: "title", score: 1.5 }],
+      },
+    },
+  });
 });
 
 test("the AppKit shell does not draw the local start page", async () => {
