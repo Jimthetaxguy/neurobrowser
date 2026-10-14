@@ -221,3 +221,86 @@ fn watch_view(page_id: usize, view: *mut std::ffi::c_void, on_click: Arc<dyn Fn(
         }
     });
 }
+
+/// Receive the hit through the engine's native evaluation completion, never IPC.
+pub fn read_snapshot(
+    webview: &Webview,
+    callback: impl Fn(String) + Send + 'static,
+) -> Result<(), String> {
+    webview
+        .with_webview(move |platform| read_native_snapshot(platform, callback))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn read_native_snapshot(
+    platform: tauri::webview::PlatformWebview,
+    callback: impl Fn(String) + 'static,
+) {
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_web_kit::WKWebView;
+    let block = block2::RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
+        if !error.is_null() || value.is_null() {
+            return;
+        }
+        // Only a primitive JS string can be a snapshot. NSNull and all other
+        // result types fail closed. The engine owns value for this callback.
+        let value = unsafe { &*value };
+        let Some(value) = value.downcast_ref::<NSString>() else {
+            return;
+        };
+        if let Ok(encoded) = serde_json::to_string(&value.to_string()) {
+            callback(encoded);
+        }
+    });
+    unsafe {
+        let view = &*(platform.inner() as *const WKWebView);
+        view.evaluateJavaScript_completionHandler(
+            &NSString::from_str("window.__NEUROBROWSER_TAKE_CONTEXT__()"),
+            Some(&block),
+        );
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn read_native_snapshot(
+    platform: tauri::webview::PlatformWebview,
+    callback: impl Fn(String) + 'static,
+) {
+    use java_script_core::ValueExt;
+    use webkit2gtk::WebViewExt;
+    platform.inner().run_javascript(
+        "window.__NEUROBROWSER_TAKE_CONTEXT__()",
+        None::<&gtk::gio::Cancellable>,
+        move |result| {
+            if let Some(value) = result.ok().and_then(|result| result.js_value()) {
+                if value.is_string() {
+                    if let Ok(encoded) = serde_json::to_string(&value.to_string()) {
+                        callback(encoded);
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+)))]
+fn read_native_snapshot(
+    _platform: tauri::webview::PlatformWebview,
+    _callback: impl Fn(String) + 'static,
+) {
+}

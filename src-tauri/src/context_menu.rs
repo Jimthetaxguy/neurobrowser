@@ -1,7 +1,7 @@
 //! Right-click menu for a page webview.
 //!
-//! The page reports what was under the pointer. This module decides the
-//! items and the action. A page cannot name a destination file: Save Image
+//! The host reads a trusted-event snapshot from the installed closure.
+//! This module decides the items and the action. A page cannot name a destination file: Save Image
 //! only keeps an http(s) address, and the download handler chooses the path.
 
 use serde::Serialize;
@@ -372,13 +372,11 @@ pub fn clamp_menu_point(x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
     (x, y)
 }
 
-/// Expression the page webview evaluates. One JSON string, the image address.
-/// There is no path argument.
-pub fn save_image_expression(url: &str) -> String {
-    let url_json = serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string());
-    format!(
-        "(() => {{ const save = window.__NEUROBROWSER_SAVE_IMAGE__; if (typeof save === \"function\") save({url_json}); }})()"
-    )
+/// Only a host evaluation result, never an IPC report body, supplies the hit.
+pub fn context_snapshot_from_eval(result: &str) -> Option<Value> {
+    let serialized: String = serde_json::from_str(result).ok()?;
+    let value: Value = serde_json::from_str(&serialized).ok()?;
+    value.is_object().then_some(value)
 }
 
 pub fn duckduckgo_search_url(query: &str) -> String {
@@ -522,6 +520,17 @@ mod tests {
     }
 
     #[test]
+    fn host_callback_requires_a_serialized_snapshot() {
+        assert!(context_snapshot_from_eval("null").is_none());
+        assert!(context_snapshot_from_eval(r#"{"imageUrl":"https://8.8.8.8/forged"}"#).is_none());
+        let snapshot = serde_json::to_string(&r#"{"imageUrl":"https://8.8.8.8/real"}"#).unwrap();
+        assert_eq!(
+            context_snapshot_from_eval(&snapshot).unwrap()["imageUrl"],
+            "https://8.8.8.8/real"
+        );
+    }
+
+    #[test]
     fn a_page_only_menu_is_back_forward_and_reload() {
         let hit = context_hit_from_report("https://8.8.8.8/", None);
         let model = menu_model(&hit);
@@ -604,10 +613,6 @@ mod tests {
             }
             other => panic!("expected save, got {other:?}"),
         }
-        let expression = save_image_expression("https://8.8.8.8/pic.png\");alert(1)");
-        assert!(expression.contains("__NEUROBROWSER_SAVE_IMAGE__"));
-        assert!(expression.contains(r#"https://8.8.8.8/pic.png\");alert(1)"#));
-        assert!(!expression.contains("/tmp"));
         assert_eq!(
             duckduckgo_search_url("cats & dogs"),
             "https://duckduckgo.com/?q=cats%20%26%20dogs"

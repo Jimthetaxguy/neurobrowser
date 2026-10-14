@@ -2,6 +2,7 @@ mod context_menu;
 mod downloads;
 mod find_page;
 mod native_context_click;
+mod native_image_download;
 mod runtime;
 mod zoom;
 
@@ -783,7 +784,22 @@ fn browser_runtime_report(
     payload: RuntimeReportPayload,
 ) -> Result<(), String> {
     if payload.request_id == context_menu::CONTEXT_MENU_REQUEST {
-        return present_context_menu(&webview, state.inner(), payload.payload);
+        // Never accept a caller-supplied hit, even during a real right-click.
+        let caller = webview.clone();
+        return native_context_click::read_snapshot(&webview, move |result| {
+            let Some(body) = context_menu::context_snapshot_from_eval(&result) else {
+                return;
+            };
+            let app = caller.app_handle().clone();
+            let caller = caller.clone();
+            let _ = app.clone().run_on_main_thread(move || {
+                if let Err(error) =
+                    present_context_menu(&caller, app.state::<AppState>().inner(), Some(body))
+                {
+                    tracing::warn!("could not present context menu: {error}");
+                }
+            });
+        });
     }
     if payload.request_id == POPUP_BLOCKED_REQUEST {
         let page_id = page_id_from_runtime_label(webview.label())
@@ -893,8 +909,7 @@ fn save_context_image(app: &AppHandle, page_id: usize, url: &str) {
     let Some(webview) = app.get_webview(&runtime_id) else {
         return;
     };
-    let expression = context_menu::save_image_expression(url);
-    if let Err(error) = webview.eval(expression) {
+    if let Err(error) = native_image_download::start(&webview, url) {
         tracing::warn!("could not save image: {error}");
     }
 }

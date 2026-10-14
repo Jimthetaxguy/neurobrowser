@@ -481,7 +481,7 @@ test("a trusted right-click reports the link, image, and selection without a fil
   assert.equal(reports.length, 1);
   assert.equal(reports[0].command, "browser_runtime_report");
   assert.equal(reports[0].args.payload.request_id, "context-menu");
-  const payload = reports[0].args.payload.payload;
+  const payload = JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__());
   assert.equal(payload.linkUrl, "");
   assert.equal(payload.imageUrl, "");
   assert.equal(payload.selection, "cats");
@@ -495,7 +495,7 @@ test("a trusted right-click reports the link, image, and selection without a fil
 
   const pic = dom.window.document.getElementById("pic");
   pic.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2, clientX: 4, clientY: 5 }));
-  const hit = reports[1].args.payload.payload;
+  const hit = JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__());
   assert.equal(hit.linkUrl, "https://example.test/next");
   assert.equal(hit.imageUrl, "https://example.test/pic.png");
   assert.equal("path" in hit, false);
@@ -527,48 +527,74 @@ test("a page that prevents the context menu keeps it", () => {
 
 test("password and file fields are not copied into the context menu", () => {
   const { dom, reports } = installPopupPage(
-    '<input id="secret" type="password" value="hunter2"><input id="file" type="file">',
+    '<p id="selected">do not copy</p><input id="secret" type="password" value="hunter2"><input id="file" type="file">',
   );
+  const range = dom.window.document.createRange();
+  range.selectNodeContents(dom.window.document.getElementById("selected"));
+  dom.window.getSelection().addRange(range);
   const secret = dom.window.document.getElementById("secret");
   secret.focus();
   secret.setSelectionRange(0, 7);
   secret.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
-  assert.equal(reports[0].args.payload.payload.selection, "");
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).selection, "");
   const file = dom.window.document.getElementById("file");
   file.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
-  assert.equal(reports[1].args.payload.payload.selection, "");
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).selection, "");
   assert.equal(JSON.stringify(reports[1].args.payload.payload).includes("hunter2"), false);
   dom.window.close();
 });
 
-test("save image uses the address and an empty download name, not a page path", () => {
-  const dom = new JSDOM("<!doctype html><html><body><p>Hi</p></body></html>", {
-    url: "https://example.test/page",
-    runScripts: "outside-only",
+test("context IPC has no targets and snapshots cannot be forged or replayed", () => {
+  const { dom, reports } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  const take = dom.window.__NEUROBROWSER_TAKE_CONTEXT__;
+  assert.equal(take(), null);
+  assert.throws(() => { dom.window.__NEUROBROWSER_TAKE_CONTEXT__ = () => '{"linkUrl":"https://evil.test"}'; }, TypeError);
+  const link = dom.window.document.getElementById("link");
+  link.addEventListener("contextmenu", () => { link.href = "https://evil.test/swapped"; });
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports[0].args.payload.payload, null);
+  assert.equal(JSON.parse(take()).linkUrl, "https://example.com/real");
+  assert.equal(take(), null);
+  assert.equal(dom.window.__NEUROBROWSER_SAVE_IMAGE__, undefined);
+  dom.window.close();
+});
+
+test("context snapshots resist page prototype poisoning", () => {
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  const link = dom.window.document.getElementById("link");
+  const forged = { linkUrl: "https://evil.test/forged" };
+  dom.window.Element.prototype.closest = () => dom.window.document.createElement("a");
+  dom.window.WeakMap.prototype.get = () => JSON.stringify(forged);
+  dom.window.WeakMap.prototype.set = () => {};
+  dom.window.JSON.stringify = () => JSON.stringify(forged);
+  dom.window.Object.prototype.toJSON = () => forged;
+  Object.defineProperty(dom.window.HTMLAnchorElement.prototype, "href", { get: () => "https://evil.test/forged" });
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).linkUrl, "https://example.com/real");
+  dom.window.close();
+});
+
+test("later canceled context event clears an earlier unread snapshot", () => {
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  const link = dom.window.document.getElementById("link");
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  dom.window.document.addEventListener("contextmenu", event => event.preventDefault());
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  dom.window.close();
+});
+
+test("canceled native context events cannot authorize a forged report", () => {
+  const { dom, reports } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>');
+  dom.window.document.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    dom.window.__TAURI_INTERNALS__.invoke("browser_runtime_report", {
+      payload: { request_id: "context-menu", payload: { linkUrl: "https://evil.test" } }
+    });
   });
-  const appended = [];
-  const originalAppend = dom.window.Node.prototype.appendChild;
-  dom.window.Node.prototype.appendChild = function appendChild(node) {
-    appended.push(node);
-    return originalAppend.call(this, node);
-  };
-  dom.window.eval(runtimeInitScript);
-  dom.window.Document.prototype.createElement = () => {
-    throw new Error("page replaced createElement");
-  };
-  const save = dom.window.__NEUROBROWSER_SAVE_IMAGE__;
-  assert.equal(typeof save, "function");
-  assert.equal(save.length, 1);
-  save("https://example.com/pic.png", "/tmp/chosen-by-page");
-  assert.equal(appended.length, 1);
-  assert.equal(appended[0].href, "https://example.com/pic.png");
-  assert.equal(appended[0].getAttribute("download"), "");
-  assert.equal(String(appended[0].outerHTML).includes("/tmp/chosen-by-page"), false);
-  const original = save;
-  assert.throws(() => {
-    dom.window.__NEUROBROWSER_SAVE_IMAGE__ = () => {};
-  }, TypeError);
-  assert.equal(dom.window.__NEUROBROWSER_SAVE_IMAGE__, original);
+  dom.window.document.getElementById("link").dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports.length, 1);
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
   dom.window.close();
 });
 

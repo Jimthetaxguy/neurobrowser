@@ -657,91 +657,91 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   window.open = shellOpen;
   if (typeof Window === 'function' && Window.prototype) Window.prototype.open = shellOpen;
 
-  // Save Image asks WebKit to download one address. The download attribute is
-  // empty on purpose: the page does not name a file, and the shell's download
-  // handler reserves the path under Downloads. Setters are captured here so a
-  // later page script cannot replace them and slip a path into the click.
-  const nativeCreate = Document.prototype.createElement;
-  const nativeAppend = Node.prototype.appendChild;
-  const nativeClick = HTMLElement.prototype.click;
-  const hrefSet = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'href');
-  const downloadSet = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
-  const relSet = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'rel');
-  const saveImage = (url) => {
-    if (typeof url !== 'string' || url.length === 0) return;
-    const anchor = nativeCreate.call(document, 'a');
-    if (hrefSet && typeof hrefSet.set === 'function') hrefSet.set.call(anchor, url);
-    else anchor.href = url;
-    if (downloadSet && typeof downloadSet.set === 'function') downloadSet.set.call(anchor, '');
-    else anchor.download = '';
-    if (relSet && typeof relSet.set === 'function') relSet.set.call(anchor, 'noopener');
-    else anchor.rel = 'noopener';
-    const parent = document.documentElement;
-    if (parent) nativeAppend.call(parent, anchor);
-    nativeClick.call(anchor);
-    if (typeof anchor.remove === 'function') anchor.remove();
-  };
-  Object.defineProperty(window, '__NEUROBROWSER_SAVE_IMAGE__', {
-    value: saveImage, writable: false, configurable: false
+  // Only this document-start closure can write a hit. IPC reports merely wake
+  // the host, which reads the serialized snapshot via eval_with_callback.
+  // Pages can drain it (deny their own menu), but cannot replace its contents.
+  const stringifyContext = JSON.stringify.bind(JSON);
+  const contextHits = new WeakMap();
+  const rememberContext = contextHits.set.bind(contextHits);
+  const readContext = contextHits.get.bind(contextHits);
+  const deleteContext = contextHits.delete.bind(contextHits);
+  const readSelection = window.getSelection.bind(window);
+  const selectionString = Function.prototype.call.bind(Selection.prototype.toString);
+  const closestContext = Function.prototype.call.bind(Element.prototype.closest);
+  const contextTarget = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Event.prototype, 'target').get);
+  const linkHref = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'href').get);
+  const imageSrc = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').get);
+  const imageCurrentSrc = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'currentSrc').get);
+  const contextX = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientX').get);
+  const contextY = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientY').get);
+  let pendingContext = null;
+  // A later click must never consume a snapshot left by an earlier event.
+  window.addEventListener('mousedown', (event) => {
+    if (trustedClick(event)) pendingContext = null;
+  }, true);
+  Object.defineProperty(window, '__NEUROBROWSER_TAKE_CONTEXT__', {
+    value: () => {
+      const hit = pendingContext;
+      pendingContext = null;
+      return hit;
+    }, writable: false, configurable: false
   });
 
-  const elementOf = (target) => {
-    if (!target) return null;
-    if (target.nodeType === 1) return target;
-    return target.parentElement || null;
-  };
-  const absoluteUrl = (value) => {
-    if (typeof value !== 'string' || value.length === 0) return '';
-    try {
-      return new URL(value, location.href).href;
-    } catch (_) {
-      return '';
-    }
-  };
+  const contextNodeType = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType').get);
+  const contextParent = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype, 'parentElement').get);
+  const contextTag = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Element.prototype, 'tagName').get);
+  const contextCanceled = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Event.prototype, 'defaultPrevented').get);
+  const contextTrim = Function.prototype.call.bind(String.prototype.trim);
+  const contextSlice = Function.prototype.call.bind(String.prototype.slice);
+  const inputGetters = ['type', 'value', 'selectionStart', 'selectionEnd'].map(key =>
+    Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, key).get));
+  const areaGetters = ['type', 'value', 'selectionStart', 'selectionEnd'].map(key =>
+    Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, key).get));
   const fieldSelection = (node) => {
-    if (!node || node.nodeType !== 1) return '';
-    const tag = node.tagName;
+    if (!node || contextNodeType(node) !== 1) return '';
+    const tag = contextTag(node);
     if (tag !== 'INPUT' && tag !== 'TEXTAREA') return '';
-    const type = String(node.type || '').toLowerCase();
+    const getters = tag === 'INPUT' ? inputGetters : areaGetters;
+    const type = getters[0](node);
     if (type === 'password' || type === 'hidden' || type === 'file') return '';
-    const start = node.selectionStart;
-    const end = node.selectionEnd;
+    const start = getters[2](node);
+    const end = getters[3](node);
     if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return '';
-    return String(node.value).slice(start, end).trim().slice(0, 2000);
+    return contextSlice(contextTrim(contextSlice(getters[1](node), start, end)), 0, 2000);
   };
-  const reportContextMenu = (event) => {
-    if (typeof invoke !== 'function') return;
-    const element = elementOf(event.target);
-    const link = element && element.closest && element.closest('a[href]');
-    const image = element && element.closest && element.closest('img');
-    let selection = fieldSelection(element);
-    if (!selection) {
-      const selected = window.getSelection && window.getSelection();
-      selection = selected ? String(selected).trim().slice(0, 2000) : '';
-    }
-    const notice = invoke('browser_runtime_report', {
-      payload: {
-        page_id: 0,
-        request_id: 'context-menu',
-        payload: {
-          linkUrl: link && link.href ? absoluteUrl(link.href) : '',
-          imageUrl: image ? absoluteUrl(image.currentSrc || image.src || '') : '',
-          selection,
-          x: Number(event.clientX) || 0,
-          y: Number(event.clientY) || 0
-        },
-        error: null
-      }
-    });
-    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
-  };
-  // Window bubble runs after the page's own listeners. A page that called
-  // preventDefault keeps its menu; a real right-click otherwise gets ours.
+  // Capture before page handlers can replace DOM methods or change the target.
   window.addEventListener('contextmenu', (event) => {
     if (!trustedClick(event)) return;
-    if (event.defaultPrevented) return;
+    pendingContext = null;
+    const target = contextTarget(event);
+    const element = target && (contextNodeType(target) === 1 ? target : contextParent(target));
+    const link = element && closestContext(element, 'a[href]');
+    const image = element && closestContext(element, 'img');
+    const fieldType = element && contextTag(element) === 'INPUT' ? inputGetters[0](element) : '';
+    const excludedField = fieldType === 'password' || fieldType === 'hidden' || fieldType === 'file';
+    let selection = fieldSelection(element);
+    if (!selection && !excludedField) {
+      const selected = readSelection();
+      selection = selected ? contextSlice(contextTrim(selectionString(selected)), 0, 2000) : '';
+    }
+    rememberContext(event, stringifyContext({
+      __proto__: null,
+      linkUrl: link ? linkHref(link) : '',
+      imageUrl: image ? imageCurrentSrc(image) || imageSrc(image) : '',
+      selection,
+      x: contextX(event), y: contextY(event)
+    }));
+  }, true);
+  window.addEventListener('contextmenu', (event) => {
+    const hit = readContext(event);
+    deleteContext(event);
+    if (!hit || contextCanceled(event) || typeof invoke !== 'function') return;
     event.preventDefault();
-    reportContextMenu(event);
+    pendingContext = hit;
+    const notice = invoke('browser_runtime_report', {
+      payload: { page_id: 0, request_id: 'context-menu', payload: null, error: null }
+    });
+    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
   }, false);
 
   Object.defineProperty(window, '__NEUROBROWSER_RUNTIME__', {
@@ -2421,7 +2421,7 @@ mod response_tests {
         assert!(super::RUNTIME_INIT_SCRIPT.contains(super::POPUP_BLOCKED_REQUEST));
         assert!(super::RUNTIME_INIT_SCRIPT.contains("browser_runtime_report"));
         assert!(super::RUNTIME_INIT_SCRIPT.contains(crate::context_menu::CONTEXT_MENU_REQUEST));
-        assert!(super::RUNTIME_INIT_SCRIPT.contains("__NEUROBROWSER_SAVE_IMAGE__"));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains("__NEUROBROWSER_TAKE_CONTEXT__"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("savePath"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("showSaveFilePicker"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("open_popup"));
