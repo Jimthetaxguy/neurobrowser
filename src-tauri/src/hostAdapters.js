@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { bindMenuCommand } from "./menuCommands.js";
 import { bindPageLifecycle } from "./nativePageEvents.js";
 
 function errorMessage(error) {
@@ -81,6 +82,9 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     },
     onPageLifecycle(callback) {
       return bindPageLifecycle(listen, callback);
+    },
+    onMenuCommand(callback) {
+      return bindMenuCommand(listen, callback);
     },
     async searchLocalMemory(query, limit = 8) {
       return invoke("search_local_memory", { query, limit });

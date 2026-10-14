@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
+import { createMenuEchoGuard, numberedTabCommand } from "./menuCommands.js";
 import { moveTab, nativePageUpdates, pageLifecycleUpdates, securityState } from "./nativePageEvents.js";
 import {
   createNativeNavigationState,
@@ -86,6 +87,13 @@ function activateRelativeTab(tabs, currentPageId, delta, activatePage) {
   const index = current < 0 ? 0 : current;
   const next = (index + delta + tabs.length) % tabs.length;
   const tab = tabs[next];
+  if (tab && tab.id !== currentPageId) activatePage(tab.id);
+}
+
+function activateNumberedTab(tabs, currentPageId, number, activatePage) {
+  const index = number === 9 ? tabs.length - 1 : number - 1;
+  if (index < 0 || index >= tabs.length) return;
+  const tab = tabs[index];
   if (tab && tab.id !== currentPageId) activatePage(tab.id);
 }
 
@@ -483,6 +491,7 @@ export default function App({ adapter, lane }) {
     },
   ]);
   const nativeNavigationRef = useRef(createNativeNavigationState());
+  const menuEcho = useRef(createMenuEchoGuard());
 
   const appendMessage = useCallback((role, text) => {
     const id = nextMessageId.current;
@@ -874,20 +883,14 @@ export default function App({ adapter, lane }) {
   }, [adapter.rendersPageInHost, syncBrowserViewport]);
 
   useEffect(() => {
-    // The page webview does not deliver keys here. These chords, including
-    // Escape to stop a load, run only while this React chrome is focused.
+    // Keys from the page webview never arrive here. The native menu emits the
+    // same commands when that webview is focused. Marking a chord here drops
+    // the menu echo of this key so chrome focus does not run it twice.
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
-        if (
-          compact ||
-          event.repeat ||
-          event.defaultPrevented ||
-          event.altKey ||
-          event.metaKey ||
-          event.ctrlKey
-        ) {
-          return;
-        }
+        if (compact || event.repeat || event.altKey || event.metaKey || event.ctrlKey) return;
+        menuEcho.current.mark("stop");
+        if (event.defaultPrevented) return;
         if (loading == null && !pageLoading) return;
         if (addressDirtyRef.current) return;
         if (currentPageId == null || sessionId == null) return;
@@ -899,22 +902,52 @@ export default function App({ adapter, lane }) {
         stopPageLoad();
         return;
       }
+
+      const altHistory =
+        event.altKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.shiftKey &&
+        (event.key === "ArrowLeft" ||
+          event.key === "ArrowRight" ||
+          event.code === "ArrowLeft" ||
+          event.code === "ArrowRight");
+      if (altHistory) {
+        if (compact) return;
+        const forward = event.key === "ArrowRight" || event.code === "ArrowRight";
+        menuEcho.current.mark(forward ? "forward" : "back");
+        if (event.repeat) return;
+        event.preventDefault();
+        runBrowserAction(forward ? "browser_forward" : "browser_back");
+        return;
+      }
+
       const modifier = event.metaKey || event.ctrlKey;
+      if (event.key === "Tab" && event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (compact) return;
+        menuEcho.current.mark(event.shiftKey ? "previous-tab" : "next-tab");
+        event.preventDefault();
+        activateRelativeTab(tabs, currentPageId, event.shiftKey ? -1 : 1, activatePage);
+        return;
+      }
       if (!modifier) return;
       const key = event.key.toLowerCase();
       if (key === "t") {
         if (compact) return;
+        menuEcho.current.mark("new-tab");
         event.preventDefault();
         createNewTab();
         return;
       }
       if (key === "l") {
+        menuEcho.current.mark("focus-address");
         event.preventDefault();
         document.querySelector(".url-input")?.focus();
         return;
       }
       if (key === "w" && currentPageId != null) {
         if (compact) return;
+        menuEcho.current.mark("close-tab");
         event.preventDefault();
         closeTab(currentPageId);
         return;
@@ -922,17 +955,39 @@ export default function App({ adapter, lane }) {
 
       if (compact || event.altKey) return;
 
-      if (key === "r" && !event.shiftKey && !event.repeat) {
+      if (key === "r" && !event.shiftKey) {
+        menuEcho.current.mark("reload");
+        if (event.repeat) return;
         event.preventDefault();
         runBrowserAction("browser_reload");
         return;
       }
-      if (typingInTextField(event)) return;
+      if (typingInTextField(event)) {
+        const side = bracketSide(event);
+        if (side) {
+          const shifted = event.shiftKey || event.key === "{" || event.key === "}";
+          menuEcho.current.mark(
+            shifted
+              ? side === "left"
+                ? "previous-tab"
+                : "next-tab"
+              : side === "left"
+                ? "back"
+                : "forward"
+          );
+        } else if (!event.shiftKey && !event.repeat && /^[1-9]$/.test(event.key)) {
+          menuEcho.current.mark(`select-tab-${event.key}`);
+        }
+        return;
+      }
 
       const side = bracketSide(event);
       if (side) {
-        event.preventDefault();
         const shifted = event.shiftKey || event.key === "{" || event.key === "}";
+        menuEcho.current.mark(
+          shifted ? (side === "left" ? "previous-tab" : "next-tab") : side === "left" ? "back" : "forward"
+        );
+        event.preventDefault();
         if (shifted) {
           activateRelativeTab(tabs, currentPageId, side === "left" ? -1 : 1, activatePage);
         } else if (!event.repeat) {
@@ -941,16 +996,57 @@ export default function App({ adapter, lane }) {
         return;
       }
 
-      if (event.shiftKey || event.repeat || !/^[1-9]$/.test(event.key)) return;
+      if (event.shiftKey || !/^[1-9]$/.test(event.key)) return;
+      menuEcho.current.mark(`select-tab-${event.key}`);
+      if (event.repeat) return;
       event.preventDefault();
-      const index = event.key === "9" ? tabs.length - 1 : Number(event.key) - 1;
-      if (index < 0 || index >= tabs.length) return;
-      const tab = tabs[index];
-      if (tab.id !== currentPageId) activatePage(tab.id);
+      activateNumberedTab(tabs, currentPageId, Number(event.key), activatePage);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [activatePage, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
+
+  useEffect(() => {
+    if (typeof adapter.onMenuCommand !== "function") return undefined;
+    return adapter.onMenuCommand((command) => {
+      if (menuEcho.current.isEcho(command)) return;
+      if (compact && command !== "focus-address") return;
+      if (command === "new-tab") {
+        createNewTab();
+        return;
+      }
+      if (command === "close-tab") {
+        if (currentPageId != null) closeTab(currentPageId);
+        return;
+      }
+      if (command === "focus-address") {
+        document.querySelector(".url-input")?.focus();
+        return;
+      }
+      if (command === "reload") {
+        runBrowserAction("browser_reload");
+        return;
+      }
+      if (command === "stop") {
+        if (loading == null && !pageLoading) return;
+        if (addressDirtyRef.current) return;
+        if (currentPageId == null || sessionId == null) return;
+        stopPageLoad();
+        return;
+      }
+      if (command === "back" || command === "forward") {
+        runBrowserAction(command === "back" ? "browser_back" : "browser_forward");
+        return;
+      }
+      if (command === "next-tab" || command === "previous-tab") {
+        activateRelativeTab(tabs, currentPageId, command === "previous-tab" ? -1 : 1, activatePage);
+        return;
+      }
+      const number = numberedTabCommand(command);
+      if (number == null) return;
+      activateNumberedTab(tabs, currentPageId, number, activatePage);
+    });
+  }, [activatePage, adapter, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
 
   const stageText =
     "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";

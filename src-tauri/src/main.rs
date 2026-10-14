@@ -17,7 +17,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, State, WebviewWindow};
 
 struct AppState {
     session_manager: SessionManager,
@@ -822,6 +823,347 @@ fn set_provider(
     })
 }
 
+/// Emitted to the main control webview when a browser menu item is chosen.
+/// Edit-role items are not emitted; the OS applies them to the focused webview.
+pub const MENU_COMMAND_EVENT: &str = "menu-command";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuSection {
+    File,
+    View,
+    History,
+}
+
+struct MenuShortcut {
+    section: MenuSection,
+    id: &'static str,
+    label: &'static str,
+    accelerator: &'static str,
+    enabled: bool,
+}
+
+// Reopen Closed Tab (Cmd/Ctrl+Shift+T) is omitted: the shell has no closed-tab stack.
+const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
+    MenuShortcut {
+        section: MenuSection::File,
+        id: "new-tab",
+        label: "New Tab",
+        accelerator: "CmdOrCtrl+T",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::File,
+        id: "close-tab",
+        label: "Close Tab",
+        accelerator: "CmdOrCtrl+W",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::File,
+        id: "focus-address",
+        label: "Focus Address Bar",
+        accelerator: "CmdOrCtrl+L",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "reload",
+        label: "Reload",
+        accelerator: "CmdOrCtrl+R",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "stop",
+        label: "Stop",
+        accelerator: "Escape",
+        enabled: false,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "next-tab",
+        label: "Next Tab",
+        accelerator: "Ctrl+Tab",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "previous-tab",
+        label: "Previous Tab",
+        accelerator: "Ctrl+Shift+Tab",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-1",
+        label: "Tab 1",
+        accelerator: "CmdOrCtrl+1",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-2",
+        label: "Tab 2",
+        accelerator: "CmdOrCtrl+2",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-3",
+        label: "Tab 3",
+        accelerator: "CmdOrCtrl+3",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-4",
+        label: "Tab 4",
+        accelerator: "CmdOrCtrl+4",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-5",
+        label: "Tab 5",
+        accelerator: "CmdOrCtrl+5",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-6",
+        label: "Tab 6",
+        accelerator: "CmdOrCtrl+6",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-7",
+        label: "Tab 7",
+        accelerator: "CmdOrCtrl+7",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-8",
+        label: "Tab 8",
+        accelerator: "CmdOrCtrl+8",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-9",
+        label: "Last Tab",
+        accelerator: "CmdOrCtrl+9",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "back",
+        label: "Back",
+        accelerator: "CmdOrCtrl+[",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "forward",
+        label: "Forward",
+        accelerator: "CmdOrCtrl+]",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "back-alt",
+        label: "Back",
+        accelerator: "Alt+Left",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "forward-alt",
+        label: "Forward",
+        accelerator: "Alt+Right",
+        enabled: true,
+    },
+];
+
+fn menu_command(id: &str) -> Option<&'static str> {
+    match id {
+        "new-tab" => Some("new-tab"),
+        "close-tab" => Some("close-tab"),
+        "focus-address" => Some("focus-address"),
+        "reload" => Some("reload"),
+        "stop" => Some("stop"),
+        "back" | "back-alt" => Some("back"),
+        "forward" | "forward-alt" => Some("forward"),
+        "next-tab" => Some("next-tab"),
+        "previous-tab" => Some("previous-tab"),
+        "select-tab-1" => Some("select-tab-1"),
+        "select-tab-2" => Some("select-tab-2"),
+        "select-tab-3" => Some("select-tab-3"),
+        "select-tab-4" => Some("select-tab-4"),
+        "select-tab-5" => Some("select-tab-5"),
+        "select-tab-6" => Some("select-tab-6"),
+        "select-tab-7" => Some("select-tab-7"),
+        "select-tab-8" => Some("select-tab-8"),
+        "select-tab-9" => Some("select-tab-9"),
+        _ => None,
+    }
+}
+
+fn emit_menu_command(app: &AppHandle, command: &str) {
+    if let Err(error) = app.emit_to(
+        EventTarget::labeled(runtime::MAIN_WEBVIEW_LABEL),
+        MENU_COMMAND_EVENT,
+        command,
+    ) {
+        tracing::warn!("failed to emit {MENU_COMMAND_EVENT} ({command}): {error}");
+    }
+}
+
+fn section_items<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    section: MenuSection,
+) -> tauri::Result<Vec<MenuItem<R>>> {
+    let mut items = Vec::new();
+    for shortcut in BROWSER_MENU_ITEMS {
+        if shortcut.section != section {
+            continue;
+        }
+        items.push(MenuItem::with_id(
+            manager,
+            shortcut.id,
+            shortcut.label,
+            shortcut.enabled,
+            Some(shortcut.accelerator),
+        )?);
+    }
+    Ok(items)
+}
+
+fn append_with_separator_before<R: Runtime, M: Manager<R>>(
+    submenu: &Submenu<R>,
+    manager: &M,
+    items: &[MenuItem<R>],
+    separator_before: &[&str],
+) -> tauri::Result<()> {
+    for item in items {
+        let id: &str = item.id().as_ref();
+        if separator_before.contains(&id) {
+            submenu.append(&PredefinedMenuItem::separator(manager)?)?;
+        }
+        submenu.append(item)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_submenu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Submenu<R>> {
+    let about = PredefinedMenuItem::about(manager, None, None)?;
+    let services = PredefinedMenuItem::services(manager, None)?;
+    let hide = PredefinedMenuItem::hide(manager, None)?;
+    let hide_others = PredefinedMenuItem::hide_others(manager, None)?;
+    let show_all = PredefinedMenuItem::show_all(manager, None)?;
+    let quit = PredefinedMenuItem::quit(manager, None)?;
+    let after_about = PredefinedMenuItem::separator(manager)?;
+    let after_services = PredefinedMenuItem::separator(manager)?;
+    let before_quit = PredefinedMenuItem::separator(manager)?;
+    Submenu::with_items(
+        manager,
+        "NeuroBrowser",
+        true,
+        &[
+            &about,
+            &after_about,
+            &services,
+            &after_services,
+            &hide,
+            &hide_others,
+            &show_all,
+            &before_quit,
+            &quit,
+        ],
+    )
+}
+
+fn browser_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<(Menu<R>, MenuItem<R>)> {
+    let file_items = section_items(manager, MenuSection::File)?;
+    let view_items = section_items(manager, MenuSection::View)?;
+    let history_items = section_items(manager, MenuSection::History)?;
+    let stop = view_items
+        .iter()
+        .find(|item| item.id().as_ref() == "stop")
+        .cloned()
+        .expect("View menu includes Stop");
+
+    let file = Submenu::new(manager, "File", true)?;
+    append_with_separator_before(&file, manager, &file_items, &["focus-address"])?;
+
+    // Predefined edit items target the focused webview, including a page.
+    let undo = PredefinedMenuItem::undo(manager, None)?;
+    let redo = PredefinedMenuItem::redo(manager, None)?;
+    let cut = PredefinedMenuItem::cut(manager, None)?;
+    let copy = PredefinedMenuItem::copy(manager, None)?;
+    let paste = PredefinedMenuItem::paste(manager, None)?;
+    let select_all = PredefinedMenuItem::select_all(manager, None)?;
+    let edit_history_sep = PredefinedMenuItem::separator(manager)?;
+    let edit_select_sep = PredefinedMenuItem::separator(manager)?;
+    let edit = Submenu::with_items(
+        manager,
+        "Edit",
+        true,
+        &[
+            &undo,
+            &redo,
+            &edit_history_sep,
+            &cut,
+            &copy,
+            &paste,
+            &edit_select_sep,
+            &select_all,
+        ],
+    )?;
+
+    let view = Submenu::new(manager, "View", true)?;
+    append_with_separator_before(&view, manager, &view_items, &["next-tab", "select-tab-1"])?;
+
+    let history = Submenu::new(manager, "History", true)?;
+    append_with_separator_before(&history, manager, &history_items, &["back-alt"])?;
+
+    let menu = Menu::new(manager)?;
+    #[cfg(target_os = "macos")]
+    menu.append(&macos_app_submenu(manager)?)?;
+    menu.append(&file)?;
+    menu.append(&edit)?;
+    menu.append(&view)?;
+    menu.append(&history)?;
+    Ok((menu, stop))
+}
+
+fn install_app_menu(app: &tauri::App, runtimes: &BrowserRuntimeRegistry) -> tauri::Result<()> {
+    let handle = app.handle();
+    let (menu, stop) = browser_menu(handle)?;
+    let app_handle = handle.clone();
+    let stop_item = stop.clone();
+    runtimes.set_active_loading_hook(std::sync::Arc::new(move |loading| {
+        let stop_item = stop_item.clone();
+        let app_handle = app_handle.clone();
+        if let Err(error) = app_handle.run_on_main_thread(move || {
+            if let Err(error) = stop_item.set_enabled(loading) {
+                tracing::warn!("failed to update Stop menu item: {error}");
+            }
+        }) {
+            tracing::warn!("failed to schedule Stop menu update: {error}");
+        }
+    }));
+    handle.set_menu(menu)?;
+    handle.on_menu_event(|app, event| {
+        if let Some(command) = menu_command(event.id().as_ref()) {
+            emit_menu_command(app, command);
+        }
+    });
+    Ok(())
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -840,6 +1182,11 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            install_app_menu(app, runtimes.as_ref()).map_err(
+                |err| -> Box<dyn std::error::Error> {
+                    Box::new(std::io::Error::other(err.to_string()))
+                },
+            )?;
             let memory = open_memory(app).map_err(|err| -> Box<dyn std::error::Error> {
                 Box::new(std::io::Error::other(err))
             })?;
@@ -885,9 +1232,70 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_run_response, AgentRunEvent, AgentRunResult, AgentRunStatus, ToolCall};
+    use super::{
+        agent_run_response, menu_command, AgentRunEvent, AgentRunResult, AgentRunStatus, ToolCall,
+        BROWSER_MENU_ITEMS,
+    };
     use neurobrowser::{PolicyDecision, PolicyOutcome, RiskFlag};
     use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::str::FromStr;
+
+    #[test]
+    fn browser_menu_accelerators_parse_and_skip_edit_roles() {
+        let mut ids = HashSet::new();
+        let mut accelerators = HashSet::new();
+        for shortcut in BROWSER_MENU_ITEMS {
+            assert!(ids.insert(shortcut.id), "duplicate id {}", shortcut.id);
+            assert!(
+                accelerators.insert(shortcut.accelerator),
+                "duplicate accelerator {}",
+                shortcut.accelerator
+            );
+            muda::accelerator::Accelerator::from_str(shortcut.accelerator).unwrap_or_else(
+                |error| panic!("{} failed to parse: {error}", shortcut.accelerator),
+            );
+            let command = menu_command(shortcut.id).unwrap_or_else(|| {
+                panic!("{} is not forwarded to the control webview", shortcut.id)
+            });
+            if shortcut.id == "back-alt" {
+                assert_eq!(command, "back");
+            } else if shortcut.id == "forward-alt" {
+                assert_eq!(command, "forward");
+            } else {
+                assert_eq!(command, shortcut.id);
+            }
+        }
+        assert!(
+            !accelerators
+                .iter()
+                .any(|item| *item == "CmdOrCtrl+Shift+T" || *item == "Ctrl+Shift+T"),
+            "reopen closed tab is not a menu accelerator"
+        );
+        assert_eq!(menu_command("reopen-closed-tab"), None);
+        for edit in [
+            "undo",
+            "redo",
+            "cut",
+            "copy",
+            "paste",
+            "select_all",
+            "separator",
+        ] {
+            assert_eq!(
+                menu_command(edit),
+                None,
+                "{edit} stays on the focused webview"
+            );
+        }
+        let stop = BROWSER_MENU_ITEMS
+            .iter()
+            .find(|item| item.id == "stop")
+            .expect("stop item");
+        assert_eq!(stop.accelerator, "Escape");
+        assert!(!stop.enabled);
+        assert_eq!(menu_command("select-tab-9"), Some("select-tab-9"));
+    }
 
     #[test]
     fn agent_run_response_drops_unread_bodies() {

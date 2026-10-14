@@ -585,11 +585,17 @@ struct PendingRuntimeRequest {
     sender: oneshot::Sender<Result<Value, String>>,
 }
 
+type ActiveLoadingHook = Arc<dyn Fn(bool) + Send + Sync>;
+
 #[derive(Default)]
 pub struct BrowserRuntimeRegistry {
     pages: Mutex<HashMap<usize, RuntimePage>>,
     pending: Mutex<HashMap<String, PendingRuntimeRequest>>,
     active_page: Mutex<Option<usize>>,
+    /// Last flag delivered to the loading hook. `None` until the first report
+    /// so a hook attached later still hears the current value.
+    last_active_loading: Mutex<Option<bool>>,
+    active_loading_hook: Mutex<Option<ActiveLoadingHook>>,
 }
 
 impl BrowserRuntimeRegistry {
@@ -625,6 +631,9 @@ impl BrowserRuntimeRegistry {
                 ));
             }
         }
+        drop(pending);
+        drop(active_page);
+        self.notify_active_loading();
         removed.map(|page| page.runtime_id)
     }
 
@@ -699,6 +708,7 @@ impl BrowserRuntimeRegistry {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.loading = loading;
         }
+        self.notify_active_loading();
     }
 
     /// A finished load clears `loading` and leaves any cancellation recorded.
@@ -714,6 +724,7 @@ impl BrowserRuntimeRegistry {
             page.navigation_cancel = Some(reason.into());
             page.suppress_finished_event = true;
         }
+        self.notify_active_loading();
     }
 
     /// Netguard allowed a new hop. A refusal recorded for an earlier hop
@@ -724,6 +735,7 @@ impl BrowserRuntimeRegistry {
             page.navigation_cancel = None;
             page.loading = true;
         }
+        self.notify_active_loading();
     }
 
     pub fn clear_navigation_cancel(&self, page_id: usize) {
@@ -785,10 +797,47 @@ impl BrowserRuntimeRegistry {
 
     pub fn set_active_page(&self, page_id: Option<usize>) {
         *self.active_page.lock().unwrap() = page_id;
+        self.notify_active_loading();
     }
 
     pub fn active_page(&self) -> Option<usize> {
         *self.active_page.lock().unwrap()
+    }
+
+    /// Whether the visible page is loading. Background tabs do not count.
+    pub fn active_page_is_loading(&self) -> bool {
+        let Some(page_id) = self.active_page() else {
+            return false;
+        };
+        self.pages
+            .lock()
+            .unwrap()
+            .get(&page_id)
+            .is_some_and(|page| page.loading)
+    }
+
+    /// Called when the active page starts or stops loading, including a tab
+    /// switch onto a page that is already loading. The Stop menu item uses
+    /// this so Escape is a menu accelerator only while a load can be stopped.
+    pub fn set_active_loading_hook(&self, hook: ActiveLoadingHook) {
+        *self.active_loading_hook.lock().unwrap() = Some(hook);
+        self.last_active_loading.lock().unwrap().take();
+        self.notify_active_loading();
+    }
+
+    fn notify_active_loading(&self) {
+        let loading = self.active_page_is_loading();
+        {
+            let mut last = self.last_active_loading.lock().unwrap();
+            if *last == Some(loading) {
+                return;
+            }
+            *last = Some(loading);
+        }
+        let hook = self.active_loading_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(loading);
+        }
     }
 
     pub fn all_pages(&self) -> Vec<(usize, String)> {
@@ -943,7 +992,7 @@ const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
 pub const PAGE_LIFECYCLE_EVENT: &str = "page-lifecycle";
 
 /// Default label of the control webview created from `tauri.conf.json`.
-const MAIN_WEBVIEW_LABEL: &str = "main";
+pub(crate) const MAIN_WEBVIEW_LABEL: &str = "main";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1029,9 +1078,377 @@ fn missing_runtime_response(error: &str, action_request: bool) -> String {
     }
 }
 
+#[async_trait]
+impl BrowserInterface for TauriBrowserRuntime {
+    fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities::desktop()
+    }
+
+    async fn observe(&self, limits: ObservationLimits) -> Result<PageObservation, String> {
+        let before_url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        let limits = limits.bounded();
+        let limits_json = serde_json::to_string(&limits).map_err(|error| error.to_string())?;
+        let runtime_id_json =
+            serde_json::to_string(&self.runtime_id).map_err(|error| error.to_string())?;
+        let mut observation: PageObservation = self
+            .request_json(
+                &format!("runtime.observe({runtime_id_json}, {limits_json})"),
+                false,
+            )
+            .await?;
+        let native_url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        if before_url != native_url {
+            return Err("Page navigated while collecting evidence; observe again".into());
+        }
+        if observation
+            .document
+            .as_ref()
+            .is_none_or(|document| document.runtime_id != self.runtime_id)
+        {
+            return Err("Observation runtime identity mismatch".into());
+        }
+        observation.url = native_url;
+        observation.capabilities = self.capabilities();
+        observation.apply_limits(limits);
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    async fn dispatch_target(&self, command: &TargetCommand) -> Result<(), TargetDispatchError> {
+        if command.document.runtime_id != self.runtime_id {
+            return Err(TargetDispatchError::rejected(
+                "Target belongs to a different runtime",
+            ));
+        }
+        let command_json = serde_json::to_string(command)
+            .map_err(|error| TargetDispatchError::rejected(error.to_string()))?;
+        let result: TargetAcknowledgment = self
+            .request_json(&format!("runtime.dispatchTarget({command_json})"), true)
+            .await
+            .map_err(TargetDispatchError::unknown)?;
+        match result.state {
+            DispatchState::Acknowledged => Ok(()),
+            DispatchState::NotDispatched => Err(TargetDispatchError::rejected(result.message)),
+            DispatchState::Unknown => Err(TargetDispatchError::unknown(result.message)),
+        }
+    }
+
+    async fn navigate(&self, url: &str) -> Result<(), String> {
+        if let Some(reason) = neurobrowser::netguard::blocked_reason(url) {
+            tracing::warn!("Blocked navigation to {}: {}", url, reason);
+            return Err(reason.to_string());
+        }
+        let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
+        self.registry.clear_navigation_cancel(self.page_id);
+        self.registry.set_loading(self.page_id, true);
+        self.webview()?
+            .navigate(parsed)
+            .map_err(|e| e.to_string())?;
+        self.wait_for_navigation().await
+    }
+
+    async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
+        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+        self.request_json(&format!("runtime.querySelector({selector_json})"), false)
+            .await
+    }
+
+    async fn get_text(&self, selector: &str) -> Result<String, String> {
+        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+        self.request_json(&format!("runtime.getText({selector_json})"), false)
+            .await
+    }
+
+    async fn click(&self, selector: &str) -> Result<(), String> {
+        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+        self.execute_action(&format!("runtime.click({selector_json})"))
+            .await
+    }
+
+    async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
+        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+        let text_json = serde_json::to_string(text).map_err(|e| e.to_string())?;
+        self.execute_action(&format!("runtime.typeText({selector_json}, {text_json})"))
+            .await
+    }
+
+    async fn submit_form(&self, selector: &str) -> Result<(), String> {
+        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+        self.execute_action(&format!("runtime.submitForm({selector_json})"))
+            .await
+    }
+
+    async fn scroll_to(&self, selector: &str) -> Result<(), String> {
+        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
+        self.execute_action(&format!("runtime.scrollTo({selector_json})"))
+            .await
+    }
+
+    async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String> {
+        self.execute_action(&format!("runtime.scrollBy({}, {})", x, y))
+            .await
+    }
+
+    async fn keypress(&self, key: &str) -> Result<(), String> {
+        let key_json = serde_json::to_string(key).map_err(|e| e.to_string())?;
+        self.execute_action(&format!("runtime.keypress({key_json})"))
+            .await
+    }
+
+    async fn browser_back(&self) -> Result<(), String> {
+        // A missing history entry emits no load event. Let real page-load
+        // callbacks own loading, as for click/submit, rather than inventing one.
+        self.registry.clear_navigation_cancel(self.page_id);
+        self.execute_action("history.back()").await?;
+        self.wait_for_navigation().await
+    }
+
+    async fn browser_forward(&self) -> Result<(), String> {
+        // A missing history entry emits no load event. Let real page-load
+        // callbacks own loading, as for click/submit, rather than inventing one.
+        self.registry.clear_navigation_cancel(self.page_id);
+        self.execute_action("history.forward()").await?;
+        self.wait_for_navigation().await
+    }
+
+    async fn browser_reload(&self) -> Result<(), String> {
+        self.registry.clear_navigation_cancel(self.page_id);
+        self.registry.set_loading(self.page_id, true);
+        self.webview()?.reload().map_err(|e| e.to_string())
+    }
+
+    async fn snapshot(&self) -> Result<PageSnapshot, String> {
+        let before_url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()", false).await?;
+        snapshot.url = self
+            .webview()?
+            .url()
+            .map_err(|error| error.to_string())?
+            .to_string();
+        if snapshot.url != before_url {
+            return Err("Page navigated while collecting snapshot; observe again".into());
+        }
+        enrich_snapshot(&mut snapshot);
+        Ok(snapshot)
+    }
+
+    async fn wait_for_navigation(&self) -> Result<(), String> {
+        self.wait_for_ready(NAVIGATION_READY_TIMEOUT_MS).await
+    }
+}
+
+pub fn create_runtime_page(
+    window: &Window,
+    registry: Arc<BrowserRuntimeRegistry>,
+    page_id: usize,
+    runtime_id: &str,
+) -> Result<(), String> {
+    let external_url = ABOUT_BLANK_URL
+        .parse::<tauri::Url>()
+        .map_err(|e| e.to_string())?;
+    let registry_for_nav = registry.clone();
+    let registry_for_load = registry.clone();
+
+    let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
+        .initialization_script(RUNTIME_INIT_SCRIPT)
+        // Cancel hops the shared netguard rejects (redirects, JS, clicked links).
+        .on_navigation(move |url| {
+            if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
+                tracing::warn!("Blocked webview navigation to {}: {}", url, reason);
+                registry_for_nav.cancel_navigation(page_id, reason.to_string());
+                return false;
+            }
+            registry_for_nav.note_navigation_allowed(page_id);
+            registry_for_nav.begin_allowed_navigation(page_id);
+            true
+        })
+        .on_page_load(move |webview, payload| {
+            let url = payload.url().to_string();
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    registry_for_load.set_loading(page_id, true);
+                    emit_page_lifecycle(
+                        &webview,
+                        page_lifecycle_payload(
+                            page_id,
+                            PageLifecyclePhase::Started,
+                            url,
+                            String::new(),
+                            false,
+                        ),
+                    );
+                }
+                PageLoadEvent::Finished => {
+                    registry_for_load.finish_loading(page_id);
+                    emit_page_lifecycle(
+                        &webview,
+                        page_lifecycle_payload(
+                            page_id,
+                            PageLifecyclePhase::Finished,
+                            url,
+                            String::new(),
+                            registry_for_load.suppress_finished_event(page_id),
+                        ),
+                    );
+                }
+            }
+        })
+        .on_document_title_changed(move |webview, title| {
+            let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+            emit_page_lifecycle(
+                &webview,
+                page_lifecycle_payload(page_id, PageLifecyclePhase::Title, url, title, false),
+            );
+        });
+
+    let webview = window
+        .add_child(
+            builder,
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(1.0, 1.0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    webview.set_auto_resize(false).map_err(|e| e.to_string())?;
+    webview.hide().map_err(|e| e.to_string())?;
+    registry.register_page(page_id, runtime_id.to_string());
+    Ok(())
+}
+
+pub fn close_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    if let Some(runtime_id) = registry.unregister_page(page_id) {
+        if let Some(webview) = app.get_webview(&runtime_id) {
+            webview.close().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn set_active_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    registry.set_active_page(Some(page_id));
+    for (known_page_id, runtime_id) in registry.all_pages() {
+        let webview = app
+            .get_webview(&runtime_id)
+            .ok_or_else(|| format!("Webview '{}' not found", runtime_id))?;
+        if known_page_id == page_id {
+            let viewport = registry.viewport(known_page_id)?;
+            webview
+                .set_position(LogicalPosition::new(viewport.x, viewport.y))
+                .map_err(|e| e.to_string())?;
+            webview
+                .set_size(LogicalSize::new(
+                    viewport.width.max(1.0),
+                    viewport.height.max(1.0),
+                ))
+                .map_err(|e| e.to_string())?;
+            webview.show().map_err(|e| e.to_string())?;
+        } else {
+            webview.hide().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn sync_runtime_viewport(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+    viewport: BrowserViewport,
+) -> Result<(), String> {
+    registry.set_viewport(page_id, viewport)?;
+    if registry.active_page() == Some(page_id) {
+        let runtime_id = registry.page_runtime_id(page_id)?;
+        let webview = app
+            .get_webview(&runtime_id)
+            .ok_or_else(|| format!("Webview '{}' not found", runtime_id))?;
+        webview
+            .set_position(LogicalPosition::new(viewport.x, viewport.y))
+            .map_err(|e| e.to_string())?;
+        webview
+            .set_size(LogicalSize::new(
+                viewport.width.max(1.0),
+                viewport.height.max(1.0),
+            ))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod response_tests {
     use super::missing_runtime_response;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn stop_menu_hook_tracks_only_the_active_page() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(1, "page-runtime-1".into());
+        registry.register_page(2, "page-runtime-2".into());
+        registry.set_active_page(Some(1));
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_hook = seen.clone();
+        registry.set_active_loading_hook(Arc::new(move |loading| {
+            seen_hook.lock().unwrap().push(loading);
+        }));
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false]);
+
+        registry.set_loading(2, true);
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[false],
+            "a background load must not enable Stop"
+        );
+
+        registry.set_active_page(Some(2));
+        registry.set_loading(2, true);
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false, true]);
+
+        registry.set_active_page(Some(1));
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false, true, false]);
+
+        registry.begin_allowed_navigation(1);
+        registry.begin_allowed_navigation(1);
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false, true, false, true]);
+
+        registry.finish_loading(1);
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[false, true, false, true, false]
+        );
+
+        registry.set_loading(1, true);
+        registry.cancel_navigation(1, "refused");
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[false, true, false, true, false, true, false]
+        );
+
+        registry.set_loading(1, true);
+        registry.unregister_page(1);
+        assert_eq!(seen.lock().unwrap().last().copied(), Some(false));
+        assert!(!registry.active_page_is_loading());
+    }
 
     #[test]
     fn incomplete_action_acknowledgments_cannot_be_treated_as_dispatch_success() {
@@ -1362,320 +1779,4 @@ mod response_tests {
             );
         });
     }
-}
-
-#[async_trait]
-impl BrowserInterface for TauriBrowserRuntime {
-    fn capabilities(&self) -> RuntimeCapabilities {
-        RuntimeCapabilities::desktop()
-    }
-
-    async fn observe(&self, limits: ObservationLimits) -> Result<PageObservation, String> {
-        let before_url = self
-            .webview()?
-            .url()
-            .map_err(|error| error.to_string())?
-            .to_string();
-        let limits = limits.bounded();
-        let limits_json = serde_json::to_string(&limits).map_err(|error| error.to_string())?;
-        let runtime_id_json =
-            serde_json::to_string(&self.runtime_id).map_err(|error| error.to_string())?;
-        let mut observation: PageObservation = self
-            .request_json(
-                &format!("runtime.observe({runtime_id_json}, {limits_json})"),
-                false,
-            )
-            .await?;
-        let native_url = self
-            .webview()?
-            .url()
-            .map_err(|error| error.to_string())?
-            .to_string();
-        if before_url != native_url {
-            return Err("Page navigated while collecting evidence; observe again".into());
-        }
-        if observation
-            .document
-            .as_ref()
-            .is_none_or(|document| document.runtime_id != self.runtime_id)
-        {
-            return Err("Observation runtime identity mismatch".into());
-        }
-        observation.url = native_url;
-        observation.capabilities = self.capabilities();
-        observation.apply_limits(limits);
-        observation.validate()?;
-        Ok(observation)
-    }
-
-    async fn dispatch_target(&self, command: &TargetCommand) -> Result<(), TargetDispatchError> {
-        if command.document.runtime_id != self.runtime_id {
-            return Err(TargetDispatchError::rejected(
-                "Target belongs to a different runtime",
-            ));
-        }
-        let command_json = serde_json::to_string(command)
-            .map_err(|error| TargetDispatchError::rejected(error.to_string()))?;
-        let result: TargetAcknowledgment = self
-            .request_json(&format!("runtime.dispatchTarget({command_json})"), true)
-            .await
-            .map_err(TargetDispatchError::unknown)?;
-        match result.state {
-            DispatchState::Acknowledged => Ok(()),
-            DispatchState::NotDispatched => Err(TargetDispatchError::rejected(result.message)),
-            DispatchState::Unknown => Err(TargetDispatchError::unknown(result.message)),
-        }
-    }
-
-    async fn navigate(&self, url: &str) -> Result<(), String> {
-        if let Some(reason) = neurobrowser::netguard::blocked_reason(url) {
-            tracing::warn!("Blocked navigation to {}: {}", url, reason);
-            return Err(reason.to_string());
-        }
-        let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
-        self.registry.clear_navigation_cancel(self.page_id);
-        self.registry.set_loading(self.page_id, true);
-        self.webview()?
-            .navigate(parsed)
-            .map_err(|e| e.to_string())?;
-        self.wait_for_navigation().await
-    }
-
-    async fn query_selector(&self, selector: &str) -> Result<Vec<ElementInfo>, String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.request_json(&format!("runtime.querySelector({selector_json})"), false)
-            .await
-    }
-
-    async fn get_text(&self, selector: &str) -> Result<String, String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.request_json(&format!("runtime.getText({selector_json})"), false)
-            .await
-    }
-
-    async fn click(&self, selector: &str) -> Result<(), String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.execute_action(&format!("runtime.click({selector_json})"))
-            .await
-    }
-
-    async fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        let text_json = serde_json::to_string(text).map_err(|e| e.to_string())?;
-        self.execute_action(&format!("runtime.typeText({selector_json}, {text_json})"))
-            .await
-    }
-
-    async fn submit_form(&self, selector: &str) -> Result<(), String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.execute_action(&format!("runtime.submitForm({selector_json})"))
-            .await
-    }
-
-    async fn scroll_to(&self, selector: &str) -> Result<(), String> {
-        let selector_json = serde_json::to_string(selector).map_err(|e| e.to_string())?;
-        self.execute_action(&format!("runtime.scrollTo({selector_json})"))
-            .await
-    }
-
-    async fn scroll_by(&self, x: f32, y: f32) -> Result<(), String> {
-        self.execute_action(&format!("runtime.scrollBy({}, {})", x, y))
-            .await
-    }
-
-    async fn keypress(&self, key: &str) -> Result<(), String> {
-        let key_json = serde_json::to_string(key).map_err(|e| e.to_string())?;
-        self.execute_action(&format!("runtime.keypress({key_json})"))
-            .await
-    }
-
-    async fn browser_back(&self) -> Result<(), String> {
-        // A missing history entry emits no load event. Let real page-load
-        // callbacks own loading, as for click/submit, rather than inventing one.
-        self.registry.clear_navigation_cancel(self.page_id);
-        self.execute_action("history.back()").await?;
-        self.wait_for_navigation().await
-    }
-
-    async fn browser_forward(&self) -> Result<(), String> {
-        // A missing history entry emits no load event. Let real page-load
-        // callbacks own loading, as for click/submit, rather than inventing one.
-        self.registry.clear_navigation_cancel(self.page_id);
-        self.execute_action("history.forward()").await?;
-        self.wait_for_navigation().await
-    }
-
-    async fn browser_reload(&self) -> Result<(), String> {
-        self.registry.clear_navigation_cancel(self.page_id);
-        self.registry.set_loading(self.page_id, true);
-        self.webview()?.reload().map_err(|e| e.to_string())
-    }
-
-    async fn snapshot(&self) -> Result<PageSnapshot, String> {
-        let before_url = self
-            .webview()?
-            .url()
-            .map_err(|error| error.to_string())?
-            .to_string();
-        let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()", false).await?;
-        snapshot.url = self
-            .webview()?
-            .url()
-            .map_err(|error| error.to_string())?
-            .to_string();
-        if snapshot.url != before_url {
-            return Err("Page navigated while collecting snapshot; observe again".into());
-        }
-        enrich_snapshot(&mut snapshot);
-        Ok(snapshot)
-    }
-
-    async fn wait_for_navigation(&self) -> Result<(), String> {
-        self.wait_for_ready(NAVIGATION_READY_TIMEOUT_MS).await
-    }
-}
-
-pub fn create_runtime_page(
-    window: &Window,
-    registry: Arc<BrowserRuntimeRegistry>,
-    page_id: usize,
-    runtime_id: &str,
-) -> Result<(), String> {
-    let external_url = ABOUT_BLANK_URL
-        .parse::<tauri::Url>()
-        .map_err(|e| e.to_string())?;
-    let registry_for_nav = registry.clone();
-    let registry_for_load = registry.clone();
-
-    let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
-        .initialization_script(RUNTIME_INIT_SCRIPT)
-        // Cancel hops the shared netguard rejects (redirects, JS, clicked links).
-        .on_navigation(move |url| {
-            if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
-                tracing::warn!("Blocked webview navigation to {}: {}", url, reason);
-                registry_for_nav.cancel_navigation(page_id, reason.to_string());
-                return false;
-            }
-            registry_for_nav.note_navigation_allowed(page_id);
-            registry_for_nav.begin_allowed_navigation(page_id);
-            true
-        })
-        .on_page_load(move |webview, payload| {
-            let url = payload.url().to_string();
-            match payload.event() {
-                PageLoadEvent::Started => {
-                    registry_for_load.set_loading(page_id, true);
-                    emit_page_lifecycle(
-                        &webview,
-                        page_lifecycle_payload(
-                            page_id,
-                            PageLifecyclePhase::Started,
-                            url,
-                            String::new(),
-                            false,
-                        ),
-                    );
-                }
-                PageLoadEvent::Finished => {
-                    registry_for_load.finish_loading(page_id);
-                    emit_page_lifecycle(
-                        &webview,
-                        page_lifecycle_payload(
-                            page_id,
-                            PageLifecyclePhase::Finished,
-                            url,
-                            String::new(),
-                            registry_for_load.suppress_finished_event(page_id),
-                        ),
-                    );
-                }
-            }
-        })
-        .on_document_title_changed(move |webview, title| {
-            let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
-            emit_page_lifecycle(
-                &webview,
-                page_lifecycle_payload(page_id, PageLifecyclePhase::Title, url, title, false),
-            );
-        });
-
-    let webview = window
-        .add_child(
-            builder,
-            LogicalPosition::new(0.0, 0.0),
-            LogicalSize::new(1.0, 1.0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    webview.set_auto_resize(false).map_err(|e| e.to_string())?;
-    webview.hide().map_err(|e| e.to_string())?;
-    registry.register_page(page_id, runtime_id.to_string());
-    Ok(())
-}
-
-pub fn close_runtime_page(
-    app: &AppHandle,
-    registry: &BrowserRuntimeRegistry,
-    page_id: usize,
-) -> Result<(), String> {
-    if let Some(runtime_id) = registry.unregister_page(page_id) {
-        if let Some(webview) = app.get_webview(&runtime_id) {
-            webview.close().map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-pub fn set_active_runtime_page(
-    app: &AppHandle,
-    registry: &BrowserRuntimeRegistry,
-    page_id: usize,
-) -> Result<(), String> {
-    registry.set_active_page(Some(page_id));
-    for (known_page_id, runtime_id) in registry.all_pages() {
-        let webview = app
-            .get_webview(&runtime_id)
-            .ok_or_else(|| format!("Webview '{}' not found", runtime_id))?;
-        if known_page_id == page_id {
-            let viewport = registry.viewport(known_page_id)?;
-            webview
-                .set_position(LogicalPosition::new(viewport.x, viewport.y))
-                .map_err(|e| e.to_string())?;
-            webview
-                .set_size(LogicalSize::new(
-                    viewport.width.max(1.0),
-                    viewport.height.max(1.0),
-                ))
-                .map_err(|e| e.to_string())?;
-            webview.show().map_err(|e| e.to_string())?;
-        } else {
-            webview.hide().map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-pub fn sync_runtime_viewport(
-    app: &AppHandle,
-    registry: &BrowserRuntimeRegistry,
-    page_id: usize,
-    viewport: BrowserViewport,
-) -> Result<(), String> {
-    registry.set_viewport(page_id, viewport)?;
-    if registry.active_page() == Some(page_id) {
-        let runtime_id = registry.page_runtime_id(page_id)?;
-        let webview = app
-            .get_webview(&runtime_id)
-            .ok_or_else(|| format!("Webview '{}' not found", runtime_id))?;
-        webview
-            .set_position(LogicalPosition::new(viewport.x, viewport.y))
-            .map_err(|e| e.to_string())?;
-        webview
-            .set_size(LogicalSize::new(
-                viewport.width.max(1.0),
-                viewport.height.max(1.0),
-            ))
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }

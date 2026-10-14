@@ -42,6 +42,25 @@ test("AppKit keeps snapshots associated with their page and discards closed page
   }
 });
 
+test("the Tauri adapter forwards a menu command to the shell handler", async () => {
+  let handler = null;
+  const adapter = createTauriHostAdapter({
+    listen(name, next) {
+      assert.equal(name, "menu-command");
+      handler = next;
+      return () => { handler = null; };
+    },
+  });
+  const seen = [];
+  const stop = adapter.onMenuCommand((command) => seen.push(command));
+  await Promise.resolve();
+  await Promise.resolve();
+  handler({ payload: "focus-address" });
+  assert.deepEqual(seen, ["focus-address"]);
+  stop();
+  assert.equal(handler, null);
+});
+
 test("the Tauri adapter forwards a dispatched page-lifecycle payload", async () => {
   let handler = null;
   const adapter = createTauriHostAdapter({
