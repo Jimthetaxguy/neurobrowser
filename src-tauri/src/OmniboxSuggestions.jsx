@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { omniboxActionHint } from "./omniboxInput.js";
 
 const SEARCH_DEBOUNCE_MS = 200;
 const SEARCH_LIMIT = 8;
@@ -58,6 +59,12 @@ export function memoryQueryFromOmnibox(input) {
 
 function optionDomId(listId, index) {
   return `${listId}-opt-${index}`;
+}
+
+function urlInputClass(hint) {
+  if (hint === "Search DuckDuckGo") return "url-input hint-search";
+  if (hint) return "url-input hint-go";
+  return "url-input";
 }
 
 function formatScore(score) {
@@ -248,6 +255,10 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
   const canForget = typeof adapter?.forgetMemory === "function";
   const visible = open && hits.length > 0;
   const safeIndex = activeIndex >= 0 && activeIndex < hits.length ? activeIndex : -1;
+  const hintId = `${listId}-hint`;
+  // Snapshot updates replace `url` without touching the draft, so the hint
+  // follows an unsent edit and stays off the loaded page address.
+  const hint = userQueryRef.current === url ? omniboxActionHint(url) : "";
 
   useEffect(() => {
     if (userQueryRef.current !== url) {
@@ -414,10 +425,11 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
           aria-autocomplete="list"
           aria-busy={searching}
           aria-controls={visible ? listId : undefined}
+          aria-describedby={hint ? hintId : undefined}
           aria-expanded={visible}
           aria-label="URL or memory search"
           autoComplete="off"
-          className="url-input"
+          className={urlInputClass(hint)}
           onChange={(event) => {
             const value = event.target.value;
             userQueryRef.current = value;
@@ -431,6 +443,11 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
           role="combobox"
           value={url}
         />
+        {hint ? (
+          <span className="omnibox-hint" id={hintId}>
+            {hint}
+          </span>
+        ) : null}
         {visible && (
           <OmniboxSuggestions
             activeIndex={safeIndex}
