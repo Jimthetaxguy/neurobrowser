@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
+import { classifyOmniboxInput } from "./omniboxInput.js";
 import { createMenuEchoGuard, numberedTabCommand } from "./menuCommands.js";
 import { moveTab, nativePageUpdates, pageLifecycleUpdates, securityState } from "./nativePageEvents.js";
 import {
@@ -628,19 +629,24 @@ export default function App({ adapter, lane }) {
 
   const navigateCurrentPage = useCallback(async (nextUrl) => {
     if (currentPageId == null || !sessionId) return;
-    const rawUrl = (typeof nextUrl === "string" ? nextUrl : url).trim();
-    if (!rawUrl) return;
+    // The host navigate command still runs netguard on this URL.
+    const destination = classifyOmniboxInput(typeof nextUrl === "string" ? nextUrl : url);
+    if (!destination) return;
 
     const token = commandLoadToken.current + 1;
     commandLoadToken.current = token;
-    addressDirtyRef.current = false;
-    setStatus(`Navigating to ${rawUrl}`);
-    setLoading(`Opening ${rawUrl}...`);
+    setUrlFromPage(destination.url);
+    setStatus(
+      destination.kind === "search"
+        ? `Searching DuckDuckGo for ${destination.query}`
+        : `Navigating to ${destination.url}`
+    );
+    setLoading(`Opening ${destination.url}...`);
     expectNativeNavigation(currentPageId);
 
     try {
       await performPageAction(
-        () => adapter.navigate(sessionId, currentPageId, rawUrl),
+        () => adapter.navigate(sessionId, currentPageId, destination.url),
         "Navigation failed"
       );
     } finally {
@@ -649,7 +655,7 @@ export default function App({ adapter, lane }) {
         setPageLoading(false);
       }
     }
-  }, [adapter, currentPageId, expectNativeNavigation, performPageAction, sessionId, url]);
+  }, [adapter, currentPageId, expectNativeNavigation, performPageAction, sessionId, setUrlFromPage, url]);
 
   const runBrowserAction = useCallback(
     async (command) => {

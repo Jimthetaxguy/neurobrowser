@@ -147,6 +147,28 @@ textarea {
   outline: none;
 }
 
+.url-input.hint-go {
+  padding-right: 76px;
+}
+
+.url-input.hint-search {
+  padding-right: 168px;
+}
+
+.omnibox-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  user-select: none;
+  white-space: nowrap;
+}
+
 .omnibox {
   min-width: 0;
   position: relative;

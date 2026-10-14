@@ -122,7 +122,7 @@ async function withApp(check, {
     await act(async () => { element.click(); });
   };
   // Controlled address-bar text commits on keyup. jsdom does not implement requestSubmit.
-  const goTo = async (nextUrl) => {
+  const goTo = async (nextUrl, { submit = true } = {}) => {
     const input = document.querySelector(".url-input");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
     await act(async () => {
@@ -132,6 +132,7 @@ async function withApp(check, {
       setter.call(input, nextUrl);
       input.dispatchEvent(new window.Event("keyup", { bubbles: true }));
     });
+    if (!submit) return;
     await act(async () => {
       document.querySelector(".url-bar").dispatchEvent(
         new window.Event("submit", { bubbles: true, cancelable: true })
@@ -1143,6 +1144,45 @@ test("menu commands use the same handlers as the chrome shortcuts", async () => 
     await dispatchMenu("reopen-closed-tab");
     assert.deepEqual(calls, []);
   });
+});
+
+test("the address bar opens URLs and searches DuckDuckGo for other text", async () => {
+  await withApp(async ({ calls, document, goTo }) => {
+    assert.equal(document.querySelector(".omnibox-hint"), null);
+
+    await goTo("cats", { submit: false });
+    assert.equal(document.querySelector(".omnibox-hint").textContent, "Search DuckDuckGo");
+    await goTo("example.com/docs", { submit: false });
+    assert.equal(document.querySelector(".omnibox-hint").textContent, "Go to");
+
+    const navigatedTo = () => calls.filter((call) => call[0] === "navigate").map((call) => call[3]);
+    await goTo("   ");
+    await goTo("  example.com/docs  ");
+    await goTo("foo bar.com");
+    await goTo("localhost:3000/app");
+    await goTo("?example.com");
+    await goTo("https://already.example/path");
+    assert.deepEqual(navigatedTo(), [
+      "https://example.com/docs",
+      "https://duckduckgo.com/?q=foo%20bar.com",
+      "http://localhost:3000/app",
+      "https://duckduckgo.com/?q=example.com",
+      "https://already.example/path",
+    ]);
+    assert.match(statusText(document), /Navigating to https:\/\/already\.example\/path/);
+  }, { lane: "appkit" });
+});
+
+test("a bare loopback address still reaches the host netguard check", async () => {
+  const reason = "Refusing to fetch internal/loopback address (host '127.0.0.1')";
+  await withApp(async ({ calls, document, goTo }) => {
+    await goTo("127.0.0.1");
+    assert.deepEqual(calls, [["navigate", "session", 0, "http://127.0.0.1"]]);
+    assert.match(
+      document.querySelector(".status-line").textContent,
+      /Navigation failed: Refusing to fetch internal\/loopback address \(host '127\.0\.0\.1'\)/
+    );
+  }, { navigateError: reason, navigateFails: true });
 });
 
 test("a menu echo of a chrome shortcut does not run the command twice", async () => {
