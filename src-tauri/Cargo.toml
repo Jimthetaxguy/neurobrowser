@@ -38,3 +38,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+# Accelerator parsing only. Default features pull libxdo, which the app menu does not use.
+muda = { version = "=0.17.1", default-features = false }

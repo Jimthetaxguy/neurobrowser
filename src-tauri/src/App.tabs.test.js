@@ -44,6 +44,7 @@ async function withApp(check, {
   let nextPage = 0;
   const hostListeners = new Set();
   const lifecycleListeners = new Set();
+  const menuListeners = new Set();
   const adapter = {
     rendersPageInHost: false,
     createSession: async () => "session",
@@ -88,7 +89,12 @@ async function withApp(check, {
         hostListeners.add(callback);
         return () => hostListeners.delete(callback);
       },
-    } : {}),
+    } : {
+      onMenuCommand(callback) {
+        menuListeners.add(callback);
+        return () => menuListeners.delete(callback);
+      },
+    }),
   };
   const dispatch = async (event) => {
     await act(async () => {
@@ -98,6 +104,11 @@ async function withApp(check, {
   const dispatchLifecycle = async (event) => {
     await act(async () => {
       for (const listener of lifecycleListeners) listener(event);
+    });
+  };
+  const dispatchMenu = async (command) => {
+    await act(async () => {
+      for (const listener of menuListeners) listener(command);
     });
   };
   const root = createRoot(document.getElementById("root"));
@@ -150,7 +161,7 @@ async function withApp(check, {
   };
   try {
     await act(async () => { root.render(createElement(App, { adapter, lane })); });
-    await check({ calls, click, dispatch, dispatchLifecycle, document, goTo, keydown, toolbar });
+    await check({ calls, click, dispatch, dispatchLifecycle, dispatchMenu, document, goTo, keydown, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();
@@ -978,6 +989,10 @@ test("AppKit ignores the new chrome chords and still focuses the address field",
       ["9", { ctrl: true }],
       ["[", { ctrl: true, shift: true }],
       ["]", { meta: true, shift: true }],
+      ["ArrowLeft", { alt: true }],
+      ["ArrowRight", { alt: true }],
+      ["Tab", { ctrl: true }],
+      ["Tab", { ctrl: true, shift: true }],
     ]) {
       calls.length = 0;
       await keydown(key, options);
@@ -987,4 +1002,182 @@ test("AppKit ignores the new chrome chords and still focuses the address field",
     await keydown("l", { meta: true });
     assert.equal(document.activeElement, document.querySelector(".url-input"));
   }, { lane: "appkit" });
+});
+
+test("Alt+Left and Alt+Right go back and forward, including from a text field", async () => {
+  await withApp(async ({ calls, document, keydown }) => {
+    const urlInput = document.querySelector(".url-input");
+    await act(async () => { urlInput.focus(); });
+    const back = await keydown("ArrowLeft", { alt: true });
+    assert.equal(back.defaultPrevented, true);
+    assert.deepEqual(calls, [
+      ["browser", "browser_back", "session", 0],
+      ["snapshot", "session", 0],
+    ]);
+    calls.length = 0;
+    const forward = await keydown("ArrowRight", { alt: true, code: "ArrowRight" });
+    assert.equal(forward.defaultPrevented, true);
+    assert.deepEqual(calls, [
+      ["browser", "browser_forward", "session", 0],
+      ["snapshot", "session", 0],
+    ]);
+    calls.length = 0;
+    await keydown("ArrowLeft", { alt: true, ctrl: true });
+    await keydown("ArrowLeft", { alt: true, shift: true });
+    await keydown("ArrowLeft", { alt: true, repeat: true });
+    assert.deepEqual(calls, []);
+  });
+});
+
+test("Ctrl+Tab and Ctrl+Shift+Tab select the next and previous tab", async () => {
+  await withApp(async ({ calls, click, document, keydown }) => {
+    await keydown("Tab", { ctrl: true });
+    assert.deepEqual(calls, []);
+    await openMoreTabs(click, document, 2);
+    calls.length = 0;
+    const next = await keydown("Tab", { ctrl: true });
+    assert.equal(next.defaultPrevented, true);
+    assert.deepEqual(calls, [
+      ["activate", "session", 0],
+      ["snapshot", "session", 0],
+    ]);
+    calls.length = 0;
+    const previous = await keydown("Tab", { ctrl: true, shift: true });
+    assert.equal(previous.defaultPrevented, true);
+    assert.deepEqual(calls, [
+      ["activate", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+    const chat = document.querySelector(".chat-input");
+    await act(async () => { chat.focus(); });
+    calls.length = 0;
+    await keydown("Tab", { ctrl: true });
+    assert.deepEqual(calls, [
+      ["activate", "session", 0],
+      ["snapshot", "session", 0],
+    ]);
+    calls.length = 0;
+    await keydown("Tab", { ctrl: true, meta: true });
+    await keydown("Tab", { alt: true });
+    assert.deepEqual(calls, []);
+  });
+});
+
+test("menu commands use the same handlers as the chrome shortcuts", async () => {
+  await withApp(async ({ calls, click, dispatchLifecycle, dispatchMenu, document }) => {
+    await dispatchMenu("new-tab");
+    assert.equal(document.querySelectorAll(".tab").length, 2);
+    await click(document.querySelector(".header > button"));
+    assert.equal(document.querySelectorAll(".tab").length, 3);
+
+    calls.length = 0;
+    await dispatchMenu("select-tab-2");
+    assert.deepEqual(calls, [
+      ["activate", "session", 1],
+      ["snapshot", "session", 1],
+    ]);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 1");
+
+    calls.length = 0;
+    await dispatchMenu("next-tab");
+    assert.deepEqual(calls, [
+      ["activate", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+    calls.length = 0;
+    await dispatchMenu("previous-tab");
+    assert.deepEqual(calls, [
+      ["activate", "session", 1],
+      ["snapshot", "session", 1],
+    ]);
+    calls.length = 0;
+    await dispatchMenu("select-tab-9");
+    assert.deepEqual(calls, [
+      ["activate", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+
+    calls.length = 0;
+    await dispatchMenu("back");
+    assert.deepEqual(calls, [
+      ["browser", "browser_back", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+    calls.length = 0;
+    await dispatchMenu("forward");
+    assert.deepEqual(calls, [
+      ["browser", "browser_forward", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+    calls.length = 0;
+    await dispatchMenu("reload");
+    assert.deepEqual(calls, [
+      ["browser", "browser_reload", "session", 2],
+      ["snapshot", "session", 2],
+    ]);
+
+    await dispatchMenu("focus-address");
+    assert.equal(document.activeElement, document.querySelector(".url-input"));
+
+    calls.length = 0;
+    await dispatchMenu("stop");
+    assert.deepEqual(calls, []);
+    await dispatchLifecycle({
+      pageId: 2,
+      phase: "started",
+      url: "https://slow.example/",
+      title: "",
+    });
+    calls.length = 0;
+    await dispatchMenu("stop");
+    assert.deepEqual(calls, [["browser", "stop_page_load", "session", 2]]);
+
+    const tabCount = document.querySelectorAll(".tab").length;
+    await dispatchMenu("close-tab");
+    assert.equal(document.querySelectorAll(".tab").length, tabCount - 1);
+
+    calls.length = 0;
+    await dispatchMenu("copy");
+    await dispatchMenu("paste");
+    await dispatchMenu("undo");
+    await dispatchMenu("reopen-closed-tab");
+    assert.deepEqual(calls, []);
+  });
+});
+
+test("a menu echo of a chrome shortcut does not run the command twice", async () => {
+  await withApp(async ({ calls, dispatchLifecycle, dispatchMenu, document, keydown }) => {
+    const tabsBefore = document.querySelectorAll(".tab").length;
+    await keydown("t", { ctrl: true });
+    await dispatchMenu("new-tab");
+    assert.equal(document.querySelectorAll(".tab").length, tabsBefore + 1);
+
+    calls.length = 0;
+    await keydown("r", { meta: true });
+    await dispatchMenu("reload");
+    assert.deepEqual(calls, [
+      ["browser", "browser_reload", "session", 1],
+      ["snapshot", "session", 1],
+    ]);
+
+    const urlInput = document.querySelector(".url-input");
+    await act(async () => { urlInput.focus(); });
+    calls.length = 0;
+    const history = await keydown("[", { ctrl: true });
+    assert.equal(history.defaultPrevented, false);
+    await dispatchMenu("back");
+    assert.deepEqual(calls, []);
+
+    await act(async () => { urlInput.blur(); });
+    await dispatchLifecycle({
+      pageId: 1,
+      phase: "started",
+      url: "https://slow.example/",
+      title: "",
+    });
+    calls.length = 0;
+    await keydown("Escape");
+    await dispatchMenu("stop");
+    assert.deepEqual(calls, [["browser", "stop_page_load", "session", 1]]);
+  });
 });
