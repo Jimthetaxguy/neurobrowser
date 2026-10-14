@@ -25,7 +25,9 @@ class ContentViewController: NSViewController {
     /// older load or another tab.
     private var nextNavigationId = 0
     private var latestNavigationIds: [ObjectIdentifier: Int] = [:]
-    private var navigationIds: [ObjectIdentifier: Int] = [:]
+    // Weak object keys cannot mistake a recycled WKNavigation address for an
+    // earlier request that WebKit discarded without a terminal callback.
+    private let navigationIds = NSMapTable<WKNavigation, NSNumber>(keyOptions: .weakMemory, valueOptions: .strongMemory)
     private var navigationStatuses: [ObjectIdentifier: String] = [:]
     var currentPageId: Int? {
         pageIds.indices.contains(currentTabIndex) ? pageIds[currentTabIndex] : nil
@@ -330,7 +332,9 @@ class ContentViewController: NSViewController {
 
     private func takeNavigationId(_ navigation: WKNavigation?) -> Int? {
         guard let navigation = navigation else { return nil }
-        return navigationIds.removeValue(forKey: ObjectIdentifier(navigation))
+        let id = navigationIds.object(forKey: navigation)?.intValue
+        navigationIds.removeObject(forKey: navigation)
+        return id
     }
 
     /// Status for the page in `webView`, stamped with its newest navigation.
@@ -477,14 +481,14 @@ extension ContentViewController: WKNavigationDelegate {
     private func beginNavigation(_ webView: WKWebView, navigation: WKNavigation?) {
         // Host commands reserve their id immediately: WebKit may cancel the
         // old load before delivering didStart for its replacement.
-        if let navigation, navigationIds[ObjectIdentifier(navigation)] != nil { return }
+        if let navigation, navigationIds.object(forKey: navigation) != nil { return }
         guard tabPageId(for: webView) != nil else { return }
         nextNavigationId += 1
         let navigationId = nextNavigationId
         latestNavigationIds[ObjectIdentifier(webView)] = navigationId
         navigationStatuses.removeValue(forKey: ObjectIdentifier(webView))
         if let navigation = navigation {
-            navigationIds[ObjectIdentifier(navigation)] = navigationId
+            navigationIds.setObject(NSNumber(value: navigationId), forKey: navigation)
         }
         if let pageId = tabPageId(for: webView) {
             var event: [String: Any] = ["type": "navigation", "pageId": pageId, "navigationId": navigationId]
@@ -500,7 +504,7 @@ extension ContentViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
         guard let pageId = tabPageId(for: webView), let url = webView.url?.absoluteString,
               let navigation,
-              navigationIds[ObjectIdentifier(navigation)] == latestNavigationId(for: webView) else { return }
+              navigationIds.object(forKey: navigation)?.intValue == latestNavigationId(for: webView) else { return }
         pageUpdateHandler?(["type": "navigation", "pageId": pageId,
                             "navigationId": latestNavigationId(for: webView), "url": url])
         if currentPageId == pageId { urlBar.stringValue = url }

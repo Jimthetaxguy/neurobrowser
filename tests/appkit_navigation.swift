@@ -96,6 +96,12 @@ struct ReloadRegression {
             return event["reason"] as? String == "select" && event["navigationId"] as? Int == latest
                 && snapshot?["url"] as? String != base + "/last"
         }, "a stale selection must not borrow the replacement's navigation id")
+        // Several host requests in one run-loop turn must settle on the last.
+        events.removeAll()
+        for index in 0..<8 { controller.navigateCurrentTab(to: base + "/rapid-\(index)") }
+        wait("rapid navigation") { finished("/rapid-7") }
+        precondition(controller.urlBar.stringValue == base + "/rapid-7")
+        precondition(controller.reloadButton.title == "↻")
         // A hidden page's network failure must be restored when selected.
         events.removeAll()
         controller.navigateCurrentTab(to: base + "/failure")
