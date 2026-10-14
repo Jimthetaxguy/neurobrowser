@@ -7,6 +7,7 @@ import { NewTabPage } from "./NewTabPage.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { classifyOmniboxInput } from "./omniboxInput.js";
 import { createMenuEchoGuard, numberedTabCommand } from "./menuCommands.js";
+import { FindBar, chromeShortcut } from "./pageFind.js";
 import {
   blockedPopupLabel,
   focusAfterClose,
@@ -309,7 +310,7 @@ function StatsRow({ snapshot }) {
   );
 }
 
-function BrowserToolbar({ loading, onAction, onStop }) {
+function BrowserToolbar({ loading, onAction, onStop, zoomPercent }) {
   return (
     <div className="browser-toolbar">
       <button className="btn btn-secondary" onClick={() => onAction("browser_back")} type="button">
@@ -327,6 +328,9 @@ function BrowserToolbar({ loading, onAction, onStop }) {
           Reload
         </button>
       )}
+      {Number.isFinite(zoomPercent) ? (
+        <span aria-label={`Page zoom ${zoomPercent}%`} className="zoom-level">{zoomPercent}%</span>
+      ) : null}
     </div>
   );
 }
@@ -559,6 +563,16 @@ export default function App({ adapter, lane }) {
   const [pageLoading, setPageLoading] = useState(false);
   const [blockedPopups, setBlockedPopups] = useState({});
   const [downloads, setDownloads] = useState([]);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findHit, setFindHit] = useState({ total: 0, current: 0 });
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const findInputRef = useRef(null);
+  const findOpenRef = useRef(false);
+  const findQueryRef = useRef("");
+  const findToken = useRef(0);
+  findOpenRef.current = findOpen;
+  findQueryRef.current = findQuery;
   const blockedPopupsRef = useRef({});
   const sessionIdRef = useRef(null);
   sessionIdRef.current = sessionId;
@@ -665,6 +679,7 @@ export default function App({ adapter, lane }) {
       } catch (error) {
         setStatus(`Page refresh failed: ${messageText(error)}`);
       }
+      refreshZoomRef.current(pageId);
     },
     [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updateSnapshot]
   );
@@ -1023,6 +1038,9 @@ export default function App({ adapter, lane }) {
       if (updates.loading === true) setPageLoading(true);
       if (updates.loading === false) setPageLoading(false);
       if (typeof updates.url === "string") setUrlFromPage(updates.url);
+      if (updates.phase === "finished" && updates.pageId === currentPageIdRef.current) {
+        refreshZoomRef.current(updates.pageId);
+      }
       const pageId = updates.pageId;
       const title = typeof updates.title === "string" ? updates.title : null;
       const nextPageUrl = typeof event.url === "string" && event.url ? event.url : null;
@@ -1087,6 +1105,94 @@ export default function App({ adapter, lane }) {
     }
   }, [adapter]);
 
+  const refreshZoom = useCallback(async (pageId = currentPageId) => {
+    if (compact || typeof adapter.adjustPageZoom !== "function") return;
+    if (pageId == null || sessionId == null) return;
+    try {
+      const result = await adapter.adjustPageZoom(sessionId, pageId, "get");
+      if (pageId === currentPageIdRef.current && Number.isFinite(result?.percent)) {
+        setZoomPercent(result.percent);
+      }
+    } catch (error) {
+      console.warn("zoom read failed", messageText(error));
+    }
+  }, [adapter, compact, currentPageId, sessionId]);
+  const refreshZoomRef = useRef(refreshZoom);
+  refreshZoomRef.current = refreshZoom;
+
+  const changeZoom = useCallback(async (action) => {
+    if (compact || typeof adapter.adjustPageZoom !== "function") return;
+    if (currentPageId == null || sessionId == null) return;
+    try {
+      const result = await adapter.adjustPageZoom(sessionId, currentPageId, action);
+      if (Number.isFinite(result?.percent)) setZoomPercent(result.percent);
+    } catch (error) {
+      setStatus(`Zoom failed: ${messageText(error)}`);
+    }
+  }, [adapter, compact, currentPageId, sessionId]);
+
+  const runFind = useCallback(async (query, direction, pageId = currentPageId) => {
+    if (compact || typeof adapter.findInPage !== "function") return;
+    if (pageId == null || sessionId == null) return;
+    const token = ++findToken.current;
+    try {
+      const result = await adapter.findInPage(sessionId, pageId, query, direction);
+      if (token !== findToken.current || pageId !== currentPageIdRef.current) return;
+      setFindHit({
+        total: Number(result?.total) || 0,
+        current: Number(result?.current) || 0,
+      });
+    } catch (error) {
+      if (token !== findToken.current || pageId !== currentPageIdRef.current) return;
+      setStatus(`Find failed: ${messageText(error)}`);
+    }
+  }, [adapter, compact, currentPageId, sessionId]);
+
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    const focusField = () => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(focusField);
+    } else {
+      queueMicrotask(focusField);
+    }
+  }, []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindHit({ total: 0, current: 0 });
+    runFind("", "start");
+  }, [runFind]);
+
+  const onFindQuery = useCallback((value) => {
+    setFindQuery(value);
+    runFind(value, "start");
+  }, [runFind]);
+
+  const closeFindRef = useRef(closeFind);
+  closeFindRef.current = closeFind;
+  const chromeActionRef = useRef(() => {});
+  chromeActionRef.current = (shortcut) => {
+    if (shortcut === "find") {
+      openFind();
+      return;
+    }
+    if (shortcut === "find-next" || shortcut === "find-previous") {
+      setFindOpen(true);
+      const query = findQueryRef.current;
+      const direction = !query ? "start" : shortcut === "find-next" ? "next" : "previous";
+      runFind(query, direction);
+      return;
+    }
+    if (shortcut === "zoom-in") changeZoom("in");
+    else if (shortcut === "zoom-out") changeZoom("out");
+    else if (shortcut === "zoom-reset") changeZoom("reset");
+  };
+
   const activeTab = tabs.find((tab) => tab.id === currentPageId);
   const showStartPage =
     !compact &&
@@ -1098,25 +1204,36 @@ export default function App({ adapter, lane }) {
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
     let frame = null;
+    let frameKind = null;
     const queueSync = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(async () => {
+      if (frame != null) return;
+      const run = async () => {
         frame = null;
+        frameKind = null;
         try {
           await syncBrowserViewport();
         } catch (error) {
           console.warn("viewport sync failed", messageText(error));
         }
-      });
+      };
+      if (typeof window.requestAnimationFrame === "function") {
+        frameKind = "animation";
+        frame = window.requestAnimationFrame(run);
+      } else {
+        frameKind = "timeout";
+        frame = setTimeout(run, 16);
+      }
     };
     window.addEventListener("resize", queueSync);
-    const observer = new ResizeObserver(queueSync);
-    if (browserStageRef.current) observer.observe(browserStageRef.current);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(queueSync) : null;
+    if (browserStageRef.current) observer?.observe(browserStageRef.current);
     queueSync();
     return () => {
       window.removeEventListener("resize", queueSync);
-      observer.disconnect();
-      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      if (frame == null) return;
+      if (frameKind === "animation") window.cancelAnimationFrame(frame);
+      else clearTimeout(frame);
     };
   }, [adapter.rendersPageInHost, syncBrowserViewport]);
 
@@ -1126,6 +1243,11 @@ export default function App({ adapter, lane }) {
     // the menu echo of this key so chrome focus does not run it twice.
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
+        if (findOpenRef.current && !compact && !event.repeat && !event.altKey && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
+          closeFindRef.current();
+          return;
+        }
         if (compact || event.repeat || event.altKey || event.metaKey || event.ctrlKey) return;
         menuEcho.current.mark("stop");
         if (event.defaultPrevented) return;
@@ -1157,6 +1279,14 @@ export default function App({ adapter, lane }) {
         if (event.repeat) return;
         event.preventDefault();
         runBrowserAction(forward ? "browser_forward" : "browser_back");
+        return;
+      }
+
+      const shortcut = chromeShortcut(event);
+      if (shortcut && !compact) {
+        menuEcho.current.mark(shortcut);
+        event.preventDefault();
+        chromeActionRef.current(shortcut);
         return;
       }
 
@@ -1261,6 +1391,10 @@ export default function App({ adapter, lane }) {
         document.querySelector(".url-input")?.focus();
         return;
       }
+      if (command === "find" || command === "find-next" || command === "find-previous" || command === "zoom-in" || command === "zoom-out" || command === "zoom-reset") {
+        chromeActionRef.current(command);
+        return;
+      }
       if (command === "reload") {
         runBrowserAction("browser_reload");
         return;
@@ -1339,7 +1473,19 @@ export default function App({ adapter, lane }) {
       <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
       <main>
         <section className="browser-panel">
-          <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} />
+          <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} zoomPercent={zoomPercent} />
+          {findOpen ? (
+            <FindBar
+              current={findHit.current}
+              inputRef={findInputRef}
+              onClose={closeFind}
+              onNext={() => runFind(findQuery, findQuery ? "next" : "start")}
+              onPrevious={() => runFind(findQuery, findQuery ? "previous" : "start")}
+              onQuery={onFindQuery}
+              query={findQuery}
+              total={findHit.total}
+            />
+          ) : null}
           <StatsRow snapshot={snapshot} />
           <div className="downloads-slot">
             <Downloads items={downloads} onOpen={openDownload} onShow={showDownload} />

@@ -243,74 +243,6 @@ fn normalize_dns_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
-const DOWNLOAD_REDIRECT_LIMIT: usize = 10;
-
-/// The URL that remains after redirects, judged again before it is returned.
-///
-/// Each hop is refused before it is requested. A download can follow this
-/// result only when the final address is still allowed.
-pub async fn final_url_after_redirects(url: &str) -> Result<String, String> {
-    if let Some(reason) = blocked_reason(url) {
-        return Err(reason.to_string());
-    }
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .dns_resolver(guarded_resolver())
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|error| error.to_string())?;
-    follow_download_redirects(&client, url).await
-}
-
-async fn follow_download_redirects(
-    client: &reqwest::Client,
-    start: &str,
-) -> Result<String, String> {
-    let mut current = start.to_string();
-    for _ in 0..DOWNLOAD_REDIRECT_LIMIT {
-        if let Some(reason) = blocked_reason(&current) {
-            return Err(reason.to_string());
-        }
-        let response = client
-            .get(&current)
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        let landed = response.url().clone();
-        if let Some(reason) = blocked_reason(landed.as_str()) {
-            return Err(reason.to_string());
-        }
-        if !response.status().is_redirection() {
-            return Ok(landed.to_string());
-        }
-        let location = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        drop(response);
-        let next = redirect_target(&landed, &location)?;
-        current = next.to_string();
-    }
-    Err("too many redirects".into())
-}
-
-/// Join a redirect `Location` and refuse it when netguard would.
-fn redirect_target(current: &url::Url, location: &str) -> Result<url::Url, String> {
-    let location = location.trim();
-    if location.is_empty() {
-        return Err("Redirect had no destination".into());
-    }
-    let next = current
-        .join(location)
-        .map_err(|_| "Redirect destination is not a URL".to_string())?;
-    if let Some(reason) = blocked_reason(next.as_str()) {
-        return Err(reason.to_string());
-    }
-    Ok(next)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,99 +402,6 @@ mod tests {
             ),
             "127.0.0.1 is not localhost; a hop there must be re-checked"
         );
-    }
-
-    #[tokio::test]
-    async fn a_download_redirect_to_a_blocked_url_is_refused_before_that_hop() {
-        let (port, _server) = serve_paths(|_port, path| match path {
-            "/start" => (
-                "302 Found",
-                Some("http://169.254.169.254/latest/meta-data/".to_string()),
-                &b""[..],
-            ),
-            _ => ("200 OK", None, &b"secret"[..]),
-        });
-        let client = redirect_client(port);
-        let err = follow_download_redirects(&client, &format!("http://example.com:{port}/start"))
-            .await
-            .unwrap_err();
-        assert!(err.contains("169.254") || err.contains("internal"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn an_allowed_download_redirect_returns_the_final_url() {
-        let (port, _server) = serve_paths(|server_port, path| match path {
-            "/start" => (
-                "302 Found",
-                Some(format!("http://example.com:{server_port}/file.pdf")),
-                &b""[..],
-            ),
-            "/file.pdf" => ("200 OK", None, &b"%PDF"[..]),
-            _ => ("404 Not Found", None, &b""[..]),
-        });
-        let client = redirect_client(port);
-        let final_url =
-            follow_download_redirects(&client, &format!("http://example.com:{port}/start"))
-                .await
-                .expect("allowed redirect");
-        assert_eq!(final_url, format!("http://example.com:{port}/file.pdf"));
-    }
-
-    fn redirect_client(port: u16) -> reqwest::Client {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .resolve(
-                "example.com",
-                format!("127.0.0.1:{port}")
-                    .parse()
-                    .expect("loopback override"),
-            )
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .expect("test client")
-    }
-
-    /// Serves a few requests on loopback. `example.com` is pointed here with
-    /// reqwest's resolver override so netguard still sees a public name.
-    fn serve_paths<F>(handler: F) -> (u16, std::thread::JoinHandle<()>)
-    where
-        F: Fn(u16, &str) -> (&'static str, Option<String>, &'static [u8]) + Send + 'static,
-    {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        let server = std::thread::spawn(move || {
-            for _ in 0..4 {
-                let Ok((mut stream, _)) = listener.accept() else {
-                    break;
-                };
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
-                let mut request = Vec::new();
-                let mut buf = [0u8; 1024];
-                while let Ok(read) = std::io::Read::read(&mut stream, &mut buf) {
-                    if read == 0 {
-                        break;
-                    }
-                    request.extend_from_slice(&buf[..read]);
-                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let text = String::from_utf8_lossy(&request);
-                let path = text.split_whitespace().nth(1).unwrap_or("");
-                let (status, location, body) = handler(port, path);
-                let mut head = format!(
-                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
-                    body.len()
-                );
-                if let Some(location) = location {
-                    head.push_str(&format!("Location: {location}\r\n"));
-                }
-                head.push_str("\r\n");
-                let _ = std::io::Write::write_all(&mut stream, head.as_bytes());
-                let _ = std::io::Write::write_all(&mut stream, body);
-            }
-        });
-        (port, server)
     }
 }
 
@@ -729,34 +568,6 @@ mod resolver_tests {
             .expect("configured localhost must remain resolvable");
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].ip().to_string(), "127.0.0.1");
-    }
-
-    #[test]
-    fn a_redirect_to_a_blocked_final_url_is_refused() {
-        let current = url::Url::parse("https://93.184.216.34/download").unwrap();
-        let metadata =
-            redirect_target(&current, "http://169.254.169.254/latest/meta-data/").unwrap_err();
-        assert!(
-            metadata.contains("169.254") || metadata.contains("internal"),
-            "{metadata}"
-        );
-        let loopback = redirect_target(&current, "http://127.0.0.1/secret").unwrap_err();
-        assert!(
-            loopback.contains("127.0.0.1") || loopback.contains("internal"),
-            "{loopback}"
-        );
-        let file = redirect_target(&current, "file:///etc/passwd").unwrap_err();
-        assert!(file.contains("file"), "{file}");
-        let allowed = redirect_target(&current, "https://93.184.216.34/files/report.pdf").unwrap();
-        assert_eq!(allowed.as_str(), "https://93.184.216.34/files/report.pdf");
-    }
-
-    #[tokio::test]
-    async fn final_url_after_redirects_refuses_a_blocked_address_before_connecting() {
-        let err = final_url_after_redirects("http://169.254.169.254/latest/meta-data/")
-            .await
-            .unwrap_err();
-        assert!(err.contains("169.254") || err.contains("internal"), "{err}");
     }
 
     #[tokio::test]

@@ -1071,6 +1071,28 @@ impl TauriBrowserRuntime {
         );
         Ok(())
     }
+
+    pub fn page_url(&self) -> Result<String, String> {
+        self.webview()?
+            .url()
+            .map(|url| url.to_string())
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn set_page_zoom(&self, factor: f64) -> Result<(), String> {
+        self.webview()?
+            .set_zoom(factor)
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn find_in_page(
+        &self,
+        query: &str,
+        index: usize,
+    ) -> Result<crate::find_page::FindHit, String> {
+        self.request_json(&crate::find_page::search_expression(query, index), false)
+            .await
+    }
 }
 
 async fn wait_for_page_ready(
@@ -1177,6 +1199,16 @@ fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
             .iter()
             .zip(prefix.as_bytes())
             .all(|(left, right)| left.to_ascii_lowercase() == *right)
+}
+
+fn apply_remembered_zoom(webview: &Webview<impl Runtime>, url: &str) {
+    let Some(state) = webview.try_state::<crate::AppState>() else {
+        return;
+    };
+    let factor = state.zoom.factor_for_url(url);
+    if let Err(error) = webview.set_zoom(factor) {
+        tracing::warn!("page zoom was not applied: {error}");
+    }
 }
 
 fn show_if_browsed(webview: &Webview<impl Runtime>, url: &str, active: bool) {
@@ -1642,6 +1674,7 @@ pub fn create_runtime_page(
             match payload.event() {
                 PageLoadEvent::Started => {
                     registry_for_load.set_loading(page_id, true);
+                    apply_remembered_zoom(&webview, &url);
                     show_if_browsed(
                         &webview,
                         &url,
@@ -1660,6 +1693,7 @@ pub fn create_runtime_page(
                 }
                 PageLoadEvent::Finished => {
                     registry_for_load.finish_loading(page_id);
+                    apply_remembered_zoom(&webview, &url);
                     let payload = page_lifecycle_payload(
                         page_id,
                         PageLifecyclePhase::Finished,
