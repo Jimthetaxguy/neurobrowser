@@ -150,6 +150,42 @@ fn stop_page_load_is_main_webview_only() {
 }
 
 #[test]
+fn search_browsing_history_is_main_webview_only() {
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    assert!(
+        authority
+            .resolve_access("search_browsing_history", "main", "main", &Origin::Local)
+            .is_some(),
+        "control webview lost search_browsing_history"
+    );
+    for origin in [
+        Origin::Local,
+        remote("about:blank"),
+        remote("http://example.com/"),
+        remote("https://example.com/"),
+    ] {
+        assert!(
+            authority
+                .resolve_access("search_browsing_history", "main", "page-runtime-1", &origin)
+                .is_none(),
+            "page webview gained search_browsing_history from {origin}"
+        );
+    }
+    assert!(
+        authority
+            .resolve_access(
+                "search_browsing_history",
+                "main",
+                "main",
+                &remote("https://example.com/")
+            )
+            .is_none(),
+        "remote control-webview content gained search_browsing_history"
+    );
+}
+
+#[test]
 fn page_lifecycle_listen_is_main_webview_only() {
     let mut context = context();
     let authority = context.runtime_authority_mut();

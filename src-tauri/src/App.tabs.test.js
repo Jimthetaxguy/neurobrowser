@@ -28,6 +28,9 @@ async function withApp(check, {
   snapshotFails = false,
   reloadUnconfirmed = false,
   lane = "tauri",
+  history = null,
+  keepStartFocus = false,
+  memory = null,
 } = {}) {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://shell.example" });
   const globals = {
@@ -84,6 +87,26 @@ async function withApp(check, {
       lifecycleListeners.add(callback);
       return () => lifecycleListeners.delete(callback);
     },
+    ...(history == null ? {} : {
+      searchBrowsingHistory: async (query, limit) => {
+        calls.push(["history", query, limit]);
+        return typeof history === "function" ? history(query, limit) : history;
+      },
+    }),
+    ...(memory == null ? {} : {
+      searchLocalMemory: async (query, limit) => {
+        calls.push(["memory", query, limit]);
+        return typeof memory.search === "function" ? memory.search(query, limit) : memory.search;
+      },
+      explainMemoryResult: async (query, result, limit) => {
+        calls.push(["explain", query, result?.block_id, limit]);
+        return typeof memory.explain === "function" ? memory.explain(query, result, limit) : memory.explain;
+      },
+      forgetMemory: async (pageUrl) => {
+        calls.push(["forget", pageUrl]);
+        if (typeof memory.forget === "function") await memory.forget(pageUrl);
+      },
+    }),
     ...(lane === "appkit" ? {
       onHostEvent(callback) {
         hostListeners.add(callback);
@@ -162,6 +185,14 @@ async function withApp(check, {
   };
   try {
     await act(async () => { root.render(createElement(App, { adapter, lane })); });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    if (!keepStartFocus) {
+      await act(async () => {
+        document.querySelector(".location .url-input")?.blur();
+      });
+    }
     await check({ calls, click, dispatch, dispatchLifecycle, dispatchMenu, document, goTo, keydown, toolbar });
   } finally {
     await act(async () => { root.unmount(); });
@@ -430,6 +461,9 @@ async function openMoreTabs(click, document, count) {
   for (let index = 0; index < count; index += 1) {
     await click(document.querySelector(".header > button"));
   }
+  await act(async () => {
+    document.querySelector(".location .url-input")?.blur();
+  });
 }
 
 test("Cmd/Ctrl-R reloads the active tab", async () => {
@@ -1220,4 +1254,229 @@ test("a menu echo of a chrome shortcut does not run the command twice", async ()
     await dispatchMenu("stop");
     assert.deepEqual(calls, [["browser", "stop_page_load", "session", 1]]);
   });
+});
+
+function sampleHistory(query) {
+  const recent = [
+    { url: "https://docs.example/guide", title: "Guide", visitCount: 4 },
+    { url: "https://news.example/", title: "News", visitCount: 1 },
+  ];
+  if (!query) return recent;
+  const needle = query.toLowerCase();
+  return recent.filter((hit) => hit.url.includes(needle) || hit.title.toLowerCase().includes(needle));
+}
+
+async function settle(ms = 0) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+}
+
+async function setInput(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+  await act(async () => {
+    input.focus();
+    const tracker = input._valueTracker;
+    if (tracker) tracker.setValue("");
+    setter.call(input, value);
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new window.Event("keyup", { bubbles: true }));
+  });
+}
+
+function submitStartSearch(document) {
+  return act(async () => {
+    document.querySelector(".start-search-form").dispatchEvent(
+      new window.Event("submit", { bubbles: true, cancelable: true })
+    );
+  });
+}
+
+test("a blank tab shows a local start page and focuses the address bar", async () => {
+  await withApp(async ({ calls, click, document }) => {
+    await settle();
+    assert.equal(document.activeElement, document.querySelector(".location .url-input"));
+    assert.ok(document.querySelector(".start-page"));
+    assert.equal(document.querySelectorAll(".start-site-title").length, 2);
+    assert.equal(document.querySelector(".start-site-title").textContent, "Guide");
+    assert.equal(document.querySelector(".start-site-host").textContent, "docs.example");
+    assert.deepEqual(calls.filter((call) => call[0] === "history"), [["history", "", 8]]);
+
+    const search = document.querySelector(".start-search");
+    await setInput(search, "cats");
+    assert.equal(document.querySelector(".start-search-hint").textContent, "Search DuckDuckGo");
+    calls.length = 0;
+    await submitStartSearch(document);
+    assert.deepEqual(
+      calls.filter((call) => call[0] === "navigate").map((call) => call[3]),
+      ["https://duckduckgo.com/?q=cats"]
+    );
+
+    await click(document.querySelector(".header > button"));
+    await settle();
+    assert.ok(document.querySelector(".start-page"));
+    await setInput(document.querySelector(".start-search"), "example.com/docs");
+    assert.equal(document.querySelector(".start-search-hint").textContent, "Go to");
+    calls.length = 0;
+    await submitStartSearch(document);
+    assert.deepEqual(
+      calls.filter((call) => call[0] === "navigate").map((call) => call[3]),
+      ["https://example.com/docs"]
+    );
+
+    await click(document.querySelector(".header > button"));
+    await settle();
+    calls.length = 0;
+    await click(document.querySelector(".start-site"));
+    assert.deepEqual(
+      calls.filter((call) => call[0] === "navigate").map((call) => call[3]),
+      ["https://docs.example/guide"]
+    );
+  }, { history: sampleHistory, keepStartFocus: true });
+});
+
+test("a new tab clears the address bar and shows the start page again", async () => {
+  await withApp(async ({ dispatchLifecycle, dispatchMenu, document }) => {
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "finished",
+      url: "https://example.com/",
+      title: "Example",
+    });
+    assert.equal(document.querySelector(".start-page"), null);
+    assert.equal(document.querySelector(".url-input").value, "https://example.com/");
+
+    await dispatchMenu("new-tab");
+    assert.equal(document.querySelectorAll(".tab").length, 2);
+    assert.equal(document.querySelector(".url-input").value, "");
+    assert.ok(document.querySelector(".start-page"));
+    assert.equal(document.activeElement, document.querySelector(".location .url-input"));
+  });
+});
+
+test("address suggestions open history and Escape closes them without stopping", async () => {
+  await withApp(async ({ calls, dispatchLifecycle, document, keydown }) => {
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/",
+      title: "",
+    });
+    const input = document.querySelector(".location .url-input");
+    await setInput(input, "docs");
+    await settle(350);
+    const rows = [...document.querySelectorAll(".omnibox-suggestion")];
+    assert.equal(rows[0].dataset.kind, "action");
+    assert.equal(rows[0].textContent, "Search DuckDuckGo for docs");
+    assert.equal(rows[1].dataset.kind, "history");
+    assert.match(rows[1].textContent, /Guide/);
+    assert.match(rows[1].textContent, /docs\.example/);
+    assert.equal(rows[0].classList.contains("active"), true);
+
+    calls.length = 0;
+    const down = await keydown("ArrowDown", { target: input });
+    assert.equal(down.defaultPrevented, true);
+    assert.equal(document.querySelectorAll(".omnibox-suggestion")[1].classList.contains("active"), true);
+    await act(async () => {
+      document.querySelector(".url-bar").dispatchEvent(
+        new window.Event("submit", { bubbles: true, cancelable: true })
+      );
+    });
+    assert.deepEqual(
+      calls.filter((call) => call[0] === "navigate").map((call) => call[3]),
+      ["https://docs.example/guide"]
+    );
+    assert.equal(document.querySelector(".omnibox-suggestion"), null);
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/again",
+      title: "",
+    });
+    await setInput(input, "example.com/docs");
+    await settle(350);
+    assert.equal(document.querySelector(".omnibox-suggestion").textContent, "Go to https://example.com/docs");
+    calls.length = 0;
+    const closed = await keydown("Escape", { target: input });
+    assert.equal(closed.defaultPrevented, true);
+    assert.equal(document.querySelector(".omnibox-suggestion"), null);
+    assert.equal(calls.some((call) => call[1] === "stop_page_load"), false);
+    assert.equal(input.value, "example.com/docs");
+
+    await act(async () => { input.blur(); });
+    calls.length = 0;
+    const stop = await keydown("Escape");
+    assert.equal(stop.defaultPrevented, true);
+    assert.deepEqual(calls.filter((call) => call[0] === "browser"), [
+      ["browser", "stop_page_load", "session", 0],
+    ]);
+  }, { history: sampleHistory });
+});
+
+test("address suggestions show history and memory, and Forget still removes the page", async () => {
+  const memoryHit = {
+    block_id: "block-1",
+    page_url: "https://notes.example/page",
+    heading_path: ["Meeting notes"],
+    text: "Quarterly plan for the team",
+  };
+  await withApp(async ({ calls, click, document, keydown }) => {
+    const input = document.querySelector(".location .url-input");
+    await setInput(input, "docs");
+    await settle(350);
+
+    const labels = [...document.querySelectorAll(".omnibox-suggestions-label")].map((label) => label.textContent);
+    assert.deepEqual(labels, ["History", "Memory"]);
+    const rows = [...document.querySelectorAll(".omnibox-suggestion")];
+    assert.equal(rows[0].dataset.kind, "action");
+    assert.equal(rows[0].textContent, "Search DuckDuckGo for docs");
+    assert.equal(rows[1].dataset.kind, "history");
+    assert.match(rows[1].textContent, /Guide/);
+    assert.match(rows[1].textContent, /docs\.example/);
+    assert.equal(rows[2].dataset.kind, "memory");
+    assert.match(rows[2].textContent, /Meeting notes/);
+    assert.match(rows[2].textContent, /https:\/\/notes\.example\/page/);
+    assert.equal(rows[0].classList.contains("active"), true);
+
+    await keydown("ArrowDown", { target: input });
+    await keydown("ArrowDown", { target: input });
+    const moved = [...document.querySelectorAll(".omnibox-suggestion")];
+    assert.equal(moved[1].classList.contains("active"), false);
+    assert.equal(moved[2].classList.contains("active"), true);
+
+    const why = [...moved[2].querySelectorAll("button")].find((button) => button.textContent === "Why");
+    await click(why);
+    assert.match(document.querySelector(".omnibox-explain").textContent, /matched the heading/);
+    assert.equal(document.querySelector(".omnibox-explain-score").textContent, "title 1.50");
+    assert.ok(calls.some((call) => call[0] === "explain" && call[1] === "docs" && call[2] === "block-1"));
+
+    const forget = [...document.querySelectorAll(".omnibox-suggestion-action")].find((button) => button.textContent === "Forget");
+    await click(forget);
+    assert.equal(document.querySelector(".omnibox-forget-prompt").textContent, "Stop capturing notes.example?");
+    calls.length = 0;
+    await click(document.querySelector(".omnibox-suggestion-action.danger"));
+    assert.deepEqual(calls.filter((call) => call[0] === "forget"), [["forget", "https://notes.example/page"]]);
+    assert.equal(document.querySelector("[data-kind='memory']"), null);
+    assert.ok(document.querySelector("[data-kind='history']"));
+    assert.match(
+      document.querySelector(".status-bar").textContent,
+      /Forgot notes\.example and blocked further capture for that site\./
+    );
+  }, {
+    history: sampleHistory,
+    memory: {
+      search: [memoryHit],
+      explain: {
+        snippets: ["matched the heading"],
+        breakdown: [{ field: "title", score: 1.5 }],
+      },
+    },
+  });
+});
+
+test("the AppKit shell does not draw the local start page", async () => {
+  await withApp(async ({ document }) => {
+    assert.equal(document.querySelector(".start-page"), null);
+  }, { lane: "appkit" });
 });

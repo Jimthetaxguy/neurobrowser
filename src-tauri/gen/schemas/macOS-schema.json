@@ -267,6 +267,12 @@
           "markdownDescription": "Enables the navigate command without any pre-configured scope."
         },
         {
+          "description": "Enables the search_browsing_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-browsing-history",
+          "markdownDescription": "Enables the search_browsing_history command without any pre-configured scope."
+        },
+        {
           "description": "Enables the search_local_memory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-search-local-memory",
@@ -403,6 +409,12 @@
           "type": "string",
           "const": "deny-navigate",
           "markdownDescription": "Denies the navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_browsing_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-browsing-history",
+          "markdownDescription": "Denies the search_browsing_history command without any pre-configured scope."
         },
         {
           "description": "Denies the search_local_memory command without any pre-configured scope.",

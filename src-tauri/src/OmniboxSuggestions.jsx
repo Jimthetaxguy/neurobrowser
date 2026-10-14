@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { historyQueryFromInput, suggestionRows } from "./historySuggestions.js";
 import { omniboxActionHint } from "./omniboxInput.js";
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -73,6 +74,35 @@ function formatScore(score) {
   return value.toFixed(2);
 }
 
+function emptyList(current) {
+  return current.length === 0 ? current : [];
+}
+
+function emptyMap(current) {
+  return Object.keys(current).length === 0 ? current : {};
+}
+
+async function loadHistory(adapter, query, onStatus) {
+  try {
+    const next = await adapter.searchBrowsingHistory(query, SEARCH_LIMIT);
+    return Array.isArray(next) ? next : [];
+  } catch (error) {
+    console.warn("history search failed", messageText(error));
+    onStatus?.(`Could not search history: ${messageText(error)}`);
+    return [];
+  }
+}
+
+async function loadMemory(adapter, query) {
+  try {
+    const next = await adapter.searchLocalMemory(query, SEARCH_LIMIT);
+    return Array.isArray(next) ? next : [];
+  } catch (error) {
+    console.warn("memory search failed", messageText(error));
+    return [];
+  }
+}
+
 function ExplainDetail({ detail }) {
   const snippets = (detail?.snippets ?? []).map(plainText).filter(Boolean);
   const breakdown = (detail?.breakdown ?? [])
@@ -97,142 +127,21 @@ function ExplainDetail({ detail }) {
   );
 }
 
-export function OmniboxSuggestions({
-  activeIndex,
-  canExplain,
-  canForget,
-  explainingId,
-  explanations,
-  forgettingId,
-  hits,
-  listId,
-  onExplain,
-  onForget,
-  onHighlight,
-  onSelect,
-  pendingForgetId,
-  setPendingForgetId,
-}) {
-  const listRef = useRef(null);
-
-  useEffect(() => {
-    if (activeIndex < 0) return;
-    const list = listRef.current;
-    const option = list?.querySelector(`[data-index="${activeIndex}"]`);
-    if (!list || !option) return;
-    const listRect = list.getBoundingClientRect();
-    const optionRect = option.getBoundingClientRect();
-    if (optionRect.top < listRect.top) {
-      list.scrollTop -= listRect.top - optionRect.top;
-    } else if (optionRect.bottom > listRect.bottom) {
-      list.scrollTop += optionRect.bottom - listRect.bottom;
-    }
-  }, [activeIndex, hits.length]);
-
-  if (!hits.length) return null;
-
-  return (
-    <div className="omnibox-suggestions">
-      <div className="omnibox-suggestions-label" id={`${listId}-label`}>
-        From memory
-      </div>
-      <ul
-        aria-labelledby={`${listId}-label`}
-        className="omnibox-suggestions-list"
-        id={listId}
-        ref={listRef}
-        role="listbox"
-      >
-        {hits.map((hit, index) => {
-          const pageUrl = pageUrlOf(hit);
-          const heading = headingLabel(hit);
-          const excerpt = hitExcerpt(hit);
-          const host = hostOf(pageUrl);
-          const title = heading || excerpt || host || "Saved page";
-          const detail = heading && excerpt ? excerpt : "";
-          const selected = index === activeIndex;
-          const explanation = explanations[hit.block_id];
-          const confirmingForget = pendingForgetId === hit.block_id;
-          const titleIsExcerpt = !heading && Boolean(excerpt);
-
-          return (
-            <li
-              className={`omnibox-suggestion${selected ? " active" : ""}`}
-              data-index={index}
-              key={hit.block_id || `${pageUrl}-${index}`}
-            >
-              <div className="omnibox-suggestion-row">
-                <button
-                  aria-selected={selected}
-                  className={`omnibox-suggestion-main${titleIsExcerpt ? " wrap-title" : ""}`}
-                  id={optionDomId(listId, index)}
-                  onClick={() => onSelect(hit)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => onHighlight(index)}
-                  role="option"
-                  type="button"
-                >
-                  <span className="omnibox-suggestion-title">{title}</span>
-                  {pageUrl && <span className="omnibox-suggestion-url">{pageUrl}</span>}
-                  {detail && <span className="omnibox-suggestion-text">{detail}</span>}
-                </button>
-                {(canExplain || canForget) && (
-                  <div className="omnibox-suggestion-actions">
-                    {canExplain && (
-                      <button
-                        className="omnibox-suggestion-action"
-                        disabled={explainingId === hit.block_id}
-                        onClick={() => onExplain(hit)}
-                        onMouseDown={(event) => event.preventDefault()}
-                        type="button"
-                      >
-                        {explainingId === hit.block_id ? "…" : explanation ? "Hide" : "Why"}
-                      </button>
-                    )}
-                    {canForget && confirmingForget && (
-                      <>
-                        <span className="omnibox-forget-prompt">
-                          {host ? `Stop capturing ${host}?` : "Forget this page?"}
-                        </span>
-                        <button
-                          className="omnibox-suggestion-action danger"
-                          disabled={forgettingId === hit.block_id}
-                          onClick={() => onForget(hit)}
-                          onMouseDown={(event) => event.preventDefault()}
-                          type="button"
-                        >
-                          Forget
-                        </button>
-                        <button
-                          className="omnibox-suggestion-action"
-                          onClick={() => setPendingForgetId(null)}
-                          onMouseDown={(event) => event.preventDefault()}
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
-                    {canForget && !confirmingForget && (
-                      <button
-                        className="omnibox-suggestion-action"
-                        onClick={() => setPendingForgetId(hit.block_id)}
-                        onMouseDown={(event) => event.preventDefault()}
-                        type="button"
-                      >
-                        Forget
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              {explanation && <ExplainDetail detail={explanation} />}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
+function memoryPresentation(hit) {
+  const pageUrl = pageUrlOf(hit);
+  const heading = headingLabel(hit);
+  const excerpt = hitExcerpt(hit);
+  const host = hostOf(pageUrl);
+  const title = heading || excerpt || host || "Saved page";
+  return {
+    detail: heading && excerpt ? excerpt : "",
+    excerpt,
+    heading,
+    host,
+    pageUrl,
+    title,
+    titleIsExcerpt: !heading && Boolean(excerpt),
+  };
 }
 
 export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
@@ -241,45 +150,68 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
   // Keystrokes set this to the field value. Snapshot updates call setUrl and leave it unset.
   const userQueryRef = useRef(null);
   const requestId = useRef(0);
-  const [hits, setHits] = useState([]);
+  const [historyHits, setHistoryHits] = useState([]);
+  const [memoryHits, setMemoryHits] = useState([]);
   const [hitQuery, setHitQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
+  const [focused, setFocused] = useState(false);
+  const [dismissedQuery, setDismissedQuery] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [searching, setSearching] = useState(false);
   const [explanations, setExplanations] = useState({});
   const [explainingId, setExplainingId] = useState(null);
   const [pendingForgetId, setPendingForgetId] = useState(null);
   const [forgettingId, setForgettingId] = useState(null);
 
-  const canExplain = typeof adapter?.explainMemoryResult === "function";
-  const canForget = typeof adapter?.forgetMemory === "function";
-  const visible = open && hits.length > 0;
-  const safeIndex = activeIndex >= 0 && activeIndex < hits.length ? activeIndex : -1;
   const hintId = `${listId}-hint`;
   // Snapshot updates replace `url` without touching the draft, so the hint
   // follows an unsent edit and stays off the loaded page address.
-  const hint = userQueryRef.current === url ? omniboxActionHint(url) : "";
+  const editing = userQueryRef.current === url;
+  const hint = editing ? omniboxActionHint(url) : "";
+  const action = editing && String(url ?? "").trim() ? suggestionRows(url, [])[0] : null;
+  const historyRows = editing && String(url ?? "").trim() ? suggestionRows("", historyHits) : [];
+  const canExplain = typeof adapter?.explainMemoryResult === "function";
+  const canForget = typeof adapter?.forgetMemory === "function";
+
+  const entries = [];
+  if (action) entries.push({ kind: "action", label: action.label, url: action.url });
+  for (const row of historyRows) entries.push(row);
+  for (const hit of memoryHits) {
+    const presented = memoryPresentation(hit);
+    entries.push({ kind: "memory", hit, url: presented.pageUrl, ...presented });
+  }
+
+  const visible = focused && dismissedQuery !== url && entries.length > 0;
+  const safeIndex = entries.length === 0 ? -1 : Math.min(Math.max(activeIndex, 0), entries.length - 1);
+
+  function commitInput(value) {
+    userQueryRef.current = value;
+    setUrl(value);
+  }
 
   useEffect(() => {
-    if (userQueryRef.current !== url) {
+    setActiveIndex(0);
+  }, [url]);
+
+  useEffect(() => {
+    if (userQueryRef.current !== url || !String(url ?? "").trim()) {
       requestId.current += 1;
-      setHits((current) => (current.length === 0 ? current : []));
-      setOpen(false);
-      setActiveIndex(-1);
+      setHistoryHits(emptyList);
+      setMemoryHits(emptyList);
       setHitQuery((current) => (current === "" ? current : ""));
       setSearching(false);
-      setExplanations((current) => (Object.keys(current).length === 0 ? current : {}));
+      setExplanations(emptyMap);
       setPendingForgetId(null);
       return undefined;
     }
 
-    const query = memoryQueryFromOmnibox(url);
-    if (!query || typeof adapter?.searchLocalMemory !== "function") {
+    const historyQuery = historyQueryFromInput(url);
+    const memoryQuery = memoryQueryFromOmnibox(url);
+    const canHistory = typeof adapter?.searchBrowsingHistory === "function";
+    const canMemory = Boolean(memoryQuery) && typeof adapter?.searchLocalMemory === "function";
+    if (!canHistory && !canMemory) {
       requestId.current += 1;
-      setHits((current) => (current.length === 0 ? current : []));
-      setOpen(false);
-      setActiveIndex(-1);
-      setHitQuery((current) => (current === "" ? current : ""));
+      setHistoryHits(emptyList);
+      setMemoryHits(emptyList);
       setSearching(false);
       return undefined;
     }
@@ -287,58 +219,68 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
     const request = requestId.current + 1;
     requestId.current = request;
     setSearching(true);
+    setHistoryHits(emptyList);
+    setMemoryHits(emptyList);
+    setExplanations(emptyMap);
+    setPendingForgetId(null);
     const timer = window.setTimeout(async () => {
-      try {
-        const next = await adapter.searchLocalMemory(query, SEARCH_LIMIT);
-        if (requestId.current !== request) return;
-        const list = Array.isArray(next) ? next : [];
-        const focused = rootRef.current?.contains(document.activeElement) ?? false;
-        setHits(list);
-        setHitQuery(query);
-        setExplanations({});
-        setPendingForgetId(null);
-        setActiveIndex(-1);
-        setOpen(list.length > 0 && focused);
-      } catch (error) {
-        if (requestId.current !== request) return;
-        setHits([]);
-        setOpen(false);
-        console.warn("memory search failed", messageText(error));
-      } finally {
-        if (requestId.current === request) setSearching(false);
-      }
+      const [nextHistory, nextMemory] = await Promise.all([
+        canHistory ? loadHistory(adapter, historyQuery, onStatus) : Promise.resolve([]),
+        canMemory ? loadMemory(adapter, memoryQuery) : Promise.resolve([]),
+      ]);
+      if (requestId.current !== request) return;
+      setHistoryHits(nextHistory);
+      setMemoryHits(nextMemory);
+      setHitQuery(canMemory ? memoryQuery : "");
+      setSearching(false);
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [adapter, url]);
+  }, [adapter, onStatus, url]);
+
+  useEffect(() => {
+    if (safeIndex < 0) return;
+    const list = rootRef.current?.querySelector(".omnibox-suggestions");
+    const option = list?.querySelector(`[data-index="${safeIndex}"]`);
+    if (!list || !option) return;
+    const listRect = list.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    if (optionRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - optionRect.top;
+    } else if (optionRect.bottom > listRect.bottom) {
+      list.scrollTop += optionRect.bottom - listRect.bottom;
+    }
+  }, [safeIndex, entries.length]);
 
   useEffect(() => {
     if (!visible) return undefined;
     const onPointerDown = (event) => {
       if (rootRef.current && !rootRef.current.contains(event.target)) {
-        setOpen(false);
-        setActiveIndex(-1);
+        setDismissedQuery(url);
       }
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [visible]);
+  }, [url, visible]);
 
   function closeSuggestions() {
     userQueryRef.current = null;
     requestId.current += 1;
-    setOpen(false);
-    setHits([]);
-    setActiveIndex(-1);
+    setDismissedQuery(null);
+    setHistoryHits([]);
+    setMemoryHits([]);
+    setHitQuery("");
+    setActiveIndex(0);
     setSearching(false);
+    setExplanations({});
+    setPendingForgetId(null);
   }
 
-  function selectHit(hit) {
-    const nextUrl = pageUrlOf(hit);
-    if (!nextUrl) return;
+  function selectEntry(entry) {
+    if (entry.kind === "memory" && !entry.url) return;
     closeSuggestions();
-    setUrl(nextUrl);
-    onNavigate(nextUrl);
+    if (entry.kind === "action") onNavigate();
+    else onNavigate(entry.url);
   }
 
   async function explainHit(hit) {
@@ -369,7 +311,7 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
     setForgettingId(hit.block_id);
     try {
       await adapter.forgetMemory(pageUrl);
-      setHits((current) => current.filter((item) => pageUrlOf(item) !== pageUrl));
+      setMemoryHits((current) => current.filter((item) => pageUrlOf(item) !== pageUrl));
       setExplanations((current) => {
         const next = { ...current };
         delete next[hit.block_id];
@@ -392,7 +334,7 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
   function onSubmit(event) {
     event.preventDefault();
     if (visible && safeIndex >= 0) {
-      selectHit(hits[safeIndex]);
+      selectEntry(entries[safeIndex]);
       return;
     }
     closeSuggestions();
@@ -403,19 +345,33 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
     if (event.key === "Escape") {
       if (!visible) return;
       event.preventDefault();
-      setOpen(false);
-      setActiveIndex(-1);
+      setDismissedQuery(url);
+      setActiveIndex(0);
       return;
     }
-    if (!visible) return;
+    if (event.altKey || event.metaKey || event.ctrlKey) return;
+    if (!visible || entries.length === 0) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((index) => (index + 1) % hits.length);
+      setActiveIndex((safeIndex + 1) % entries.length);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex((index) => (index <= 0 ? hits.length - 1 : index - 1));
+      setActiveIndex((safeIndex - 1 + entries.length) % entries.length);
     }
   }
+
+  function onInputBlur(event) {
+    const next = event.relatedTarget;
+    if (next && rootRef.current?.contains(next)) return;
+    window.queueMicrotask(() => {
+      if (!rootRef.current?.contains(document.activeElement)) setFocused(false);
+    });
+  }
+
+  let cursor = 0;
+  const actionEntry = action ? { ...entries[cursor], index: cursor++ } : null;
+  const historyEntries = historyRows.map((row) => ({ ...row, index: cursor++ }));
+  const memoryEntries = entries.slice(cursor).map((row) => ({ ...row, index: cursor++ }));
 
   return (
     <form className="url-bar" onSubmit={onSubmit} ref={rootRef}>
@@ -427,20 +383,17 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
           aria-controls={visible ? listId : undefined}
           aria-describedby={hint ? hintId : undefined}
           aria-expanded={visible}
-          aria-label="URL or memory search"
+          aria-label="URL or search"
           autoComplete="off"
           className={urlInputClass(hint)}
-          onChange={(event) => {
-            const value = event.target.value;
-            userQueryRef.current = value;
-            setUrl(value);
-          }}
-          onFocus={() => {
-            if (hits.length > 0 && userQueryRef.current === url) setOpen(true);
-          }}
+          onBlur={onInputBlur}
+          onChange={(event) => commitInput(event.target.value)}
+          onFocus={() => setFocused(true)}
           onKeyDown={onKeyDown}
+          onKeyUp={(event) => commitInput(event.currentTarget.value)}
           placeholder="Enter a URL or domain"
           role="combobox"
+          spellCheck={false}
           value={url}
         />
         {hint ? (
@@ -449,27 +402,191 @@ export function Omnibox({ adapter, onNavigate, onStatus, setUrl, url }) {
           </span>
         ) : null}
         {visible && (
-          <OmniboxSuggestions
-            activeIndex={safeIndex}
-            canExplain={canExplain}
-            canForget={canForget}
-            explainingId={explainingId}
-            explanations={explanations}
-            forgettingId={forgettingId}
-            hits={hits}
-            listId={listId}
-            onExplain={explainHit}
-            onForget={forgetHit}
-            onHighlight={setActiveIndex}
-            onSelect={selectHit}
-            pendingForgetId={pendingForgetId}
-            setPendingForgetId={setPendingForgetId}
-          />
+          <div className="omnibox-suggestions">
+            <ul
+              aria-label="Address suggestions"
+              className="omnibox-suggestions-list"
+              id={listId}
+              role="listbox"
+            >
+              {actionEntry && (
+                <SuggestionRow
+                  entry={actionEntry}
+                  listId={listId}
+                  onHighlight={setActiveIndex}
+                  onSelect={selectEntry}
+                  selected={actionEntry.index === safeIndex}
+                />
+              )}
+              {historyEntries.length > 0 && (
+                <li className="omnibox-suggestions-label" role="presentation">
+                  History
+                </li>
+              )}
+              {historyEntries.map((entry) => (
+                <SuggestionRow
+                  entry={entry}
+                  key={`history-${entry.url}-${entry.index}`}
+                  listId={listId}
+                  onHighlight={setActiveIndex}
+                  onSelect={selectEntry}
+                  selected={entry.index === safeIndex}
+                />
+              ))}
+              {memoryEntries.length > 0 && (
+                <li className="omnibox-suggestions-label" role="presentation">
+                  Memory
+                </li>
+              )}
+              {memoryEntries.map((entry) => (
+                <MemorySuggestion
+                  canExplain={canExplain}
+                  canForget={canForget}
+                  entry={entry}
+                  explainingId={explainingId}
+                  explanation={explanations[entry.hit.block_id]}
+                  forgettingId={forgettingId}
+                  key={entry.hit.block_id || `memory-${entry.index}`}
+                  listId={listId}
+                  onExplain={explainHit}
+                  onForget={forgetHit}
+                  onHighlight={setActiveIndex}
+                  onSelect={selectEntry}
+                  pendingForgetId={pendingForgetId}
+                  selected={entry.index === safeIndex}
+                  setPendingForgetId={setPendingForgetId}
+                />
+              ))}
+            </ul>
+          </div>
         )}
       </div>
       <button className="btn" type="submit">
         Go
       </button>
     </form>
+  );
+}
+
+function SuggestionRow({ entry, listId, onHighlight, onSelect, selected }) {
+  return (
+    <li
+      className={`omnibox-suggestion${selected ? " active" : ""}`}
+      data-index={entry.index}
+      data-kind={entry.kind}
+      data-url={entry.url}
+    >
+      <button
+        aria-selected={selected}
+        className="omnibox-suggestion-main"
+        id={optionDomId(listId, entry.index)}
+        onClick={() => onSelect(entry)}
+        onMouseDown={(event) => event.preventDefault()}
+        onMouseEnter={() => onHighlight(entry.index)}
+        role="option"
+        type="button"
+      >
+        <span className="omnibox-suggestion-title">{entry.label}</span>
+        {entry.kind === "history" && entry.detail ? (
+          <span className="omnibox-suggestion-url">{entry.detail}</span>
+        ) : null}
+      </button>
+    </li>
+  );
+}
+
+function MemorySuggestion({
+  canExplain,
+  canForget,
+  entry,
+  explainingId,
+  explanation,
+  forgettingId,
+  listId,
+  onExplain,
+  onForget,
+  onHighlight,
+  onSelect,
+  pendingForgetId,
+  selected,
+  setPendingForgetId,
+}) {
+  const { hit, host, pageUrl, title, detail, titleIsExcerpt } = entry;
+  const confirmingForget = pendingForgetId === hit.block_id;
+
+  return (
+    <li
+      className={`omnibox-suggestion${selected ? " active" : ""}`}
+      data-index={entry.index}
+      data-kind="memory"
+      data-url={pageUrl}
+    >
+      <div className="omnibox-suggestion-row">
+        <button
+          aria-selected={selected}
+          className={`omnibox-suggestion-main${titleIsExcerpt ? " wrap-title" : ""}`}
+          id={optionDomId(listId, entry.index)}
+          onClick={() => onSelect(entry)}
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={() => onHighlight(entry.index)}
+          role="option"
+          type="button"
+        >
+          <span className="omnibox-suggestion-title">{title}</span>
+          {pageUrl && <span className="omnibox-suggestion-url">{pageUrl}</span>}
+          {detail && <span className="omnibox-suggestion-text">{detail}</span>}
+        </button>
+        {(canExplain || canForget) && (
+          <div className="omnibox-suggestion-actions">
+            {canExplain && (
+              <button
+                className="omnibox-suggestion-action"
+                disabled={explainingId === hit.block_id}
+                onClick={() => onExplain(hit)}
+                onMouseDown={(event) => event.preventDefault()}
+                type="button"
+              >
+                {explainingId === hit.block_id ? "…" : explanation ? "Hide" : "Why"}
+              </button>
+            )}
+            {canForget && confirmingForget && (
+              <>
+                <span className="omnibox-forget-prompt">
+                  {host ? `Stop capturing ${host}?` : "Forget this page?"}
+                </span>
+                <button
+                  className="omnibox-suggestion-action danger"
+                  disabled={forgettingId === hit.block_id}
+                  onClick={() => onForget(hit)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  type="button"
+                >
+                  Forget
+                </button>
+                <button
+                  className="omnibox-suggestion-action"
+                  onClick={() => setPendingForgetId(null)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+            {canForget && !confirmingForget && (
+              <button
+                className="omnibox-suggestion-action"
+                onClick={() => setPendingForgetId(hit.block_id)}
+                onMouseDown={(event) => event.preventDefault()}
+                type="button"
+              >
+                Forget
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {explanation && <ExplainDetail detail={explanation} />}
+    </li>
   );
 }

@@ -1053,6 +1053,40 @@ fn stopped_page_payload(
     )
 }
 
+/// `http` and `https` documents are shown in the page webview.
+/// `about:blank` stays hidden so the shell can draw the new-tab page.
+pub(crate) fn is_browsed_document(url: &str) -> bool {
+    let url = url.trim();
+    starts_with_ignore_ascii_case(url, "https://") || starts_with_ignore_ascii_case(url, "http://")
+}
+
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value.len() >= prefix.len()
+        && value
+            .as_bytes()
+            .iter()
+            .zip(prefix.as_bytes())
+            .all(|(left, right)| left.to_ascii_lowercase() == *right)
+}
+
+fn show_if_browsed(webview: &Webview<impl Runtime>, url: &str) {
+    let result = if is_browsed_document(url) {
+        webview.show()
+    } else {
+        webview.hide()
+    };
+    if let Err(error) = result {
+        tracing::warn!("failed to update page webview visibility: {error}");
+    }
+}
+
+fn note_browsing_visit<R: Runtime>(webview: &Webview<R>, url: &str, title: &str) {
+    let Some(state) = webview.try_state::<super::AppState>() else {
+        return;
+    };
+    super::record_browsing_visit(&state.history, url, title);
+}
+
 fn emit_page_lifecycle<R: Runtime>(webview: &Webview<R>, payload: Option<PageLifecyclePayload>) {
     let Some(payload) = payload else {
         return;
@@ -1279,6 +1313,7 @@ pub fn create_runtime_page(
             match payload.event() {
                 PageLoadEvent::Started => {
                     registry_for_load.set_loading(page_id, true);
+                    show_if_browsed(&webview, &url);
                     emit_page_lifecycle(
                         &webview,
                         page_lifecycle_payload(
@@ -1292,21 +1327,25 @@ pub fn create_runtime_page(
                 }
                 PageLoadEvent::Finished => {
                     registry_for_load.finish_loading(page_id);
-                    emit_page_lifecycle(
-                        &webview,
-                        page_lifecycle_payload(
-                            page_id,
-                            PageLifecyclePhase::Finished,
-                            url,
-                            String::new(),
-                            registry_for_load.suppress_finished_event(page_id),
-                        ),
+                    let payload = page_lifecycle_payload(
+                        page_id,
+                        PageLifecyclePhase::Finished,
+                        url.as_str(),
+                        String::new(),
+                        registry_for_load.suppress_finished_event(page_id),
                     );
+                    // A refused hop is not a visit and does not change visibility.
+                    if let Some(payload) = &payload {
+                        note_browsing_visit(&webview, &payload.url, &payload.title);
+                        show_if_browsed(&webview, &payload.url);
+                    }
+                    emit_page_lifecycle(&webview, payload);
                 }
             }
         })
         .on_document_title_changed(move |webview, title| {
             let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+            note_browsing_visit(&webview, &url, &title);
             emit_page_lifecycle(
                 &webview,
                 page_lifecycle_payload(page_id, PageLifecyclePhase::Title, url, title, false),
@@ -1361,12 +1400,56 @@ pub fn set_active_runtime_page(
                     viewport.height.max(1.0),
                 ))
                 .map_err(|e| e.to_string())?;
-            webview.show().map_err(|e| e.to_string())?;
+            let show = webview
+                .url()
+                .map(|url| is_browsed_document(url.as_str()))
+                .unwrap_or(true);
+            if show {
+                webview.show().map_err(|e| e.to_string())?;
+            } else {
+                webview.hide().map_err(|e| e.to_string())?;
+            }
         } else {
             webview.hide().map_err(|e| e.to_string())?;
         }
     }
     Ok(())
+}
+
+/// Show the page webview for a navigation that is leaving the new-tab page.
+pub fn reveal_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    let runtime_id = registry.page_runtime_id(page_id)?;
+    let webview = app
+        .get_webview(&runtime_id)
+        .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
+    webview.show().map_err(|e| e.to_string())
+}
+
+/// Hide the page webview when it is still a blank document.
+///
+/// A URL that cannot be read stays visible, so a real page is not covered by
+/// the new-tab page just because the webview refused to report its location.
+pub fn hide_unbrowsed_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    let runtime_id = registry.page_runtime_id(page_id)?;
+    let webview = app
+        .get_webview(&runtime_id)
+        .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
+    let browsed = webview
+        .url()
+        .map(|url| is_browsed_document(url.as_str()))
+        .unwrap_or(true);
+    if browsed {
+        return Ok(());
+    }
+    webview.hide().map_err(|e| e.to_string())
 }
 
 pub fn sync_runtime_viewport(
@@ -1398,6 +1481,17 @@ pub fn sync_runtime_viewport(
 mod response_tests {
     use super::missing_runtime_response;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn blank_documents_stay_off_the_page_webview() {
+        assert!(super::is_browsed_document("https://example.com/"));
+        assert!(super::is_browsed_document(" HTTP://Example.COM/a "));
+        assert!(!super::is_browsed_document("about:blank"));
+        assert!(!super::is_browsed_document(""));
+        assert!(!super::is_browsed_document("about:blankevil"));
+        assert!(!super::is_browsed_document("file:///tmp/x"));
+        assert!(!super::is_browsed_document("http:/example.com"));
+    }
 
     #[test]
     fn stop_menu_hook_tracks_only_the_active_page() {
