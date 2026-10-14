@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
+import { applyDownloadUpdate, downloadProgressText } from "./downloads.js";
 import { isBlankDocument } from "./historySuggestions.js";
 import { NewTabPage } from "./NewTabPage.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
@@ -163,6 +164,48 @@ function SecurityIndicator({ url }) {
 function LoadProgress({ active }) {
   if (!active) return null;
   return <div aria-label="Loading page" className="load-progress" role="progressbar" />;
+}
+
+function Downloads({ items, onOpen, onShow }) {
+  if (!items.length) return null;
+  return (
+    <section aria-label="Downloads" className="downloads">
+      <div className="downloads-title">Downloads</div>
+      <ul>
+        {items.map((item) => {
+          const progress = item.phase === "progress" ? downloadProgressText(item) : "";
+          const percent = progress.endsWith("%") ? Number(progress.slice(0, -1)) : null;
+          return (
+            <li data-phase={item.phase} key={item.id}>
+              <span className="download-name" title={item.url}>{item.filename}</span>
+              {item.phase === "progress" ? (
+                <span
+                  aria-label={`Downloading ${item.filename}`}
+                  aria-valuemax={percent == null ? undefined : 100}
+                  aria-valuemin={percent == null ? undefined : 0}
+                  aria-valuenow={percent == null ? undefined : percent}
+                  className={`download-progress${percent == null ? " indeterminate" : ""}`}
+                  role="progressbar"
+                >
+                  {progress}
+                </span>
+              ) : null}
+              {item.phase === "done" ? (
+                <>
+                  <span className="download-state">Done</span>
+                  <button onClick={() => onOpen(item.id)} type="button">Open</button>
+                  <button onClick={() => onShow(item.id)} type="button">Show in folder</button>
+                </>
+              ) : null}
+              {item.phase === "failed" ? (
+                <span className="download-state">Failed{item.error ? `: ${item.error}` : ""}</span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 }
 
 function TabStrip({ tabs, currentPageId, onActivate, onClose, onReorder }) {
@@ -515,6 +558,7 @@ export default function App({ adapter, lane }) {
   const [loading, setLoading] = useState(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [blockedPopups, setBlockedPopups] = useState({});
+  const [downloads, setDownloads] = useState([]);
   const blockedPopupsRef = useRef({});
   const sessionIdRef = useRef(null);
   sessionIdRef.current = sessionId;
@@ -1018,6 +1062,31 @@ export default function App({ adapter, lane }) {
     });
   }, [adapter, enqueuePopup, openFromOpener]);
 
+  useEffect(() => {
+    if (typeof adapter.onDownload !== "function") return undefined;
+    return adapter.onDownload((event) => {
+      setDownloads((current) => applyDownloadUpdate(current, event));
+    });
+  }, [adapter]);
+
+  const openDownload = useCallback(async (id) => {
+    if (typeof adapter.openDownload !== "function") return;
+    try {
+      await adapter.openDownload(id);
+    } catch (error) {
+      setStatus(`Could not open download: ${messageText(error)}`);
+    }
+  }, [adapter]);
+
+  const showDownload = useCallback(async (id) => {
+    if (typeof adapter.showDownloadInFolder !== "function") return;
+    try {
+      await adapter.showDownloadInFolder(id);
+    } catch (error) {
+      setStatus(`Could not show download: ${messageText(error)}`);
+    }
+  }, [adapter]);
+
   const activeTab = tabs.find((tab) => tab.id === currentPageId);
   const showStartPage =
     !compact &&
@@ -1272,6 +1341,9 @@ export default function App({ adapter, lane }) {
         <section className="browser-panel">
           <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} />
           <StatsRow snapshot={snapshot} />
+          <div className="downloads-slot">
+            <Downloads items={downloads} onOpen={openDownload} onShow={showDownload} />
+          </div>
           <div className="browser-stage" ref={browserStageRef}>
             {showStartPage ? (
               <NewTabPage adapter={adapter} onNavigate={navigateCurrentPage} />

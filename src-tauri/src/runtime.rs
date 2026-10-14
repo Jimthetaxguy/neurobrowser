@@ -603,9 +603,15 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     return { href: node.href, background: modified };
   };
   let pointerClaimed = false;
+  const trustedClick = (event) => event.isTrusted === true;
   document.addEventListener('pointerdown', (event) => {
     const kind = linkOpenKind(event);
     if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     pointerClaimed = true;
     event.preventDefault();
     event.stopPropagation();
@@ -614,6 +620,11 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   document.addEventListener('click', (event) => {
     const kind = linkOpenKind(event);
     if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     if (pointerClaimed) {
@@ -626,6 +637,11 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     if (event.button !== 1) return;
     const kind = linkOpenKind(event);
     if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     if (pointerClaimed) {
@@ -1620,6 +1636,7 @@ pub fn create_runtime_page(
             registry_for_nav.begin_allowed_navigation(page_id);
             true
         })
+        .on_download(crate::downloads::handle_download_event)
         .on_page_load(move |webview, payload| {
             let url = payload.url().to_string();
             match payload.event() {

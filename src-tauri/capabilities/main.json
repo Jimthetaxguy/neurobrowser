@@ -17,6 +17,8 @@
     "allow-get-page-observation",
     "allow-execute-browser-tool",
     "allow-navigate",
+    "allow-open-download",
+    "allow-show-download-in-folder",
     "allow-search-browsing-history",
     "allow-search-local-memory",
     "allow-set-action-policy",

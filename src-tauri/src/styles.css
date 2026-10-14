@@ -470,9 +470,66 @@ main {
 
 .browser-panel {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 0;
   position: relative;
+}
+
+.downloads {
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+  max-height: 9rem;
+  overflow: auto;
+  padding: 8px 18px 10px;
+}
+
+.downloads-title {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.downloads ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+}
+
+.downloads li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.download-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-state,
+.download-progress {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.download-progress {
+  min-width: 6rem;
+}
+
+.downloads button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 8px;
 }
 
 .browser-toolbar,

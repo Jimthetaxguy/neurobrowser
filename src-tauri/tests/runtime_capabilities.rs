@@ -186,6 +186,39 @@ fn search_browsing_history_is_main_webview_only() {
 }
 
 #[test]
+fn download_commands_are_main_webview_only() {
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    for command in ["open_download", "show_download_in_folder"] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &Origin::Local)
+                .is_some(),
+            "control webview lost {command}"
+        );
+        for origin in [
+            Origin::Local,
+            remote("about:blank"),
+            remote("http://example.com/"),
+            remote("https://example.com/"),
+        ] {
+            assert!(
+                authority
+                    .resolve_access(command, "main", "page-runtime-1", &origin)
+                    .is_none(),
+                "page webview gained {command} from {origin}"
+            );
+        }
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &remote("https://example.com/"))
+                .is_none(),
+            "remote control-webview content gained {command}"
+        );
+    }
+}
+
+#[test]
 fn page_lifecycle_listen_is_main_webview_only() {
     let mut context = context();
     let authority = context.runtime_authority_mut();

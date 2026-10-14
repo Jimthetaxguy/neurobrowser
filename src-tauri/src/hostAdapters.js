@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { bindDownloads } from "./downloads.js";
 import { bindMenuCommand } from "./menuCommands.js";
 import { bindPageLifecycle, bindPageNewWindow } from "./nativePageEvents.js";
 
@@ -87,6 +88,15 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     },
     onPageNewWindow(callback) {
       return bindPageNewWindow(listen, callback);
+    },
+    onDownload(callback) {
+      return bindDownloads(listen, callback);
+    },
+    async openDownload(id) {
+      return invoke("open_download", { id });
+    },
+    async showDownloadInFolder(id) {
+      return invoke("show_download_in_folder", { id });
     },
     onMenuCommand(callback) {
       return bindMenuCommand(listen, callback);
