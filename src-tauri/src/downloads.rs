@@ -1,13 +1,14 @@
 //! WebKit downloads for the desktop shell.
 //!
 //! The page webview asks before a download starts. Netguard runs on the
-//! requested address, then again on the address that remains after redirects.
-//! A blocked final address cancels the download before the file is written and
-//! again before a finished row can be kept. An allowed file is reserved under
-//! the user's Downloads folder with a name that cannot leave that folder. On
-//! macOS the saved file gets the quarantine attribute. The main webview hears
-//! progress, done, and failed. Opening a file uses the id of a finished
-//! download, not a path from the page.
+//! requested address, and again on the address WebKit reports when the
+//! download finishes. The shell does not send its own request to discover
+//! that address, and the download callback does not wait on another thread.
+//! A blocked address at the finish cancels the row and deletes the partial
+//! file. An allowed file is reserved under the user's Downloads folder with
+//! a name that cannot leave that folder. On macOS the saved file gets the
+//! quarantine attribute. The main webview hears progress, done, and failed.
+//! Opening a file uses the id of a finished download, not a path from the page.
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -49,8 +50,6 @@ pub struct DownloadUpdate {
 struct Entry {
     id: String,
     url: String,
-    /// Address that remained after redirects, once netguard allowed it.
-    final_url: Option<String>,
     filename: String,
     path: PathBuf,
     root: PathBuf,
@@ -144,7 +143,6 @@ impl DownloadBook {
         let entry = Entry {
             id,
             url: url.to_string(),
-            final_url: None,
             filename,
             path: path.clone(),
             root: root.to_path_buf(),
@@ -161,102 +159,58 @@ impl DownloadBook {
         }
     }
 
-    /// WebKit finished one download of `url`. The oldest in-flight row for that
-    /// URL is the one that started first. macOS does not report the saved path,
-    /// so the path reserved at the start is the one that counts.
+    /// WebKit finished a download and reported `reported_url`.
     ///
-    /// The post-redirect URL stored by [`Self::authorize_final_url`] is judged
-    /// again before a file can be kept.
-    pub fn finish(&self, url: &str, success: bool) -> Option<DownloadUpdate> {
-        self.finish_with_final_url(url, None, success)
+    /// That address is the one netguard judges. The address checked when the
+    /// download started is not reused for this decision. The row is the
+    /// in-progress download started for this address. When WebKit reports a
+    /// different address, the oldest download still in progress is the one
+    /// that finished. A blocked address deletes the partial file. macOS does
+    /// not report the saved path, so the path reserved at the start is the
+    /// one that counts.
+    pub fn finish(&self, reported_url: &str, success: bool) -> Option<DownloadUpdate> {
+        let started_url = {
+            let inner = self.lock();
+            if inner.inflight.contains_key(reported_url) {
+                reported_url.to_string()
+            } else {
+                oldest_inflight_url(&inner)?
+            }
+        };
+        self.finish_reported(&started_url, reported_url, success)
     }
 
-    /// Like [`Self::finish`], but `final_url` is the address after redirects
-    /// when it was not already stored. A blocked address deletes the file.
-    pub fn finish_with_final_url(
+    /// Finish the download that started at `started_url`, judging `reported_url`.
+    ///
+    /// `reported_url` is the address WebKit put on the finished event. It is
+    /// the only address this check consults. A blocked address is cancelled,
+    /// which deletes the partial file.
+    fn finish_reported(
         &self,
-        url: &str,
-        final_url: Option<&str>,
+        started_url: &str,
+        reported_url: &str,
         success: bool,
     ) -> Option<DownloadUpdate> {
-        let mut inner = self.lock();
-        let id = {
-            let queue = inner.inflight.get_mut(url)?;
-            let id = queue.pop_front()?;
-            if queue.is_empty() {
-                inner.inflight.remove(url);
-            }
-            id
-        };
-        let entry = inner.by_id.get_mut(&id)?;
-        if entry.phase == DownloadPhase::Failed {
-            return Some(entry.update());
-        }
-        if let Some(final_url) = final_url {
-            entry.final_url = Some(final_url.to_string());
-        }
-        let judged = entry.final_url.clone().unwrap_or_else(|| entry.url.clone());
-        if let Some(reason) = neurobrowser::netguard::blocked_reason(&judged) {
-            return Some(fail_entry(entry, reason.to_string()));
-        }
-        if success && entry.path.is_file() {
-            if is_regular_file(&entry.path) {
-                if let Err(error) = apply_download_quarantine(&entry.path) {
-                    return Some(fail_entry(entry, error));
+        if let Some(reason) = rejection_for(reported_url) {
+            let id = {
+                let mut inner = self.lock();
+                let queue = inner.inflight.get_mut(started_url)?;
+                let id = queue.pop_front()?;
+                if queue.is_empty() {
+                    inner.inflight.remove(started_url);
                 }
-            }
-            let len = std::fs::metadata(&entry.path)
-                .map(|meta| meta.len())
-                .unwrap_or(entry.received);
-            entry.phase = DownloadPhase::Done;
-            entry.received = len;
-            entry.total = Some(len);
-            entry.error = None;
-        } else if success {
-            entry.phase = DownloadPhase::Failed;
-            entry.error = Some("The download finished without a file".into());
-        } else {
-            entry.phase = DownloadPhase::Failed;
-            entry.error = Some("The download did not finish".into());
-        }
-        Some(entry.update())
-    }
-
-    /// Re-run netguard on the post-redirect URL before WebKit may write.
-    ///
-    /// `Err` is the failed row. Any partial file is removed, and a later
-    /// finish will not mark this download done.
-    pub fn authorize_final_url(&self, id: &str, final_url: &str) -> Result<(), DownloadUpdate> {
-        if let Some(reason) = neurobrowser::netguard::blocked_reason(final_url) {
-            return Err(self.cancel(id, reason.to_string()));
+                id
+            };
+            return Some(self.cancel(&id, reason));
         }
         let mut inner = self.lock();
-        if let Some(entry) = inner.by_id.get_mut(id) {
-            if entry.phase == DownloadPhase::Progress {
-                entry.final_url = Some(final_url.to_string());
-            }
-        }
-        Ok(())
+        apply_finish(&mut inner, started_url, success)
     }
 
     /// Mark an in-progress download failed and delete any partial file.
     pub fn cancel(&self, id: &str, error: String) -> DownloadUpdate {
         let mut inner = self.lock();
-        let Some(entry) = inner.by_id.get_mut(id) else {
-            return DownloadUpdate {
-                id: id.to_string(),
-                phase: DownloadPhase::Failed,
-                url: String::new(),
-                filename: "download".into(),
-                received: 0,
-                total: None,
-                error: Some(error),
-            };
-        };
-        let url = entry.url.clone();
-        let update = fail_entry(entry, error);
-        dequeue(&mut inner, &url, id);
-        update
+        cancel_in(&mut inner, id, error)
     }
 
     /// Byte count while the row is still in progress. A late tick after the
@@ -319,7 +273,6 @@ impl DownloadBook {
         let entry = Entry {
             id,
             url: url.to_string(),
-            final_url: None,
             filename: safe_download_filename(suggested),
             path: root.join("download"),
             root: root.to_path_buf(),
@@ -336,6 +289,79 @@ impl DownloadBook {
     fn lock(&self) -> std::sync::MutexGuard<'_, BookInner> {
         self.inner.lock().unwrap_or_else(|error| error.into_inner())
     }
+}
+
+fn rejection_for(url: &str) -> Option<String> {
+    neurobrowser::netguard::blocked_reason(url).map(|reason| reason.to_string())
+}
+
+fn oldest_inflight_url(inner: &BookInner) -> Option<String> {
+    let id = inner
+        .inflight
+        .values()
+        .filter_map(|queue| queue.front())
+        .min_by_key(|id| id_number(id))?;
+    inner.by_id.get(id).map(|entry| entry.url.clone())
+}
+
+fn id_number(id: &str) -> u64 {
+    id.strip_prefix("dl-")
+        .and_then(|number| number.parse().ok())
+        .unwrap_or(0)
+}
+
+fn apply_finish(inner: &mut BookInner, started_url: &str, success: bool) -> Option<DownloadUpdate> {
+    let id = {
+        let queue = inner.inflight.get_mut(started_url)?;
+        let id = queue.pop_front()?;
+        if queue.is_empty() {
+            inner.inflight.remove(started_url);
+        }
+        id
+    };
+    let entry = inner.by_id.get_mut(&id)?;
+    if entry.phase == DownloadPhase::Failed {
+        return Some(entry.update());
+    }
+    if success && entry.path.is_file() {
+        if is_regular_file(&entry.path) {
+            if let Err(error) = apply_download_quarantine(&entry.path) {
+                return Some(fail_entry(entry, error));
+            }
+        }
+        let len = std::fs::metadata(&entry.path)
+            .map(|meta| meta.len())
+            .unwrap_or(entry.received);
+        entry.phase = DownloadPhase::Done;
+        entry.received = len;
+        entry.total = Some(len);
+        entry.error = None;
+    } else if success {
+        entry.phase = DownloadPhase::Failed;
+        entry.error = Some("The download finished without a file".into());
+    } else {
+        entry.phase = DownloadPhase::Failed;
+        entry.error = Some("The download did not finish".into());
+    }
+    Some(entry.update())
+}
+
+fn cancel_in(inner: &mut BookInner, id: &str, error: String) -> DownloadUpdate {
+    let Some(entry) = inner.by_id.get_mut(id) else {
+        return DownloadUpdate {
+            id: id.to_string(),
+            phase: DownloadPhase::Failed,
+            url: String::new(),
+            filename: "download".into(),
+            received: 0,
+            total: None,
+            error: Some(error),
+        };
+    };
+    let url = entry.url.clone();
+    let update = fail_entry(entry, error);
+    dequeue(inner, &url, id);
+    update
 }
 
 fn fail_entry(entry: &mut Entry, error: String) -> DownloadUpdate {
@@ -665,21 +691,6 @@ fn emit_download<R: Runtime>(webview: &Webview<R>, update: &DownloadUpdate) {
     }
 }
 
-fn final_url_for_download(url: &str) -> Result<String, String> {
-    let url = url.to_string();
-    let handle = std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| error.to_string())?;
-        runtime.block_on(neurobrowser::netguard::final_url_after_redirects(&url))
-    });
-    match handle.join() {
-        Ok(result) => result,
-        Err(_) => Err("Download check stopped".into()),
-    }
-}
-
 fn watch_progress<R: Runtime>(
     webview: Webview<R>,
     book: std::sync::Arc<DownloadBook>,
@@ -707,7 +718,14 @@ fn watch_progress<R: Runtime>(
 
 /// Handle one WebKit download event from a page webview.
 ///
-/// Returning false on a request stops the download before it starts.
+/// Returning false on a request stops the download before it starts. The
+/// request path returns as soon as the destination is chosen. It does not
+/// follow redirects with its own request and does not wait on another thread.
+/// When the download finishes, netguard judges the address on that event.
+/// wry reports the original request address on macOS and Linux, and
+/// `DownloadOperation.Uri` on Windows. A blocked address cancels the row and
+/// deletes the partial file. Page navigations wry does expose are already
+/// refused by the webview navigation hook.
 pub fn handle_download_event<R: Runtime>(webview: Webview<R>, event: DownloadEvent<'_>) -> bool {
     let Some(state) = webview.try_state::<crate::AppState>() else {
         return false;
@@ -729,21 +747,6 @@ pub fn handle_download_event<R: Runtime>(webview: Webview<R>, event: DownloadEve
                 emit_download(&webview, &start.update);
                 return false;
             };
-            // WebKit has the response by now, but the event still carries the
-            // original address. Follow redirects and judge the address that
-            // remains before anything is written.
-            let final_url = match final_url_for_download(url.as_str()) {
-                Ok(final_url) => final_url,
-                Err(error) => {
-                    let update = book.cancel(&start.update.id, error);
-                    emit_download(&webview, &update);
-                    return false;
-                }
-            };
-            if let Err(update) = book.authorize_final_url(&start.update.id, &final_url) {
-                emit_download(&webview, &update);
-                return false;
-            }
             emit_download(&webview, &start.update);
             *destination = path.clone();
             watch_progress(webview.clone(), book, start.update.id, path);
@@ -1009,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blocked_final_url_is_cancelled_before_write_and_before_finish() {
+    fn finish_judges_the_url_webkit_reports_not_the_url_checked_at_the_start() {
         let root = temp_root();
         let book = DownloadBook::default();
         let start_url = "https://93.184.216.34/start";
@@ -1017,8 +1020,8 @@ mod tests {
         let path = start.path.clone().unwrap();
         fs::write(&path, b"partial").unwrap();
         let failed = book
-            .authorize_final_url(&start.update.id, "http://169.254.169.254/latest/meta-data/")
-            .expect_err("metadata redirect must cancel");
+            .finish_reported(start_url, "http://169.254.169.254/latest/meta-data/", true)
+            .expect("reported metadata address");
         assert_eq!(failed.phase, DownloadPhase::Failed);
         let error = failed.error.expect("block reason");
         assert!(
@@ -1034,25 +1037,84 @@ mod tests {
         let path = start.path.unwrap();
         fs::write(&path, b"secret").unwrap();
         let failed = book
-            .finish_with_final_url(later, Some("http://127.0.0.1/secret"), true)
+            .finish_reported(later, "http://127.0.0.1/secret", true)
             .unwrap();
         assert_eq!(failed.phase, DownloadPhase::Failed);
         assert!(failed.error.unwrap().contains("127.0.0.1"));
         assert!(!path.exists());
         assert!(book.path_for_action(&failed.id).is_err());
+
+        let file_url = "https://93.184.216.34/passwd";
+        let start = book.begin(&root, file_url, "passwd");
+        let path = start.path.unwrap();
+        fs::write(&path, b"partial").unwrap();
+        let failed = book
+            .finish_reported(file_url, "file:///etc/passwd", true)
+            .unwrap();
+        assert_eq!(failed.phase, DownloadPhase::Failed);
+        assert!(failed.error.unwrap().contains("file"));
+        assert!(!path.exists());
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn an_allowed_final_url_can_finish_and_is_quarantined_where_supported() {
+    fn a_finished_event_url_that_differs_from_the_start_still_deletes_the_partial() {
         let root = temp_root();
         let book = DownloadBook::default();
-        let url = "https://93.184.216.34/files/report.pdf";
-        let start = book.begin(&root, url, "report.pdf");
-        assert!(book.authorize_final_url(&start.update.id, url).is_ok());
+        let start_url = "https://93.184.216.34/start";
+        let start = book.begin(&root, start_url, "secret.bin");
+        let path = start.path.unwrap();
+        fs::write(&path, b"partial").unwrap();
+        let failed = book
+            .finish("http://169.254.169.254/latest/meta-data/", true)
+            .expect("in-progress download");
+        assert_eq!(failed.id, start.update.id);
+        assert_eq!(failed.phase, DownloadPhase::Failed);
+        assert!(!path.exists());
+        assert!(book.finish(start_url, true).is_none());
+        assert!(!book.is_in_progress(&failed.id));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_reported_url_matching_one_download_leaves_the_other_in_progress() {
+        let root = temp_root();
+        let book = DownloadBook::default();
+        let first_url = "https://93.184.216.34/first";
+        let second_url = "https://93.184.216.34/second";
+        let first = book.begin(&root, first_url, "first.bin");
+        let first_path = first.path.unwrap();
+        let second = book.begin(&root, second_url, "second.bin");
+        let second_path = second.path.unwrap();
+        fs::write(&first_path, b"one").unwrap();
+        fs::write(&second_path, b"two").unwrap();
+
+        let done = book.finish(second_url, true).unwrap();
+        assert_eq!(done.id, second.update.id);
+        assert_eq!(done.phase, DownloadPhase::Done);
+        assert!(book.is_in_progress(&first.update.id));
+        assert!(second_path.is_file());
+
+        let failed = book.finish("http://127.0.0.1/secret", true).unwrap();
+        assert_eq!(failed.id, first.update.id);
+        assert_eq!(failed.phase, DownloadPhase::Failed);
+        assert!(failed.error.unwrap().contains("127.0.0.1"));
+        assert!(!first_path.exists());
+        assert!(second_path.is_file());
+        assert!(book.finish(first_url, true).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_allowed_url_webkit_reports_can_finish_and_is_quarantined_where_supported() {
+        let root = temp_root();
+        let book = DownloadBook::default();
+        let start_url = "https://93.184.216.34/start";
+        let reported = "https://93.184.216.34/files/report.pdf";
+        let start = book.begin(&root, start_url, "report.pdf");
         let path = start.path.unwrap();
         fs::write(&path, b"%PDF").unwrap();
-        let done = book.finish(url, true).unwrap();
+        let done = book.finish_reported(start_url, reported, true).unwrap();
         assert_eq!(done.phase, DownloadPhase::Done);
         assert!(path.is_file());
         #[cfg(target_os = "macos")]
@@ -1061,6 +1123,14 @@ mod tests {
             assert!(value.starts_with("0083;"), "{value}");
             assert!(value.contains("NeuroBrowser"), "{value}");
         }
+
+        let start = book.begin(&root, start_url, "other.pdf");
+        let path = start.path.unwrap();
+        fs::write(&path, b"%PDF").unwrap();
+        let done = book.finish(reported, true).unwrap();
+        assert_eq!(done.id, start.update.id);
+        assert_eq!(done.phase, DownloadPhase::Done);
+        assert!(path.is_file());
         let _ = fs::remove_dir_all(root);
     }
 
