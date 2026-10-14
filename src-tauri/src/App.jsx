@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
-import { nativePageUpdates } from "./nativePageEvents.js";
+import { moveTab, nativePageUpdates, pageLifecycleUpdates, securityState } from "./nativePageEvents.js";
 import {
   createNativeNavigationState,
   forgetNativePage,
@@ -101,16 +101,92 @@ function Message({ item }) {
   );
 }
 
-function TabStrip({ tabs, currentPageId, onActivate, onClose }) {
+function SecurityIndicator({ url }) {
+  const state = securityState(url);
+  if (state === "secure") {
+    return (
+      <span aria-label="Secure" className="security-indicator secure" data-security="secure" title="Secure">
+        <svg aria-hidden="true" className="security-lock" viewBox="0 0 16 16">
+          <path
+            d="M5 7V5a3 3 0 0 1 6 0v2h1.2A1.8 1.8 0 0 1 14 8.8v4.4a1.8 1.8 0 0 1-1.8 1.8H3.8A1.8 1.8 0 0 1 2 13.2V8.8A1.8 1.8 0 0 1 3.8 7H5zm1.2 0h3.6V5a1.8 1.8 0 0 0-3.6 0v2z"
+            fill="currentColor"
+          />
+        </svg>
+      </span>
+    );
+  }
+  if (state === "insecure") {
+    return (
+      <span className="security-indicator insecure" data-security="insecure" title="Not secure">
+        Not secure
+      </span>
+    );
+  }
+  return null;
+}
+
+function LoadProgress({ active }) {
+  if (!active) return null;
+  return <div aria-label="Loading page" className="load-progress" role="progressbar" />;
+}
+
+function TabStrip({ tabs, currentPageId, onActivate, onClose, onReorder }) {
   const canClose = tabs.length > 1;
+  const dragFrom = useRef(null);
+  const suppressClick = useRef(false);
+  const [draggingId, setDraggingId] = useState(null);
+  const [dropIndex, setDropIndex] = useState(null);
+
+  function clearDrag() {
+    dragFrom.current = null;
+    setDraggingId(null);
+    setDropIndex(null);
+  }
+
   return (
     <div className="tabs" aria-label="Open tabs">
-      {tabs.map((tab) => (
+      {tabs.map((tab, index) => (
         <div
-          className={`tab${tab.id === currentPageId ? " active" : ""}`}
+          className={`tab${tab.id === currentPageId ? " active" : ""}${tab.id === draggingId ? " dragging" : ""}${dropIndex === index ? " drop-target" : ""}`}
+          draggable
           key={tab.id}
           onClick={(event) => {
+            if (suppressClick.current) {
+              suppressClick.current = false;
+              return;
+            }
             if (event.target === event.currentTarget) onActivate(tab.id);
+          }}
+          onDragEnd={() => {
+            if (dragFrom.current == null) return;
+            suppressClick.current = true;
+            clearDrag();
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            setDropIndex(index);
+          }}
+          onDragStart={(event) => {
+            if (event.target.closest?.(".tab-close")) {
+              event.preventDefault();
+              return;
+            }
+            dragFrom.current = index;
+            suppressClick.current = false;
+            setDraggingId(tab.id);
+            event.dataTransfer?.setData("text/plain", String(index));
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const raw = event.dataTransfer?.getData("text/plain");
+            const fromData = raw == null || raw === "" ? Number.NaN : Number(raw);
+            const fromIndex = Number.isInteger(dragFrom.current) ? dragFrom.current : fromData;
+            clearDrag();
+            suppressClick.current = true;
+            if (!Number.isInteger(fromIndex)) return;
+            onReorder(fromIndex, index);
           }}
         >
           <button className="tab-title" onClick={() => onActivate(tab.id)} type="button">
@@ -342,13 +418,16 @@ function Header({
           </select>
         </>
       )}
-      <Omnibox
-        adapter={adapter}
-        onNavigate={onNavigate}
-        onStatus={onStatus}
-        setUrl={setUrl}
-        url={url}
-      />
+      <div className="location">
+        <SecurityIndicator url={url} />
+        <Omnibox
+          adapter={adapter}
+          onNavigate={onNavigate}
+          onStatus={onStatus}
+          setUrl={setUrl}
+          url={url}
+        />
+      </div>
       <button className="btn btn-secondary" onClick={onNewTab} type="button">
         New Tab
       </button>
@@ -369,6 +448,16 @@ export default function App({ adapter, lane }) {
   }, []);
   const [tabs, setTabs] = useState([]);
   const [url, setUrl] = useState("");
+  const addressDirtyRef = useRef(false);
+  const commandLoadToken = useRef(0);
+  const setUrlFromUser = useCallback((next) => {
+    addressDirtyRef.current = true;
+    setUrl(next);
+  }, []);
+  const setUrlFromPage = useCallback((next) => {
+    addressDirtyRef.current = false;
+    setUrl(next);
+  }, []);
   const [provider, setProviderValue] = useState("openai");
   const [policyMode, setPolicyModeValue] = useState("assisted");
   const [actionPolicy, setActionPolicy] = useState(null);
@@ -377,6 +466,7 @@ export default function App({ adapter, lane }) {
   const [snapshot, setSnapshot] = useState(null);
   const [status, setStatus] = useState("Starting session...");
   const [loading, setLoading] = useState(null);
+  const [pageLoading, setPageLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState([
@@ -397,14 +487,14 @@ export default function App({ adapter, lane }) {
   const updateSnapshot = useCallback((pageId, nextSnapshot) => {
     if (!nextSnapshot) return;
     setSnapshot(nextSnapshot);
-    setUrl(nextSnapshot.url || "");
+    setUrlFromPage(nextSnapshot.url || "");
     setTabs((items) =>
       items.map((tab) =>
         tab.id === pageId ? { ...tab, title: nextSnapshot.title || tab.title || "Untitled" } : tab
       )
     );
     setStatus(nextSnapshot.title ? `Loaded: ${nextSnapshot.title}` : "Ready");
-  }, []);
+  }, [setUrlFromPage]);
 
   const syncBrowserViewportForPage = useCallback(
     async (pageId) => {
@@ -517,11 +607,18 @@ export default function App({ adapter, lane }) {
     [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
 
+  const reorderTabs = useCallback((fromIndex, toIndex) => {
+    setTabs((items) => moveTab(items, fromIndex, toIndex));
+  }, []);
+
   const navigateCurrentPage = useCallback(async (nextUrl) => {
     if (currentPageId == null || !sessionId) return;
     const rawUrl = (typeof nextUrl === "string" ? nextUrl : url).trim();
     if (!rawUrl) return;
 
+    const token = commandLoadToken.current + 1;
+    commandLoadToken.current = token;
+    addressDirtyRef.current = false;
     setStatus(`Navigating to ${rawUrl}`);
     setLoading(`Opening ${rawUrl}...`);
     expectNativeNavigation(currentPageId);
@@ -532,7 +629,10 @@ export default function App({ adapter, lane }) {
         "Navigation failed"
       );
     } finally {
-      setLoading(null);
+      if (commandLoadToken.current === token) {
+        setLoading(null);
+        setPageLoading(false);
+      }
     }
   }, [adapter, currentPageId, expectNativeNavigation, performPageAction, sessionId, url]);
 
@@ -693,19 +793,43 @@ export default function App({ adapter, lane }) {
         if (updates.tabs) {
           setTabs(updates.tabs);
           setActivePageId(updates.activePageId);
-          if ("url" in updates) setUrl(updates.url);
+          if ("url" in updates) setUrlFromPage(updates.url);
         }
         // Status follows the active tab's newest WebKit navigation only.
         const next = nativeStatusUpdate(nativeNavigationRef.current, event, currentPageIdRef.current);
-        if ("url" in next) setUrl(next.url);
+        if ("url" in next) setUrlFromPage(next.url);
         if (next.snapshot) updateSnapshot(event.pageId, next.snapshot);
         else if (next.status) setStatus(next.status);
-      } else if (event.type === "status") {
-        setStatus(event.message);
       }
     });
     return unsubscribe;
-  }, [adapter, compact, setActivePageId, updateSnapshot]);
+  }, [adapter, compact, setActivePageId, setUrlFromPage, updateSnapshot]);
+
+  useEffect(() => {
+    const onFocusOut = (event) => {
+      if (event.target?.classList?.contains("url-input")) addressDirtyRef.current = false;
+    };
+    document.addEventListener("focusout", onFocusOut);
+    return () => document.removeEventListener("focusout", onFocusOut);
+  }, []);
+
+  useEffect(() => {
+    if (typeof adapter.onPageLifecycle !== "function") return undefined;
+    return adapter.onPageLifecycle((event) => {
+      const updates = pageLifecycleUpdates(event, currentPageIdRef.current, {
+        addressEditing: addressDirtyRef.current,
+      });
+      if (!updates.phase) return;
+      if (updates.loading === true) setPageLoading(true);
+      if (updates.loading === false) setPageLoading(false);
+      if (typeof updates.url === "string") setUrlFromPage(updates.url);
+      if (typeof updates.title === "string") {
+        const pageId = updates.pageId;
+        const title = updates.title;
+        setTabs((items) => items.map((tab) => (tab.id === pageId ? { ...tab, title } : tab)));
+      }
+    });
+  }, [adapter, setUrlFromPage]);
 
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
@@ -795,20 +919,21 @@ export default function App({ adapter, lane }) {
   if (compact) {
     return (
       <div className="app-shell appkit-shell">
+        <LoadProgress active={loading != null || pageLoading} />
         <Header
           adapter={adapter}
           compact
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
           onStatus={setStatus}
-          setUrl={setUrl}
+          setUrl={setUrlFromUser}
           url={url}
         />
-        <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} tabs={tabs} />
+        <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
         <BrowserToolbar onAction={runBrowserAction} />
         <StatsRow snapshot={snapshot} />
         <div className="status-bar">
-          <span>{status}</span>
+          <span className="status-line">{status}</span>
           <span>Tabs: {tabs.length}</span>
         </div>
       </div>
@@ -817,14 +942,7 @@ export default function App({ adapter, lane }) {
 
   return (
     <div className="app-shell">
-      {loading && (
-        <div className="loading-overlay">
-          <div className="loading-card">
-            <div className="spinner" />
-            <div>{loading}</div>
-          </div>
-        </div>
-      )}
+      <LoadProgress active={loading != null || pageLoading} />
       <Header
         adapter={adapter}
         onNavigate={navigateCurrentPage}
@@ -834,10 +952,10 @@ export default function App({ adapter, lane }) {
         provider={provider}
         setPolicyMode={selectPolicyMode}
         setProvider={selectProvider}
-        setUrl={setUrl}
+        setUrl={setUrlFromUser}
         url={url}
       />
-      <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} tabs={tabs} />
+      <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
       <main>
         <section className="browser-panel">
           <BrowserToolbar onAction={runBrowserAction} />
@@ -863,7 +981,7 @@ export default function App({ adapter, lane }) {
         />
       </main>
       <div className="status-bar">
-        <span>{status}</span>
+        <span className="status-line">{status}</span>
         <span>Tabs: {tabs.length}</span>
       </div>
     </div>

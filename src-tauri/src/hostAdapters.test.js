@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createAppKitHostAdapter } from "./hostAdapters.js";
+import { createAppKitHostAdapter, createTauriHostAdapter } from "./hostAdapters.js";
 
 test("AppKit keeps snapshots associated with their page and discards closed pages", async () => {
   const bridge = new EventTarget();
@@ -40,4 +40,24 @@ test("AppKit keeps snapshots associated with their page and discards closed page
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   }
+});
+
+test("the Tauri adapter forwards a dispatched page-lifecycle payload", async () => {
+  let handler = null;
+  const adapter = createTauriHostAdapter({
+    listen(name, next) {
+      assert.equal(name, "page-lifecycle");
+      handler = next;
+      return () => { handler = null; };
+    },
+  });
+  const seen = [];
+  const stop = adapter.onPageLifecycle((payload) => seen.push(payload));
+  await Promise.resolve();
+  await Promise.resolve();
+  const payload = { pageId: 1, phase: "title", url: "https://example.test/path", title: "Example" };
+  handler({ payload });
+  assert.deepEqual(seen, [payload]);
+  stop();
+  assert.equal(handler, null);
 });
