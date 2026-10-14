@@ -363,6 +363,81 @@ test("snapshot html drops noscript content entirely when it arrives as one raw t
   }
 });
 
+function installPopupPage(html, { gesture = true } = {}) {
+  const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
+    url: "https://example.test/page",
+    runScripts: "outside-only",
+  });
+  const opened = [];
+  const reports = [];
+  dom.window.open = (...args) => {
+    opened.push(args);
+    return { closed: false };
+  };
+  dom.window.__TAURI_INTERNALS__ = {
+    invoke: (command, args) => {
+      reports.push({ command, args });
+      return Promise.resolve();
+    },
+  };
+  Object.defineProperty(dom.window.navigator, "userActivation", {
+    configurable: true,
+    value: { isActive: gesture },
+  });
+  dom.window.eval(runtimeInitScript);
+  return { dom, opened, reports };
+}
+
+test("target=_blank and modified clicks ask the shell for a tab", () => {
+  const { dom, opened } = installPopupPage(
+    '<a id="blank" href="https://example.com/next" target="_blank">Next</a><a id="same" href="https://example.com/same">Same</a>',
+  );
+  const blank = dom.window.document.getElementById("blank");
+  const same = dom.window.document.getElementById("same");
+  blank.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+  blank.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+  same.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+  assert.equal(opened.length, 1);
+  assert.match(opened[0][0], /disposition=foreground/);
+  assert.match(opened[0][0], /url=https%3A%2F%2Fexample\.com%2Fnext/);
+
+  const modified = new dom.window.MouseEvent("pointerdown", {
+    bubbles: true, cancelable: true, button: 0, ctrlKey: true,
+  });
+  same.dispatchEvent(modified);
+  assert.equal(modified.defaultPrevented, true);
+  assert.match(opened[1][0], /disposition=background/);
+
+  const middle = new dom.window.MouseEvent("pointerdown", {
+    bubbles: true, cancelable: true, button: 1,
+  });
+  same.dispatchEvent(middle);
+  assert.match(opened[2][0], /disposition=background/);
+  dom.window.close();
+});
+
+test("window.open without a user gesture is reported and does not open", () => {
+  const { dom, opened, reports } = installPopupPage("<p>Hi</p>", { gesture: false });
+  const result = dom.window.open("https://example.com/popup");
+  assert.equal(result, null);
+  assert.equal(opened.length, 0);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].command, "browser_runtime_report");
+  assert.equal(reports[0].args.payload.request_id, "popup-blocked");
+  assert.equal(reports[0].args.payload.payload.url, "https://example.com/popup");
+  dom.window.close();
+});
+
+test("window.open from a user gesture asks for a foreground tab", () => {
+  const { dom, opened, reports } = installPopupPage("<p>Hi</p>", { gesture: true });
+  dom.window.open("https://example.com/popup");
+  assert.equal(reports.length, 0);
+  assert.equal(opened.length, 1);
+  assert.match(opened[0][0], /disposition=foreground/);
+  assert.match(opened[0][0], /url=https%3A%2F%2Fexample\.com%2Fpopup/);
+  dom.window.close();
+});
+
 test("snapshot html drops noscript content entirely when it parses into real child elements (jsdom's parse shape)", () => {
   // Drop noscript children because escaping does not redact them.
   const snapshot = snapshotOf(`<noscript><input type="password" value="secret"></noscript>`);

@@ -6,7 +6,19 @@ import { NewTabPage } from "./NewTabPage.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { classifyOmniboxInput } from "./omniboxInput.js";
 import { createMenuEchoGuard, numberedTabCommand } from "./menuCommands.js";
-import { moveTab, nativePageUpdates, pageLifecycleUpdates, securityState } from "./nativePageEvents.js";
+import {
+  blockedPopupLabel,
+  focusAfterClose,
+  forgetBlockedPopups,
+  insertOpenedTab,
+  moveTab,
+  nativePageUpdates,
+  pageLifecycleUpdates,
+  pageNewWindowRequest,
+  rememberBlockedPopup,
+  securityState,
+  takeBlockedPopup,
+} from "./nativePageEvents.js";
 import {
   createNativeNavigationState,
   forgetNativePage,
@@ -109,6 +121,18 @@ function Message({ item }) {
     <div className={`message ${item.role}`}>
       <div>{item.text}</div>
     </div>
+  );
+}
+
+function PopupBlockedIndicator({ count, onDismiss, onOpen }) {
+  const label = blockedPopupLabel(count);
+  if (!label) return null;
+  return (
+    <span className="popup-blocked" role="status">
+      <span>{label}</span>
+      <button onClick={onOpen} type="button">Open</button>
+      <button aria-label="Dismiss blocked popup" onClick={onDismiss} type="button">×</button>
+    </span>
   );
 }
 
@@ -392,9 +416,12 @@ function ChatPanel({
 
 function Header({
   adapter,
+  blockedCount,
   compact,
+  onDismissBlocked,
   onNavigate,
   onNewTab,
+  onOpenBlocked,
   onStatus,
   policyMode,
   provider,
@@ -444,6 +471,7 @@ function Header({
           setUrl={setUrl}
           url={url}
         />
+        <PopupBlockedIndicator count={blockedCount} onDismiss={onDismissBlocked} onOpen={onOpenBlocked} />
       </div>
       <button className="btn btn-secondary" onClick={onNewTab} type="button">
         New Tab
@@ -486,6 +514,11 @@ export default function App({ adapter, lane }) {
   const [status, setStatus] = useState("Starting session...");
   const [loading, setLoading] = useState(null);
   const [pageLoading, setPageLoading] = useState(false);
+  const [blockedPopups, setBlockedPopups] = useState({});
+  const blockedPopupsRef = useRef({});
+  const sessionIdRef = useRef(null);
+  sessionIdRef.current = sessionId;
+  const popupQueue = useRef(Promise.resolve());
   const [prompt, setPrompt] = useState("");
   const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState([
@@ -613,10 +646,15 @@ export default function App({ adapter, lane }) {
       try {
         await adapter.closePage(sessionId, pageId);
         forgetNativePage(nativeNavigationRef.current, pageId);
-        const closingIndex = tabs.findIndex((tab) => tab.id === pageId);
+        const nextId = focusAfterClose(tabs, pageId, currentPageId);
         const nextTabs = tabs.filter((tab) => tab.id !== pageId);
         setTabs(nextTabs);
-        const nextTab = nextTabs[closingIndex] || nextTabs[closingIndex - 1] || nextTabs[0];
+        setBlockedPopups((current) => {
+          const next = forgetBlockedPopups(current, pageId);
+          blockedPopupsRef.current = next;
+          return next;
+        });
+        const nextTab = nextTabs.find((tab) => tab.id === nextId);
         if (nextTab) {
           setActivePageId(nextTab.id);
           if (typeof nextTab.url === "string") setUrlFromPage(nextTab.url);
@@ -635,8 +673,78 @@ export default function App({ adapter, lane }) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, tabs, updateSnapshot]
+    [adapter, compact, currentPageId, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
+
+  const openFromOpener = useCallback(async (openerId, url, background) => {
+    const activeSession = sessionIdRef.current;
+    if (!activeSession) return;
+    let pageId;
+    try {
+      pageId = await adapter.createPage(activeSession, background ? { activate: false } : undefined);
+    } catch (error) {
+      setStatus(`New tab failed: ${messageText(error)}`);
+      return;
+    }
+    setTabs((items) => insertOpenedTab(items, openerId, pageId, url));
+    if (!background) {
+      setActivePageId(pageId);
+      setUrlFromPage(url || "");
+      await syncBrowserViewportForPage(pageId);
+      if (url) {
+        setStatus(`Navigating to ${url}`);
+        setLoading(`Opening ${url}...`);
+      } else {
+        setStatus("New tab ready");
+        if (!compact) document.querySelector(".location .url-input")?.focus();
+      }
+    } else {
+      await syncBrowserViewportForPage(pageId);
+    }
+    if (!url) return;
+    try {
+      await adapter.navigate(activeSession, pageId, url);
+      if (!background && !compact) {
+        try {
+          const nextSnapshot = await adapter.getPageSnapshot(activeSession, pageId);
+          updateSnapshot(pageId, nextSnapshot);
+        } catch (error) {
+          setStatus(`Page refresh failed: ${messageText(error)}`);
+        }
+      }
+    } catch (error) {
+      setStatus(`Navigation failed: ${messageText(error)}`);
+    } finally {
+      if (!background) {
+        setLoading(null);
+        setPageLoading(false);
+      }
+    }
+  }, [adapter, compact, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updateSnapshot]);
+
+  const enqueuePopup = useCallback((job) => {
+    popupQueue.current = popupQueue.current.then(job, job);
+  }, []);
+
+  const openBlockedPopup = useCallback(() => {
+    const pageId = currentPageIdRef.current;
+    if (pageId == null) return;
+    const taken = takeBlockedPopup(blockedPopupsRef.current, pageId);
+    blockedPopupsRef.current = taken.popups;
+    setBlockedPopups(taken.popups);
+    if (taken.url == null) return;
+    enqueuePopup(() => openFromOpener(pageId, taken.url, false));
+  }, [enqueuePopup, openFromOpener]);
+
+  const dismissBlockedPopup = useCallback(() => {
+    const pageId = currentPageIdRef.current;
+    if (pageId == null) return;
+    setBlockedPopups((current) => {
+      const next = forgetBlockedPopups(current, pageId);
+      blockedPopupsRef.current = next;
+      return next;
+    });
+  }, []);
 
   const reorderTabs = useCallback((fromIndex, toIndex) => {
     setTabs((items) => moveTab(items, fromIndex, toIndex));
@@ -889,6 +997,27 @@ export default function App({ adapter, lane }) {
     });
   }, [adapter, setUrlFromPage]);
 
+  useEffect(() => {
+    if (typeof adapter.onPageNewWindow !== "function") return undefined;
+    return adapter.onPageNewWindow((event) => {
+      const request = pageNewWindowRequest(event);
+      if (!request) return;
+      if (request.disposition === "blocked") {
+        setBlockedPopups((current) => {
+          const next = rememberBlockedPopup(current, request.pageId, request.url);
+          blockedPopupsRef.current = next;
+          return next;
+        });
+        return;
+      }
+      enqueuePopup(() => openFromOpener(
+        request.pageId,
+        request.url,
+        request.disposition === "background",
+      ));
+    });
+  }, [adapter, enqueuePopup, openFromOpener]);
+
   const activeTab = tabs.find((tab) => tab.id === currentPageId);
   const showStartPage =
     !compact &&
@@ -1088,6 +1217,8 @@ export default function App({ adapter, lane }) {
     });
   }, [activatePage, adapter, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
 
+  const blockedCount = Array.isArray(blockedPopups[currentPageId]) ? blockedPopups[currentPageId].length : 0;
+
   const stageText =
     "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
 
@@ -1097,9 +1228,12 @@ export default function App({ adapter, lane }) {
         <LoadProgress active={loading != null || pageLoading} />
         <Header
           adapter={adapter}
+          blockedCount={blockedCount}
           compact
+          onDismissBlocked={dismissBlockedPopup}
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
+          onOpenBlocked={openBlockedPopup}
           onStatus={setStatus}
           setUrl={setUrlFromUser}
           url={url}
@@ -1120,8 +1254,11 @@ export default function App({ adapter, lane }) {
       <LoadProgress active={loading != null || pageLoading} />
       <Header
         adapter={adapter}
+        blockedCount={blockedCount}
+        onDismissBlocked={dismissBlockedPopup}
         onNavigate={navigateCurrentPage}
         onNewTab={createNewTab}
+        onOpenBlocked={openBlockedPopup}
         onStatus={setStatus}
         policyMode={policyMode}
         provider={provider}

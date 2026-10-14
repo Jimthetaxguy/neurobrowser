@@ -48,10 +48,15 @@ async function withApp(check, {
   const hostListeners = new Set();
   const lifecycleListeners = new Set();
   const menuListeners = new Set();
+  const newWindowListeners = new Set();
+  const createdPages = [];
   const adapter = {
     rendersPageInHost: false,
     createSession: async () => "session",
-    createPage: async () => nextPage++,
+    createPage: async (_session, options) => {
+      createdPages.push(options ?? null);
+      return nextPage++;
+    },
     getActionPolicy: async () => null,
     setActivePage: async (session, page) => { calls.push(["activate", session, page]); },
     closePage: async (session, page) => {
@@ -86,6 +91,10 @@ async function withApp(check, {
     onPageLifecycle(callback) {
       lifecycleListeners.add(callback);
       return () => lifecycleListeners.delete(callback);
+    },
+    onPageNewWindow(callback) {
+      newWindowListeners.add(callback);
+      return () => newWindowListeners.delete(callback);
     },
     ...(history == null ? {} : {
       searchBrowsingHistory: async (query, limit) => {
@@ -127,6 +136,14 @@ async function withApp(check, {
   const dispatchLifecycle = async (event) => {
     await act(async () => {
       for (const listener of lifecycleListeners) listener(event);
+    });
+  };
+  const dispatchNewWindow = async (event) => {
+    await act(async () => {
+      for (const listener of newWindowListeners) listener(event);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
     });
   };
   const dispatchMenu = async (command) => {
@@ -193,7 +210,9 @@ async function withApp(check, {
         document.querySelector(".location .url-input")?.blur();
       });
     }
-    await check({ calls, click, dispatch, dispatchLifecycle, dispatchMenu, document, goTo, keydown, toolbar });
+    await check({
+      calls, click, createdPages, dispatch, dispatchLifecycle, dispatchMenu, dispatchNewWindow, document, goTo, keydown, toolbar,
+    });
   } finally {
     await act(async () => { root.unmount(); });
     dom.window.close();
@@ -1479,4 +1498,63 @@ test("the AppKit shell does not draw the local start page", async () => {
   await withApp(async ({ document }) => {
     assert.equal(document.querySelector(".start-page"), null);
   }, { lane: "appkit" });
+});
+
+test("a foreground popup opens a tab and closing it returns to the opener", async () => {
+  await withApp(async ({ calls, click, createdPages, dispatchNewWindow, document }) => {
+    assert.equal(document.querySelectorAll(".tab").length, 1);
+    await dispatchNewWindow({ pageId: 0, url: "https://opened.example/a", disposition: "foreground" });
+    assert.equal(document.querySelectorAll(".tab").length, 2);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 1");
+    assert.deepEqual(createdPages.at(-1), null);
+    assert.ok(calls.some((call) => call[0] === "navigate" && call[2] === 1 && call[3] === "https://opened.example/a"));
+
+    await click(document.querySelector(".header > button"));
+    await click(document.querySelectorAll(".tab-title")[1]);
+    calls.length = 0;
+    await click(document.querySelector(".tab.active .tab-close"));
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 0");
+    assert.deepEqual(calls[0], ["close", "session", 1]);
+    assert.deepEqual(calls.find((call) => call[0] === "activate"), ["activate", "session", 0]);
+  });
+});
+
+test("a background popup keeps the current tab", async () => {
+  await withApp(async ({ calls, createdPages, dispatchNewWindow, document, goTo }) => {
+    await goTo("https://current.example");
+    calls.length = 0;
+    await dispatchNewWindow({ pageId: 0, url: "https://background.example/b", disposition: "background" });
+    assert.equal(document.querySelectorAll(".tab").length, 2);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 0");
+    assert.equal(document.querySelector(".url-input").value, "https://page0.example");
+    assert.deepEqual(createdPages.at(-1), { activate: false });
+    assert.ok(calls.some((call) => call[0] === "navigate" && call[2] === 1 && call[3] === "https://background.example/b"));
+    assert.equal(calls.some((call) => call[0] === "activate"), false);
+  });
+});
+
+test("a blocked popup stays in the address bar until it is opened", async () => {
+  await withApp(async ({ calls, click, dispatchNewWindow, document }) => {
+    await dispatchNewWindow({ pageId: 0, url: "https://blocked.example/c", disposition: "blocked" });
+    await dispatchNewWindow({ pageId: 0, url: "https://blocked.example/d", disposition: "blocked" });
+    const notice = document.querySelector(".popup-blocked");
+    assert.ok(notice);
+    assert.match(notice.textContent, /2 popups blocked/);
+    assert.equal(document.querySelectorAll(".tab").length, 1);
+
+    calls.length = 0;
+    await click(notice.querySelector("button"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    assert.equal(document.querySelectorAll(".tab").length, 2);
+    assert.equal(document.querySelector(".tab.active .tab-title").textContent, "Page 1");
+    assert.equal(document.querySelector(".popup-blocked"), null);
+    assert.ok(calls.some((call) => call[0] === "navigate" && call[3] === "https://blocked.example/c"));
+
+    await click(document.querySelectorAll(".tab-title")[0]);
+    assert.match(document.querySelector(".popup-blocked").textContent, /^Popup blocked/);
+    await click(document.querySelector(".popup-blocked button[aria-label='Dismiss blocked popup']"));
+    assert.equal(document.querySelector(".popup-blocked"), null);
+  });
 });
