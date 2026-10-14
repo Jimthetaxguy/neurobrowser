@@ -728,6 +728,162 @@ test("page lifecycle updates the address bar, tab title, security indicator, and
   });
 });
 
+function reloadOrStop(document) {
+  return [...document.querySelectorAll(".browser-toolbar button")].find((item) =>
+    item.textContent === "Reload" || item.textContent === "Stop"
+  );
+}
+
+test("the reload button is Stop while the page is loading", async () => {
+  await withApp(async ({ calls, dispatchLifecycle, document, toolbar }) => {
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    assert.equal(document.querySelector(".load-progress"), null);
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/",
+      title: "",
+    });
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+    assert.ok(document.querySelector(".load-progress"));
+
+    calls.length = 0;
+    await toolbar("Stop");
+    assert.deepEqual(calls, [["browser", "stop_page_load", "session", 0]]);
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    assert.equal(document.querySelector(".load-progress"), null);
+
+    await dispatchLifecycle({
+      pageId: 1,
+      phase: "started",
+      url: "https://other.example/",
+      title: "",
+    });
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    assert.equal(document.querySelector(".load-progress"), null);
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/again",
+      title: "",
+    });
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+    calls.length = 0;
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "finished",
+      url: "https://slow.example/again",
+      title: "",
+    });
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    assert.equal(document.querySelector(".load-progress"), null);
+    assert.deepEqual(calls, []);
+
+    calls.length = 0;
+    await toolbar("Reload");
+    assert.deepEqual(calls, [
+      ["browser", "browser_reload", "session", 0],
+      ["snapshot", "session", 0],
+    ]);
+  });
+});
+
+test("Escape stops a load from the address bar or the page unless that text is being edited", async () => {
+  await withApp(async ({ calls, dispatchLifecycle, document, keydown }) => {
+    calls.length = 0;
+    const idleEsc = await keydown("Escape");
+    assert.equal(idleEsc.defaultPrevented, false);
+    assert.deepEqual(calls, []);
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/",
+      title: "",
+    });
+    calls.length = 0;
+    const pageEsc = await keydown("Escape");
+    assert.equal(pageEsc.defaultPrevented, true);
+    assert.deepEqual(calls, [["browser", "stop_page_load", "session", 0]]);
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/2",
+      title: "",
+    });
+    const input = document.querySelector(".url-input");
+    calls.length = 0;
+    await act(async () => { input.focus(); });
+    const addressEsc = await keydown("Escape");
+    assert.equal(addressEsc.defaultPrevented, true);
+    assert.equal(document.activeElement, input);
+    assert.deepEqual(calls, [["browser", "stop_page_load", "session", 0]]);
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/3",
+      title: "",
+    });
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      input.focus();
+      const tracker = input._valueTracker;
+      if (tracker) tracker.setValue("");
+      setter.call(input, "https://draft.example/editing");
+      input.dispatchEvent(new window.Event("keyup", { bubbles: true }));
+    });
+    calls.length = 0;
+    const editingEsc = await keydown("Escape");
+    assert.equal(editingEsc.defaultPrevented, false);
+    assert.equal(document.activeElement, input);
+    assert.deepEqual(calls, []);
+    assert.equal(input.value, "https://draft.example/editing");
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+
+    const chat = document.querySelector(".chat-input");
+    await act(async () => {
+      input.blur();
+      chat.focus();
+    });
+    calls.length = 0;
+    const chatEsc = await keydown("Escape");
+    assert.equal(chatEsc.defaultPrevented, false);
+    assert.equal(document.activeElement, chat);
+    assert.deepEqual(calls, []);
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+
+    await act(async () => { chat.blur(); });
+    calls.length = 0;
+    const afterEdit = await keydown("Escape");
+    assert.equal(afterEdit.defaultPrevented, true);
+    assert.deepEqual(calls, [["browser", "stop_page_load", "session", 0]]);
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+  });
+});
+
+test("AppKit keeps Reload and does not stop on Escape", async () => {
+  await withApp(async ({ calls, dispatchLifecycle, document, keydown }) => {
+    await dispatchLifecycle({
+      pageId: 0,
+      phase: "started",
+      url: "https://slow.example/",
+      title: "",
+    });
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    calls.length = 0;
+    const event = await keydown("Escape");
+    assert.equal(event.defaultPrevented, false);
+    assert.deepEqual(calls, []);
+  }, { lane: "appkit" });
+});
+
 test("an address draft survives lifecycle and a background tab keeps its own title", async () => {
   await withApp(async ({ click, dispatchLifecycle, document }) => {
     await click(document.querySelector(".header > button"));

@@ -21,6 +21,7 @@ fn main() {
             "set_active_page",
             "set_provider",
             "start_agent_run",
+            "stop_page_load",
             "submit_approval",
             "sync_browser_viewport",
         ]),

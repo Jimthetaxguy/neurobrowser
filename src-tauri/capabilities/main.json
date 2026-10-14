@@ -22,6 +22,7 @@
     "allow-set-active-page",
     "allow-set-provider",
     "allow-start-agent-run",
+    "allow-stop-page-load",
     "allow-submit-approval",
     "allow-sync-browser-viewport"
   ]

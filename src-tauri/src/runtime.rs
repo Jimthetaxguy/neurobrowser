@@ -895,6 +895,23 @@ impl TauriBrowserRuntime {
     pub async fn wait_for_ready(&self, timeout_ms: u64) -> Result<(), String> {
         wait_for_page_ready(&self.registry, self.page_id, timeout_ms).await
     }
+
+    /// Stop the current document load and clear loading so waiters and the
+    /// chrome leave the loading state. `window.stop()` is the webview stop.
+    /// A stopped load does not always deliver [`PageLoadEvent::Finished`], so
+    /// the shell event is emitted here.
+    pub fn stop_page_load(&self) -> Result<(), String> {
+        let webview = self.webview()?;
+        webview
+            .eval("window.stop()")
+            .map_err(|error| error.to_string())?;
+        let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+        emit_page_lifecycle(
+            &webview,
+            stopped_page_payload(&self.registry, self.page_id, &url),
+        );
+        Ok(())
+    }
 }
 
 async fn wait_for_page_ready(
@@ -968,6 +985,23 @@ pub fn page_lifecycle_payload(
         url,
         title,
     })
+}
+
+/// A user stop is a finished load for waiters. A netguard refusal stays
+/// suppressed, so this does not report that hop as a successful finish.
+fn stopped_page_payload(
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+    url: &str,
+) -> Option<PageLifecyclePayload> {
+    registry.finish_loading(page_id);
+    page_lifecycle_payload(
+        page_id,
+        PageLifecyclePhase::Finished,
+        url,
+        String::new(),
+        registry.suppress_finished_event(page_id),
+    )
 }
 
 fn emit_page_lifecycle<R: Runtime>(webview: &Webview<R>, payload: Option<PageLifecyclePayload>) {
@@ -1094,6 +1128,40 @@ mod response_tests {
             assert!(!message.contains("Action executed,"));
             assert_eq!(missing_runtime_response(error, false), error);
         }
+    }
+
+    #[test]
+    fn stop_clears_loading_and_reports_finish_unless_the_hop_was_refused() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = super::BrowserRuntimeRegistry::default();
+            registry.register_page(4, "page-runtime-4".into());
+            registry.set_loading(4, true);
+            let payload = super::stopped_page_payload(&registry, 4, "https://example.com/partial")
+                .expect("stop reports finish");
+            assert_eq!(payload.phase, super::PageLifecyclePhase::Finished);
+            assert_eq!(payload.url, "https://example.com/partial");
+            assert_eq!(payload.title, "");
+            super::wait_for_page_ready(&registry, 4, 200)
+                .await
+                .expect("waiter sees the stop");
+
+            registry.begin_allowed_navigation(4);
+            registry.cancel_navigation(4, "Refusing to navigate to disallowed scheme 'file:'");
+            assert!(
+                super::stopped_page_payload(&registry, 4, "https://example.com/blocked").is_none()
+            );
+            let error = super::wait_for_page_ready(&registry, 4, 200)
+                .await
+                .expect_err("refusal remains");
+            assert!(
+                error.contains("disallowed scheme"),
+                "unexpected wait error: {error}"
+            );
+        });
     }
 
     #[test]

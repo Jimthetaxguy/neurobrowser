@@ -297,6 +297,12 @@
           "markdownDescription": "Enables the start_agent_run command without any pre-configured scope."
         },
         {
+          "description": "Enables the stop_page_load command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-page-load",
+          "markdownDescription": "Enables the stop_page_load command without any pre-configured scope."
+        },
+        {
           "description": "Enables the submit_approval command without any pre-configured scope.",
           "type": "string",
           "const": "allow-submit-approval",
@@ -427,6 +433,12 @@
           "type": "string",
           "const": "deny-start-agent-run",
           "markdownDescription": "Denies the start_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_page_load command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-page-load",
+          "markdownDescription": "Denies the stop_page_load command without any pre-configured scope."
         },
         {
           "description": "Denies the submit_approval command without any pre-configured scope.",
