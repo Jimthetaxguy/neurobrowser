@@ -1,7 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { bindMenuCommand } from "./menuCommands.js";
-import { bindPageLifecycle } from "./nativePageEvents.js";
+import { bindPageLifecycle, bindPageNewWindow } from "./nativePageEvents.js";
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message;
@@ -29,8 +29,10 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     async createSession() {
       return invoke("create_session");
     },
-    async createPage(sessionId) {
-      return invoke("create_page", { sessionId });
+    async createPage(sessionId, options = {}) {
+      const payload = { sessionId };
+      if (options.activate === false) payload.activate = false;
+      return invoke("create_page", payload);
     },
     async closePage(sessionId, pageId) {
       return invoke("close_page", { sessionId, pageId });
@@ -82,6 +84,9 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     },
     onPageLifecycle(callback) {
       return bindPageLifecycle(listen, callback);
+    },
+    onPageNewWindow(callback) {
+      return bindPageNewWindow(listen, callback);
     },
     onMenuCommand(callback) {
       return bindMenuCommand(listen, callback);

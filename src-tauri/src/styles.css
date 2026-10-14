@@ -70,6 +70,38 @@ textarea {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
+.location:has(.popup-blocked) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.location:has(.security-indicator):has(.popup-blocked) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.popup-blocked {
+  align-items: center;
+  background: rgba(255, 181, 71, 0.16);
+  border: 1px solid rgba(255, 181, 71, 0.45);
+  border-radius: 999px;
+  color: #ffd59a;
+  display: inline-flex;
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  white-space: nowrap;
+}
+
+.popup-blocked button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0 2px;
+}
+
 .location .url-bar {
   min-width: 0;
 }

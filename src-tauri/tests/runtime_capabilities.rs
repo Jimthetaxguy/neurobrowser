@@ -230,3 +230,53 @@ fn page_lifecycle_listen_is_main_webview_only() {
         );
     }
 }
+
+#[test]
+fn popup_handling_does_not_grant_page_webviews_a_command() {
+    let page_capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/page-runtime.json")).unwrap();
+    let permissions: Vec<&str> = page_capability["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|permission| permission.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        permissions,
+        vec!["allow-browser-runtime-report"],
+        "page webviews stay report-only"
+    );
+
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    assert!(
+        authority
+            .resolve_access(
+                "browser_runtime_report",
+                "main",
+                "page-runtime-1",
+                &remote("https://example.com/")
+            )
+            .is_some(),
+        "a blocked popup is reported on the existing page command"
+    );
+    for command in ["open_popup", "create_popup", "allow_popup"] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &Origin::Local)
+                .is_none(),
+            "main webview gained an unshipped {command}"
+        );
+        assert!(
+            authority
+                .resolve_access(
+                    command,
+                    "main",
+                    "page-runtime-1",
+                    &remote("https://example.com/")
+                )
+                .is_none(),
+            "page webview gained {command}"
+        );
+    }
+}

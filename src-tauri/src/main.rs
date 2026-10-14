@@ -11,9 +11,10 @@ use neurobrowser::{
     ReActAgent, SessionManager, ToolCall,
 };
 use runtime::{
-    close_runtime_page, create_runtime_page, hide_unbrowsed_runtime_page, reveal_runtime_page,
+    blocked_popup_payload, close_runtime_page, create_runtime_page, emit_page_new_window,
+    hide_unbrowsed_runtime_page, page_id_from_runtime_label, reveal_runtime_page,
     set_active_runtime_page, sync_runtime_viewport, BrowserRuntimeRegistry, BrowserViewport,
-    RuntimeReportPayload, TauriBrowserRuntime,
+    RuntimeReportPayload, TauriBrowserRuntime, POPUP_BLOCKED_REQUEST,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -293,8 +294,11 @@ async fn create_page(
     window: WebviewWindow,
     state: State<'_, AppState>,
     session_id: String,
+    activate: Option<bool>,
 ) -> Result<usize, String> {
     let page = state.session_manager.create_page(&session_id)?;
+    // A background tab must not cover the page that opened it.
+    let activate = activate.unwrap_or(true);
     let result = (|| -> Result<(), String> {
         let host_window = app
             .get_window(window.label())
@@ -305,7 +309,9 @@ async fn create_page(
             page.id,
             &page.runtime_id,
         )?;
-        set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+        if activate {
+            set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+        }
         Ok(())
     })();
 
@@ -666,6 +672,17 @@ fn browser_runtime_report(
     state: State<'_, AppState>,
     payload: RuntimeReportPayload,
 ) -> Result<(), String> {
+    if payload.request_id == POPUP_BLOCKED_REQUEST {
+        let page_id = page_id_from_runtime_label(webview.label())
+            .ok_or("Runtime report caller does not own this page")?;
+        if state.runtimes.page_runtime_id(page_id).ok().as_deref() != Some(webview.label()) {
+            return Err("Runtime report caller does not own this page".into());
+        }
+        if let Some(event) = blocked_popup_payload(webview.label(), payload.payload.as_ref()) {
+            emit_page_new_window(&webview, &event);
+        }
+        return Ok(());
+    }
     state.runtimes.page_runtime_id(payload.page_id)?;
     state.runtimes.resolve_request(
         payload.page_id,
