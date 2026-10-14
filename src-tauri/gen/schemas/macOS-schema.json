@@ -225,6 +225,12 @@
           "markdownDescription": "Enables the create_session command without any pre-configured scope."
         },
         {
+          "description": "Enables the execute_browser_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-execute-browser-tool",
+          "markdownDescription": "Enables the execute_browser_tool command without any pre-configured scope."
+        },
+        {
           "description": "Enables the explain_memory_result command without any pre-configured scope.",
           "type": "string",
           "const": "allow-explain-memory-result",
@@ -241,6 +247,12 @@
           "type": "string",
           "const": "allow-get-action-policy",
           "markdownDescription": "Enables the get_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_page_observation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-page-observation",
+          "markdownDescription": "Enables the get_page_observation command without any pre-configured scope."
         },
         {
           "description": "Enables the get_page_snapshot command without any pre-configured scope.",
@@ -345,6 +357,12 @@
           "markdownDescription": "Denies the create_session command without any pre-configured scope."
         },
         {
+          "description": "Denies the execute_browser_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-execute-browser-tool",
+          "markdownDescription": "Denies the execute_browser_tool command without any pre-configured scope."
+        },
+        {
           "description": "Denies the explain_memory_result command without any pre-configured scope.",
           "type": "string",
           "const": "deny-explain-memory-result",
@@ -361,6 +379,12 @@
           "type": "string",
           "const": "deny-get-action-policy",
           "markdownDescription": "Denies the get_action_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_page_observation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-page-observation",
+          "markdownDescription": "Denies the get_page_observation command without any pre-configured scope."
         },
         {
           "description": "Denies the get_page_snapshot command without any pre-configured scope.",

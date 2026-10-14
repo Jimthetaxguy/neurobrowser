@@ -17,15 +17,14 @@ test("background tab updates preserve the active page URL draft", () => {
   assert.equal(update.tabs[1].title, "Finished loading");
 });
 
-test("a native selection and immediate snapshot use the new active page", () => {
+test("a native selection uses the new active page URL", () => {
   const selection = nativePageUpdates({
     type: "tabs", activePageId: -1,
     tabs: [{ id: 0 }, { id: -1, url: "https://selected.example" }],
   }, 0);
   assert.equal(selection.url, "https://selected.example");
-  const snapshot = { title: "Selected", url: selection.url };
-  assert.deepEqual(nativePageUpdates({ type: "snapshot", pageId: -1, snapshot }, selection.activePageId), { snapshot });
-  assert.deepEqual(nativePageUpdates({ type: "snapshot", pageId: 0, snapshot }, selection.activePageId), {});
+  assert.equal(selection.activePageId, -1);
+  assert.deepEqual(nativePageUpdates({ type: "snapshot", pageId: -1, snapshot: { title: "Selected" } }, -1), {});
 });
 
 test("page lifecycle follows the active page and keeps a background title off the address bar", () => {

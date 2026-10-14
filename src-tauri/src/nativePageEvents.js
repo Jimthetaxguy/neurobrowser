@@ -7,9 +7,6 @@ export function nativePageUpdates(event, activePageId) {
     }
     return updates;
   }
-  if (event.type === "snapshot" && event.pageId === activePageId) {
-    return { snapshot: event.snapshot };
-  }
   return {};
 }
 

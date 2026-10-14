@@ -45,6 +45,30 @@ struct ReloadRegression {
             precondition(ContentViewController.validatedNavigationURL(from: input)?.absoluteString == expected,
                          "a valid URL must retain its path and query: \(input)")
         }
-        print("AppKit navigation: 15/15 assertions passed")
+        // Events carry the page and WebKit navigation id, for every tab.
+        var events: [[String: Any]] = []
+        controller.pageUpdateHandler = { event in events.append(event) }
+        controller.webView(first, didStartProvisionalNavigation: nil)
+        let backgroundStart = events.last
+        precondition(backgroundStart?["type"] as? String == "navigation"
+                     && backgroundStart?["pageId"] as? Int == 1,
+                     "a background tab's navigation start must name its page")
+        let backgroundId = backgroundStart?["navigationId"] as? Int ?? 0
+        controller.webView(second, didStartProvisionalNavigation: nil)
+        let activeId = events.last?["navigationId"] as? Int ?? 0
+        precondition(events.last?["pageId"] as? Int == 2 && activeId > backgroundId,
+                     "each navigation start must get a newer id")
+        events.removeAll()
+        controller.navigateCurrentTab(to: "file:///blocked.html")
+        precondition(events.count == 1 && events[0]["type"] as? String == "status"
+                     && events[0]["pageId"] as? Int == 2 && events[0]["navigationId"] as? Int == activeId,
+                     "a rejection must name the active page and its newest navigation")
+        events.removeAll()
+        precondition(controller.selectTab(pageId: 2))
+        precondition(events.isEmpty, "a command for the shown tab is not a tab switch")
+        precondition(controller.selectTab(pageId: 1))
+        precondition(events.contains { $0["type"] as? String == "tabs" && $0["activePageId"] as? Int == 1 },
+                     "a tab switch must report the newly active page")
+        print("AppKit navigation: 22/22 assertions passed")
     }
 }
