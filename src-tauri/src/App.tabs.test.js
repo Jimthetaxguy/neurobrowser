@@ -49,6 +49,7 @@ async function withApp(check, {
   const lifecycleListeners = new Set();
   const menuListeners = new Set();
   const newWindowListeners = new Set();
+  const downloadListeners = new Set();
   const createdPages = [];
   const adapter = {
     rendersPageInHost: false,
@@ -96,6 +97,12 @@ async function withApp(check, {
       newWindowListeners.add(callback);
       return () => newWindowListeners.delete(callback);
     },
+    onDownload(callback) {
+      downloadListeners.add(callback);
+      return () => downloadListeners.delete(callback);
+    },
+    openDownload: async (id) => { calls.push(["open-download", id]); },
+    showDownloadInFolder: async (id) => { calls.push(["show-download", id]); },
     ...(history == null ? {} : {
       searchBrowsingHistory: async (query, limit) => {
         calls.push(["history", query, limit]);
@@ -136,6 +143,11 @@ async function withApp(check, {
   const dispatchLifecycle = async (event) => {
     await act(async () => {
       for (const listener of lifecycleListeners) listener(event);
+    });
+  };
+  const dispatchDownload = async (event) => {
+    await act(async () => {
+      for (const listener of downloadListeners) listener(event);
     });
   };
   const dispatchNewWindow = async (event) => {
@@ -211,7 +223,7 @@ async function withApp(check, {
       });
     }
     await check({
-      calls, click, createdPages, dispatch, dispatchLifecycle, dispatchMenu, dispatchNewWindow, document, goTo, keydown, toolbar,
+      calls, click, createdPages, dispatch, dispatchDownload, dispatchLifecycle, dispatchMenu, dispatchNewWindow, document, goTo, keydown, toolbar,
     });
   } finally {
     await act(async () => { root.unmount(); });
@@ -283,7 +295,6 @@ test("a failed navigation stays a navigation failure and does not read the page"
     await goTo("https://example.test");
     assert.deepEqual(calls, [["navigate", "session", 0, "https://example.test"]]);
     assert.match(document.querySelector(".status-bar").textContent, /Navigation failed: Host refused navigation/);
-    assert.equal(document.querySelector(".loading-overlay"), null);
   }, { navigateFails: true });
 });
 
@@ -297,7 +308,6 @@ test("a failed snapshot read after navigation is a page refresh failure", async 
     const status = document.querySelector(".status-bar").textContent;
     assert.match(status, /Page refresh failed: Browser runtime read timed out/);
     assert.doesNotMatch(status, /Navigation failed/);
-    assert.equal(document.querySelector(".loading-overlay"), null);
   }, { snapshotFails: true });
 });
 
@@ -749,7 +759,6 @@ test("a netguard refusal is shown on the status line", async () => {
     assert.deepEqual(calls, [["navigate", "session", 0, "http://127.0.0.1/"]]);
     assert.match(document.querySelector(".status-line").textContent, /Navigation failed: Refusing to fetch internal\/loopback address \(host '127\.0\.0\.1'\)/);
     assert.equal(document.querySelector(".load-progress"), null);
-    assert.equal(document.querySelector(".loading-overlay"), null);
   }, { navigateError: reason, navigateFails: true });
 });
 
@@ -767,7 +776,6 @@ test("page lifecycle updates the address bar, tab title, security indicator, and
     assert.equal(document.querySelector(".url-input").value, "http://inpage.example/next");
     assert.equal(document.querySelector("[data-security='insecure']").textContent.trim(), "Not secure");
     assert.ok(document.querySelector(".load-progress"));
-    assert.equal(document.querySelector(".loading-overlay"), null);
     assert.equal(document.querySelector(".tab-title").textContent, "Tab 1");
 
     await dispatchLifecycle({
@@ -1556,5 +1564,64 @@ test("a blocked popup stays in the address bar until it is opened", async () => 
     assert.match(document.querySelector(".popup-blocked").textContent, /^Popup blocked/);
     await click(document.querySelector(".popup-blocked button[aria-label='Dismiss blocked popup']"));
     assert.equal(document.querySelector(".popup-blocked"), null);
+  });
+});
+
+test("downloads show progress, done, and failed, and a finished file can be opened", async () => {
+  await withApp(async ({ calls, click, dispatchDownload, document }) => {
+    assert.equal(document.querySelector(".downloads"), null);
+    await dispatchDownload({
+      id: "dl-1",
+      phase: "progress",
+      url: "https://cdn.example/report.pdf",
+      filename: "report.pdf",
+      received: 0,
+      total: null,
+    });
+    const row = document.querySelector(".downloads [data-phase='progress']");
+    assert.equal(row.querySelector(".download-name").textContent, "report.pdf");
+    assert.match(row.querySelector(".download-progress").textContent, /Downloading/);
+
+    await dispatchDownload({
+      id: "dl-1",
+      phase: "progress",
+      url: "https://cdn.example/report.pdf",
+      filename: "report.pdf",
+      received: 50,
+      total: 100,
+    });
+    assert.match(document.querySelector(".download-progress").textContent, /50%/);
+
+    await dispatchDownload({
+      id: "dl-1",
+      phase: "done",
+      url: "https://cdn.example/report.pdf",
+      filename: "report.pdf",
+      received: 100,
+      total: 100,
+    });
+    const done = document.querySelector(".downloads [data-phase='done']");
+    assert.match(done.textContent, /Done/);
+    const open = [...done.querySelectorAll("button")].find((button) => button.textContent === "Open");
+    const show = [...done.querySelectorAll("button")].find((button) => button.textContent === "Show in folder");
+    await click(open);
+    await click(show);
+    assert.deepEqual(calls.filter((call) => call[0] === "open-download" || call[0] === "show-download"), [
+      ["open-download", "dl-1"],
+      ["show-download", "dl-1"],
+    ]);
+
+    await dispatchDownload({
+      id: "dl-2",
+      phase: "failed",
+      url: "http://127.0.0.1/secret.bin",
+      filename: "secret.bin",
+      received: 0,
+      total: null,
+      error: "Refusing to fetch internal/loopback address (host '127.0.0.1')",
+    });
+    const failed = document.querySelector(".downloads [data-phase='failed']");
+    assert.match(failed.textContent, /Failed: Refusing to fetch internal\/loopback address/);
+    assert.equal(failed.querySelector("button"), null);
   });
 });

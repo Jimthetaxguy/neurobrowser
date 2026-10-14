@@ -1,5 +1,7 @@
+mod downloads;
 mod runtime;
 
+use downloads::DownloadBook;
 use neuro_memory::{
     now_millis, CaptureDecision, CapturePolicy, CapturedPage, MemoryService, SearchExplain,
     SearchRequest, SearchResult,
@@ -38,6 +40,8 @@ struct AppState {
     capture_policy: tokio::sync::Mutex<CapturePolicy>,
     /// Browsing history (`history.json`), distinct from page memory.
     history: Arc<HistoryStore>,
+    /// Files this process has accepted into the user's Downloads folder.
+    downloads: Arc<DownloadBook>,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
 }
 
@@ -621,6 +625,16 @@ async fn browser_reload(
              Do not repeat the reload automatically; inspect the page."
         )
     })
+}
+
+#[tauri::command]
+fn open_download(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    downloads::open_download_file(&state.downloads, &id)
+}
+
+#[tauri::command]
+fn show_download_in_folder(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    downloads::show_download_in_folder(&state.downloads, &id)
 }
 
 #[tauri::command]
@@ -1323,6 +1337,7 @@ fn main() {
                 action_policy: tokio::sync::RwLock::new(ActionPolicy::default()),
                 capture_policy: tokio::sync::Mutex::new(CapturePolicy::default()),
                 history,
+                downloads: Arc::new(DownloadBook::default()),
                 pending_approvals: Mutex::new(HashMap::new()),
             });
             Ok(())
@@ -1343,7 +1358,9 @@ fn main() {
             get_page_observation,
             execute_browser_tool,
             navigate,
+            open_download,
             search_browsing_history,
+            show_download_in_folder,
             search_local_memory,
             set_active_page,
             set_action_policy,

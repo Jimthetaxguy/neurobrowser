@@ -61,6 +61,26 @@ test("the Tauri adapter forwards a menu command to the shell handler", async () 
   assert.equal(handler, null);
 });
 
+test("the Tauri adapter forwards a download update", async () => {
+  let handler = null;
+  const adapter = createTauriHostAdapter({
+    listen(name, next) {
+      assert.equal(name, "download-update");
+      handler = next;
+      return () => { handler = null; };
+    },
+  });
+  const seen = [];
+  const stop = adapter.onDownload((payload) => seen.push(payload));
+  await Promise.resolve();
+  await Promise.resolve();
+  const payload = { id: "dl-1", phase: "done", filename: "report.pdf", url: "https://example.com/report.pdf", received: 4, total: 4 };
+  handler({ payload });
+  assert.deepEqual(seen, [payload]);
+  stop();
+  assert.equal(handler, null);
+});
+
 test("the Tauri adapter forwards a dispatched page-lifecycle payload", async () => {
   let handler = null;
   const adapter = createTauriHostAdapter({
