@@ -658,9 +658,12 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   if (typeof Window === 'function' && Window.prototype) Window.prototype.open = shellOpen;
 
   // Only this document-start closure can write a hit. IPC reports merely wake
-  // the host, which reads the serialized snapshot via eval_with_callback.
+  // the host, which reads the snapshot via native evaluation completion.
   // Pages can drain it (deny their own menu), but cannot replace its contents.
   const stringifyContext = JSON.stringify.bind(JSON);
+  const contextClock = performance.now.bind(performance);
+  // Independent of native-click freshness: iframe clicks do not bubble here.
+  const contextLifetimeMs = 400;
   const contextHits = new WeakMap();
   const rememberContext = contextHits.set.bind(contextHits);
   const readContext = contextHits.get.bind(contextHits);
@@ -683,7 +686,9 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     value: () => {
       const hit = pendingContext;
       pendingContext = null;
-      return hit;
+      if (!hit) return null;
+      const age = contextClock() - hit.at;
+      return age >= 0 && age <= contextLifetimeMs ? hit.text : null;
     }, writable: false, configurable: false
   });
 
@@ -713,6 +718,7 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   window.addEventListener('contextmenu', (event) => {
     if (!trustedClick(event)) return;
     pendingContext = null;
+    const capturedAt = contextClock();
     const target = contextTarget(event);
     const element = target && (contextNodeType(target) === 1 ? target : contextParent(target));
     const link = element && closestContext(element, 'a[href]');
@@ -724,13 +730,13 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
       const selected = readSelection();
       selection = selected ? contextSlice(contextTrim(selectionString(selected)), 0, 2000) : '';
     }
-    rememberContext(event, stringifyContext({
+    rememberContext(event, { __proto__: null, at: capturedAt, text: stringifyContext({
       __proto__: null,
       linkUrl: link ? linkHref(link) : '',
       imageUrl: image ? imageCurrentSrc(image) || imageSrc(image) : '',
       selection,
       x: contextX(event), y: contextY(event)
-    }));
+    }) });
   }, true);
   window.addEventListener('contextmenu', (event) => {
     const hit = readContext(event);

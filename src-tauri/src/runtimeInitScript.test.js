@@ -388,7 +388,7 @@ test("snapshot html drops noscript content entirely when it arrives as one raw t
   }
 });
 
-function installPopupPage(html, { gesture = true } = {}) {
+function installPopupPage(html, { gesture = true, beforeInstall } = {}) {
   const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
     url: "https://example.test/page",
     runScripts: "outside-only",
@@ -409,6 +409,7 @@ function installPopupPage(html, { gesture = true } = {}) {
     configurable: true,
     value: { isActive: gesture },
   });
+  if (beforeInstall) beforeInstall(dom.window);
   dom.window.eval(runtimeInitScript);
   return { dom, opened, reports };
 }
@@ -571,6 +572,53 @@ test("context snapshots resist page prototype poisoning", () => {
   Object.defineProperty(dom.window.HTMLAnchorElement.prototype, "href", { get: () => "https://evil.test/forged" });
   link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
   assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).linkUrl, "https://example.com/real");
+  dom.window.close();
+});
+
+test("unread context snapshots expire despite later iframe clicks and clock poisoning", () => {
+  let now = 100;
+  const { dom, reports } = installPopupPage('<a id="link" href="https://example.com/old">Old</a><iframe></iframe>', {
+    beforeInstall: window => { window.performance.now = () => now; },
+  });
+  dom.window.document.getElementById("link").dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports.length, 1);
+  now = 501;
+  // Native click freshness can be renewed by a frame without a top-level event.
+  const frame = dom.window.document.querySelector("iframe").contentWindow;
+  frame.document.body.dispatchEvent(trustedMouse({ window: frame }, "contextmenu", { button: 2 }));
+  assert.equal(reports.length, 1, "iframe event must not clear or replace top-level snapshot");
+  // A page cannot extend the lifetime by replacing the clock after installation.
+  dom.window.performance.now = () => 100;
+  dom.window.__TAURI_INTERNALS__.invoke("browser_runtime_report", {
+    payload: { request_id: "context-menu", payload: { linkUrl: "https://evil.test" } }
+  });
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  now = 100;
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null, "expired read consumes stale data");
+  dom.window.close();
+});
+
+test("snapshot lifetime starts at capture before a slow page handler", () => {
+  let now = 100;
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>', {
+    beforeInstall: window => { window.performance.now = () => now; },
+  });
+  const link = dom.window.document.getElementById("link");
+  link.addEventListener("contextmenu", () => { now += 401; });
+  link.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
+  dom.window.close();
+});
+
+test("a context snapshot remains readable at the 400ms lifetime boundary", () => {
+  let now = 100;
+  const { dom } = installPopupPage('<a id="link" href="https://example.com/real">Real</a>', {
+    beforeInstall: window => { window.performance.now = () => now; },
+  });
+  dom.window.document.getElementById("link").dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  now = 500;
+  assert.equal(JSON.parse(dom.window.__NEUROBROWSER_TAKE_CONTEXT__()).linkUrl, "https://example.com/real");
+  assert.equal(dom.window.__NEUROBROWSER_TAKE_CONTEXT__(), null);
   dom.window.close();
 });
 
