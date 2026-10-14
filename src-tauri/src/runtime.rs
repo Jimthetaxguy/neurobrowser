@@ -657,6 +657,93 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
   window.open = shellOpen;
   if (typeof Window === 'function' && Window.prototype) Window.prototype.open = shellOpen;
 
+  // Save Image asks WebKit to download one address. The download attribute is
+  // empty on purpose: the page does not name a file, and the shell's download
+  // handler reserves the path under Downloads. Setters are captured here so a
+  // later page script cannot replace them and slip a path into the click.
+  const nativeCreate = Document.prototype.createElement;
+  const nativeAppend = Node.prototype.appendChild;
+  const nativeClick = HTMLElement.prototype.click;
+  const hrefSet = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'href');
+  const downloadSet = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
+  const relSet = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'rel');
+  const saveImage = (url) => {
+    if (typeof url !== 'string' || url.length === 0) return;
+    const anchor = nativeCreate.call(document, 'a');
+    if (hrefSet && typeof hrefSet.set === 'function') hrefSet.set.call(anchor, url);
+    else anchor.href = url;
+    if (downloadSet && typeof downloadSet.set === 'function') downloadSet.set.call(anchor, '');
+    else anchor.download = '';
+    if (relSet && typeof relSet.set === 'function') relSet.set.call(anchor, 'noopener');
+    else anchor.rel = 'noopener';
+    const parent = document.documentElement;
+    if (parent) nativeAppend.call(parent, anchor);
+    nativeClick.call(anchor);
+    if (typeof anchor.remove === 'function') anchor.remove();
+  };
+  Object.defineProperty(window, '__NEUROBROWSER_SAVE_IMAGE__', {
+    value: saveImage, writable: false, configurable: false
+  });
+
+  const elementOf = (target) => {
+    if (!target) return null;
+    if (target.nodeType === 1) return target;
+    return target.parentElement || null;
+  };
+  const absoluteUrl = (value) => {
+    if (typeof value !== 'string' || value.length === 0) return '';
+    try {
+      return new URL(value, location.href).href;
+    } catch (_) {
+      return '';
+    }
+  };
+  const fieldSelection = (node) => {
+    if (!node || node.nodeType !== 1) return '';
+    const tag = node.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') return '';
+    const type = String(node.type || '').toLowerCase();
+    if (type === 'password' || type === 'hidden' || type === 'file') return '';
+    const start = node.selectionStart;
+    const end = node.selectionEnd;
+    if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return '';
+    return String(node.value).slice(start, end).trim().slice(0, 2000);
+  };
+  const reportContextMenu = (event) => {
+    if (typeof invoke !== 'function') return;
+    const element = elementOf(event.target);
+    const link = element && element.closest && element.closest('a[href]');
+    const image = element && element.closest && element.closest('img');
+    let selection = fieldSelection(element);
+    if (!selection) {
+      const selected = window.getSelection && window.getSelection();
+      selection = selected ? String(selected).trim().slice(0, 2000) : '';
+    }
+    const notice = invoke('browser_runtime_report', {
+      payload: {
+        page_id: 0,
+        request_id: 'context-menu',
+        payload: {
+          linkUrl: link && link.href ? absoluteUrl(link.href) : '',
+          imageUrl: image ? absoluteUrl(image.currentSrc || image.src || '') : '',
+          selection,
+          x: Number(event.clientX) || 0,
+          y: Number(event.clientY) || 0
+        },
+        error: null
+      }
+    });
+    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
+  };
+  // Window bubble runs after the page's own listeners. A page that called
+  // preventDefault keeps its menu; a real right-click otherwise gets ours.
+  window.addEventListener('contextmenu', (event) => {
+    if (!trustedClick(event)) return;
+    if (event.defaultPrevented) return;
+    event.preventDefault();
+    reportContextMenu(event);
+  }, false);
+
   Object.defineProperty(window, '__NEUROBROWSER_RUNTIME__', {
     value: Object.freeze(runtime), writable: false, configurable: false
   });
@@ -1384,6 +1471,20 @@ pub fn page_new_window_payload(page_id: usize, raw_url: &str) -> Option<PageNewW
         page_id,
         url,
         disposition: request.disposition,
+    })
+}
+
+/// A context-menu open. The address is not parsed as a new-window carrier,
+/// so a page cannot hide a disposition inside the link it asked to open.
+pub fn foreground_tab_payload(page_id: usize, url: &str) -> Option<PageNewWindowPayload> {
+    let url = match classify_popup_target(url) {
+        PopupTarget::Allowed(url) => url,
+        PopupTarget::Blank | PopupTarget::Refused => return None,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: NewWindowDisposition::Foreground,
     })
 }
 
@@ -2319,7 +2420,23 @@ mod response_tests {
         assert!(super::RUNTIME_INIT_SCRIPT.contains(super::NEW_WINDOW_CARRIER_HOST));
         assert!(super::RUNTIME_INIT_SCRIPT.contains(super::POPUP_BLOCKED_REQUEST));
         assert!(super::RUNTIME_INIT_SCRIPT.contains("browser_runtime_report"));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(crate::context_menu::CONTEXT_MENU_REQUEST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains("__NEUROBROWSER_SAVE_IMAGE__"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("savePath"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("showSaveFilePicker"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("open_popup"));
         assert!(!super::RUNTIME_INIT_SCRIPT.contains("create_popup"));
+        let image =
+            super::foreground_tab_payload(3, "https://8.8.8.8/pic.png").expect("public image");
+        assert_eq!(image.page_id, 3);
+        assert_eq!(image.url, "https://8.8.8.8/pic.png");
+        assert_eq!(image.disposition, super::NewWindowDisposition::Foreground);
+        assert!(super::foreground_tab_payload(3, "file:///tmp/pic.png").is_none());
+        assert!(super::foreground_tab_payload(3, "javascript:alert(1)").is_none());
+        assert!(super::foreground_tab_payload(
+            3,
+            "https://new-window.neurobrowser.invalid/?disposition=background&url=https://8.8.8.8/"
+        )
+        .is_none());
     }
 }

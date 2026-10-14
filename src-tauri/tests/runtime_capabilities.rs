@@ -152,6 +152,78 @@ fn stop_page_load_is_main_webview_only() {
 }
 
 #[test]
+fn find_in_page_is_main_webview_only() {
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    assert!(
+        authority
+            .resolve_access("find_in_page", "main", "main", &Origin::Local)
+            .is_some(),
+        "control webview lost find_in_page"
+    );
+    for origin in [
+        Origin::Local,
+        remote("about:blank"),
+        remote("http://example.com/"),
+        remote("https://example.com/"),
+    ] {
+        assert!(
+            authority
+                .resolve_access("find_in_page", "main", "page-runtime-1", &origin)
+                .is_none(),
+            "page webview gained find_in_page from {origin}"
+        );
+    }
+    assert!(
+        authority
+            .resolve_access(
+                "find_in_page",
+                "main",
+                "main",
+                &remote("https://example.com/")
+            )
+            .is_none(),
+        "remote control-webview content gained find_in_page"
+    );
+}
+
+#[test]
+fn adjust_page_zoom_is_main_webview_only() {
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    assert!(
+        authority
+            .resolve_access("adjust_page_zoom", "main", "main", &Origin::Local)
+            .is_some(),
+        "control webview lost adjust_page_zoom"
+    );
+    for origin in [
+        Origin::Local,
+        remote("about:blank"),
+        remote("http://example.com/"),
+        remote("https://example.com/"),
+    ] {
+        assert!(
+            authority
+                .resolve_access("adjust_page_zoom", "main", "page-runtime-1", &origin)
+                .is_none(),
+            "page webview gained adjust_page_zoom from {origin}"
+        );
+    }
+    assert!(
+        authority
+            .resolve_access(
+                "adjust_page_zoom",
+                "main",
+                "main",
+                &remote("https://example.com/")
+            )
+            .is_none(),
+        "remote control-webview content gained adjust_page_zoom"
+    );
+}
+
+#[test]
 fn search_browsing_history_is_main_webview_only() {
     let mut context = context();
     let authority = context.runtime_authority_mut();

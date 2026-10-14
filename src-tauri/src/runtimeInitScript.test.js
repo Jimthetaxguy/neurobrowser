@@ -468,6 +468,108 @@ test("window.open without a user gesture is reported and does not open", () => {
   dom.window.close();
 });
 
+test("a trusted right-click reports the link, image, and selection without a file path", () => {
+  const { dom, reports } = installPopupPage(
+    '<a id="link" href="/next"><img id="pic" src="/pic.png" alt=""></a><textarea id="box">hello cats</textarea>',
+  );
+  const box = dom.window.document.getElementById("box");
+  box.focus();
+  box.setSelectionRange(6, 10);
+  const event = trustedMouse(dom, "contextmenu", { button: 2, clientX: 18, clientY: 24 });
+  box.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].command, "browser_runtime_report");
+  assert.equal(reports[0].args.payload.request_id, "context-menu");
+  const payload = reports[0].args.payload.payload;
+  assert.equal(payload.linkUrl, "");
+  assert.equal(payload.imageUrl, "");
+  assert.equal(payload.selection, "cats");
+  assert.equal(payload.x, 18);
+  assert.equal(payload.y, 24);
+  assert.equal("path" in payload, false);
+  assert.equal("destination" in payload, false);
+  assert.equal("filename" in payload, false);
+
+  const pic = dom.window.document.getElementById("pic");
+  pic.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2, clientX: 4, clientY: 5 }));
+  const hit = reports[1].args.payload.payload;
+  assert.equal(hit.linkUrl, "https://example.test/next");
+  assert.equal(hit.imageUrl, "https://example.test/pic.png");
+  assert.equal("path" in hit, false);
+  dom.window.close();
+});
+
+test("a script-dispatched context menu does not open the shell menu", () => {
+  const { dom, reports } = installPopupPage('<a href="https://example.com/next">Next</a>');
+  const link = dom.window.document.querySelector("a");
+  const event = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
+  assert.equal(event.isTrusted, false);
+  link.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(reports.length, 0);
+  dom.window.close();
+});
+
+test("a page that prevents the context menu keeps it", () => {
+  const { dom, reports } = installPopupPage('<a href="https://example.com/next">Next</a>');
+  dom.window.document.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+  const link = dom.window.document.querySelector("a");
+  const event = trustedMouse(dom, "contextmenu", { button: 2 });
+  link.dispatchEvent(event);
+  assert.equal(reports.length, 0);
+  dom.window.close();
+});
+
+test("password and file fields are not copied into the context menu", () => {
+  const { dom, reports } = installPopupPage(
+    '<input id="secret" type="password" value="hunter2"><input id="file" type="file">',
+  );
+  const secret = dom.window.document.getElementById("secret");
+  secret.focus();
+  secret.setSelectionRange(0, 7);
+  secret.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports[0].args.payload.payload.selection, "");
+  const file = dom.window.document.getElementById("file");
+  file.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2 }));
+  assert.equal(reports[1].args.payload.payload.selection, "");
+  assert.equal(JSON.stringify(reports[1].args.payload.payload).includes("hunter2"), false);
+  dom.window.close();
+});
+
+test("save image uses the address and an empty download name, not a page path", () => {
+  const dom = new JSDOM("<!doctype html><html><body><p>Hi</p></body></html>", {
+    url: "https://example.test/page",
+    runScripts: "outside-only",
+  });
+  const appended = [];
+  const originalAppend = dom.window.Node.prototype.appendChild;
+  dom.window.Node.prototype.appendChild = function appendChild(node) {
+    appended.push(node);
+    return originalAppend.call(this, node);
+  };
+  dom.window.eval(runtimeInitScript);
+  dom.window.Document.prototype.createElement = () => {
+    throw new Error("page replaced createElement");
+  };
+  const save = dom.window.__NEUROBROWSER_SAVE_IMAGE__;
+  assert.equal(typeof save, "function");
+  assert.equal(save.length, 1);
+  save("https://example.com/pic.png", "/tmp/chosen-by-page");
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0].href, "https://example.com/pic.png");
+  assert.equal(appended[0].getAttribute("download"), "");
+  assert.equal(String(appended[0].outerHTML).includes("/tmp/chosen-by-page"), false);
+  const original = save;
+  assert.throws(() => {
+    dom.window.__NEUROBROWSER_SAVE_IMAGE__ = () => {};
+  }, TypeError);
+  assert.equal(dom.window.__NEUROBROWSER_SAVE_IMAGE__, original);
+  dom.window.close();
+});
+
 test("window.open from a user gesture asks for a foreground tab", () => {
   const { dom, opened, reports } = installPopupPage("<p>Hi</p>", { gesture: true });
   dom.window.open("https://example.com/popup");
