@@ -1,9 +1,13 @@
 //! WebKit downloads for the desktop shell.
 //!
-//! The page webview asks before a download starts. Netguard runs first. An
-//! allowed file is reserved under the user's Downloads folder with a name that
-//! cannot leave that folder. The main webview hears progress, done, and failed.
-//! Opening a file uses the id of a finished download, not a path from the page.
+//! The page webview asks before a download starts. Netguard runs on the
+//! requested address, then again on the address that remains after redirects.
+//! A blocked final address cancels the download before the file is written and
+//! again before a finished row can be kept. An allowed file is reserved under
+//! the user's Downloads folder with a name that cannot leave that folder. On
+//! macOS the saved file gets the quarantine attribute. The main webview hears
+//! progress, done, and failed. Opening a file uses the id of a finished
+//! download, not a path from the page.
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -45,6 +49,8 @@ pub struct DownloadUpdate {
 struct Entry {
     id: String,
     url: String,
+    /// Address that remained after redirects, once netguard allowed it.
+    final_url: Option<String>,
     filename: String,
     path: PathBuf,
     root: PathBuf,
@@ -138,6 +144,7 @@ impl DownloadBook {
         let entry = Entry {
             id,
             url: url.to_string(),
+            final_url: None,
             filename,
             path: path.clone(),
             root: root.to_path_buf(),
@@ -157,7 +164,21 @@ impl DownloadBook {
     /// WebKit finished one download of `url`. The oldest in-flight row for that
     /// URL is the one that started first. macOS does not report the saved path,
     /// so the path reserved at the start is the one that counts.
+    ///
+    /// The post-redirect URL stored by [`Self::authorize_final_url`] is judged
+    /// again before a file can be kept.
     pub fn finish(&self, url: &str, success: bool) -> Option<DownloadUpdate> {
+        self.finish_with_final_url(url, None, success)
+    }
+
+    /// Like [`Self::finish`], but `final_url` is the address after redirects
+    /// when it was not already stored. A blocked address deletes the file.
+    pub fn finish_with_final_url(
+        &self,
+        url: &str,
+        final_url: Option<&str>,
+        success: bool,
+    ) -> Option<DownloadUpdate> {
         let mut inner = self.lock();
         let id = {
             let queue = inner.inflight.get_mut(url)?;
@@ -168,7 +189,22 @@ impl DownloadBook {
             id
         };
         let entry = inner.by_id.get_mut(&id)?;
+        if entry.phase == DownloadPhase::Failed {
+            return Some(entry.update());
+        }
+        if let Some(final_url) = final_url {
+            entry.final_url = Some(final_url.to_string());
+        }
+        let judged = entry.final_url.clone().unwrap_or_else(|| entry.url.clone());
+        if let Some(reason) = neurobrowser::netguard::blocked_reason(&judged) {
+            return Some(fail_entry(entry, reason.to_string()));
+        }
         if success && entry.path.is_file() {
+            if is_regular_file(&entry.path) {
+                if let Err(error) = apply_download_quarantine(&entry.path) {
+                    return Some(fail_entry(entry, error));
+                }
+            }
             let len = std::fs::metadata(&entry.path)
                 .map(|meta| meta.len())
                 .unwrap_or(entry.received);
@@ -184,6 +220,43 @@ impl DownloadBook {
             entry.error = Some("The download did not finish".into());
         }
         Some(entry.update())
+    }
+
+    /// Re-run netguard on the post-redirect URL before WebKit may write.
+    ///
+    /// `Err` is the failed row. Any partial file is removed, and a later
+    /// finish will not mark this download done.
+    pub fn authorize_final_url(&self, id: &str, final_url: &str) -> Result<(), DownloadUpdate> {
+        if let Some(reason) = neurobrowser::netguard::blocked_reason(final_url) {
+            return Err(self.cancel(id, reason.to_string()));
+        }
+        let mut inner = self.lock();
+        if let Some(entry) = inner.by_id.get_mut(id) {
+            if entry.phase == DownloadPhase::Progress {
+                entry.final_url = Some(final_url.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// Mark an in-progress download failed and delete any partial file.
+    pub fn cancel(&self, id: &str, error: String) -> DownloadUpdate {
+        let mut inner = self.lock();
+        let Some(entry) = inner.by_id.get_mut(id) else {
+            return DownloadUpdate {
+                id: id.to_string(),
+                phase: DownloadPhase::Failed,
+                url: String::new(),
+                filename: "download".into(),
+                received: 0,
+                total: None,
+                error: Some(error),
+            };
+        };
+        let url = entry.url.clone();
+        let update = fail_entry(entry, error);
+        dequeue(&mut inner, &url, id);
+        update
     }
 
     /// Byte count while the row is still in progress. A late tick after the
@@ -246,6 +319,7 @@ impl DownloadBook {
         let entry = Entry {
             id,
             url: url.to_string(),
+            final_url: None,
             filename: safe_download_filename(suggested),
             path: root.join("download"),
             root: root.to_path_buf(),
@@ -262,6 +336,33 @@ impl DownloadBook {
     fn lock(&self) -> std::sync::MutexGuard<'_, BookInner> {
         self.inner.lock().unwrap_or_else(|error| error.into_inner())
     }
+}
+
+fn fail_entry(entry: &mut Entry, error: String) -> DownloadUpdate {
+    entry.phase = DownloadPhase::Failed;
+    entry.error = Some(error);
+    remove_saved_file(&entry.path);
+    entry.update()
+}
+
+fn dequeue(inner: &mut BookInner, url: &str, id: &str) {
+    let Some(queue) = inner.inflight.get_mut(url) else {
+        return;
+    };
+    queue.retain(|item| item != id);
+    if queue.is_empty() {
+        inner.inflight.remove(url);
+    }
+}
+
+fn remove_saved_file(path: &Path) {
+    if std::fs::symlink_metadata(path).is_ok() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
 }
 
 fn next_id(inner: &mut BookInner) -> String {
@@ -406,14 +507,15 @@ fn hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
+/// Open a downloaded file without a shell.
+///
+/// Windows passes the path as one argument to `explorer.exe`. `cmd /C start`
+/// would treat `&` in a name such as `report&calc.exe` as a command separator.
 pub fn open_file_command(platform: &str, path: &Path) -> (String, Vec<String>) {
     let text = path.display().to_string();
     match platform {
         "macos" => ("open".into(), vec![text]),
-        "windows" => (
-            "cmd".into(),
-            vec!["/C".into(), "start".into(), String::new(), text],
-        ),
+        "windows" => ("explorer.exe".into(), vec![text]),
         _ => ("xdg-open".into(), vec![text]),
     }
 }
@@ -422,7 +524,7 @@ pub fn show_in_folder_command(platform: &str, path: &Path) -> (String, Vec<Strin
     let text = path.display().to_string();
     match platform {
         "macos" => ("open".into(), vec!["-R".into(), text]),
-        "windows" => ("explorer".into(), vec![format!("/select,{text}")]),
+        "windows" => ("explorer.exe".into(), vec![format!("/select,{text}")]),
         _ => {
             let folder = path.parent().unwrap_or(path).display().to_string();
             ("xdg-open".into(), vec![folder])
@@ -441,8 +543,16 @@ fn host_platform() -> &'static str {
 }
 
 pub fn launch_program(program: &str, args: &[String]) -> Result<(), String> {
-    let status = std::process::Command::new(program)
-        .args(args)
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    // Explorer returns before the file opens and often exits non-zero.
+    if detaches_after_spawn(program) {
+        return command
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not launch {program}: {error}"));
+    }
+    let status = command
         .status()
         .map_err(|error| format!("Could not launch {program}: {error}"))?;
     if status.success() {
@@ -450,6 +560,79 @@ pub fn launch_program(program: &str, args: &[String]) -> Result<(), String> {
     } else {
         Err(format!("{program} exited with {status}"))
     }
+}
+
+fn detaches_after_spawn(program: &str) -> bool {
+    let name = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program);
+    name.eq_ignore_ascii_case("explorer.exe") || name.eq_ignore_ascii_case("explorer")
+}
+
+#[cfg(target_os = "macos")]
+const QUARANTINE_ATTRIBUTE: &str = "com.apple.quarantine";
+
+/// `0083` is the quarantine flag browsers set on a downloaded file.
+pub fn quarantine_attribute_value(timestamp_secs: u64, agent: &str, id: &str) -> String {
+    format!("0083;{timestamp_secs:x};{agent};{id}")
+}
+
+fn apply_download_quarantine(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let id = uuid::Uuid::new_v4().to_string();
+        let value = quarantine_attribute_value(now, "NeuroBrowser", &id);
+        set_quarantine_attribute(path, &value)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_quarantine_attribute(path: &Path, value: &str) -> Result<(), String> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "The download path is not valid".to_string())?;
+    let name = CString::new(QUARANTINE_ATTRIBUTE).expect("quarantine attribute name");
+    let rc = unsafe {
+        setxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            value.as_ptr() as *const std::ffi::c_void,
+            value.len(),
+            0,
+            0,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not mark the download for quarantine: {}",
+            std::io::Error::last_os_error()
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn setxattr(
+        path: *const std::ffi::c_char,
+        name: *const std::ffi::c_char,
+        value: *const std::ffi::c_void,
+        size: usize,
+        position: u32,
+        options: i32,
+    ) -> i32;
 }
 
 pub fn open_download_file(book: &DownloadBook, id: &str) -> Result<(), String> {
@@ -479,6 +662,21 @@ fn emit_download<R: Runtime>(webview: &Webview<R>, update: &DownloadUpdate) {
         update,
     ) {
         tracing::warn!("failed to emit {DOWNLOAD_EVENT}: {error}");
+    }
+}
+
+fn final_url_for_download(url: &str) -> Result<String, String> {
+    let url = url.to_string();
+    let handle = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        runtime.block_on(neurobrowser::netguard::final_url_after_redirects(&url))
+    });
+    match handle.join() {
+        Ok(result) => result,
+        Err(_) => Err("Download check stopped".into()),
     }
 }
 
@@ -527,14 +725,29 @@ pub fn handle_download_event<R: Runtime>(webview: Webview<R>, event: DownloadEve
             };
             let suggested = suggested_download_name(url.as_str(), destination);
             let start = book.begin(&root, url.as_str(), &suggested);
-            emit_download(&webview, &start.update);
-            if let Some(path) = start.path {
-                *destination = path.clone();
-                watch_progress(webview.clone(), book, start.update.id, path);
-                true
-            } else {
-                false
+            let Some(path) = start.path.clone() else {
+                emit_download(&webview, &start.update);
+                return false;
+            };
+            // WebKit has the response by now, but the event still carries the
+            // original address. Follow redirects and judge the address that
+            // remains before anything is written.
+            let final_url = match final_url_for_download(url.as_str()) {
+                Ok(final_url) => final_url,
+                Err(error) => {
+                    let update = book.cancel(&start.update.id, error);
+                    emit_download(&webview, &update);
+                    return false;
+                }
+            };
+            if let Err(update) = book.authorize_final_url(&start.update.id, &final_url) {
+                emit_download(&webview, &update);
+                return false;
             }
+            emit_download(&webview, &start.update);
+            *destination = path.clone();
+            watch_progress(webview.clone(), book, start.update.id, path);
+            true
         }
         DownloadEvent::Finished { url, success, .. } => {
             if let Some(update) = book.finish(url.as_str(), success) {
@@ -552,6 +765,43 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(target_os = "macos")]
+    fn read_quarantine_attribute(path: &Path) -> Result<String, String> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let path = CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| "The download path is not valid".to_string())?;
+        let name = CString::new("com.apple.quarantine").expect("attribute name");
+        let mut buf = vec![0u8; 512];
+        let read = unsafe {
+            getxattr(
+                path.as_ptr(),
+                name.as_ptr(),
+                buf.as_mut_ptr() as *mut std::ffi::c_void,
+                buf.len(),
+                0,
+                0,
+            )
+        };
+        if read < 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        buf.truncate(read as usize);
+        String::from_utf8(buf).map_err(|error| error.to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    extern "C" {
+        fn getxattr(
+            path: *const std::ffi::c_char,
+            name: *const std::ffi::c_char,
+            value: *mut std::ffi::c_void,
+            size: usize,
+            position: u32,
+            options: i32,
+        ) -> isize;
+    }
 
     static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -713,6 +963,112 @@ mod tests {
         assert_eq!(
             show_in_folder_command("linux", path),
             ("xdg-open".into(), vec!["/Users/me/Downloads".into()])
+        );
+
+        // `&` stays inside one argument. A shell would treat it as a separator
+        // and launch calc.exe beside report.
+        let windows = Path::new(r"C:\Users\me\Downloads\report&calc.exe");
+        assert_eq!(
+            safe_download_filename(r"C:\Users\me\Downloads\report&calc.exe"),
+            "report&calc.exe"
+        );
+        let (open_program, open_args) = open_file_command("windows", windows);
+        assert_eq!(
+            (open_program.as_str(), open_args.as_slice()),
+            (
+                "explorer.exe",
+                [r"C:\Users\me\Downloads\report&calc.exe".to_string()].as_slice()
+            )
+        );
+        let (show_program, show_args) = show_in_folder_command("windows", windows);
+        assert_eq!(
+            (show_program.as_str(), show_args.as_slice()),
+            (
+                "explorer.exe",
+                [r"/select,C:\Users\me\Downloads\report&calc.exe".to_string()].as_slice()
+            )
+        );
+        for (program, args) in [
+            open_file_command("macos", path),
+            show_in_folder_command("macos", path),
+            open_file_command("linux", path),
+            show_in_folder_command("linux", path),
+            (open_program, open_args),
+            (show_program, show_args),
+        ] {
+            let name = program.to_ascii_lowercase();
+            assert_ne!(name, "cmd");
+            assert_ne!(name, "cmd.exe");
+            assert!(
+                args.iter().all(
+                    |arg| !arg.eq_ignore_ascii_case("/C") && !arg.eq_ignore_ascii_case("start")
+                ),
+                "{program} {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blocked_final_url_is_cancelled_before_write_and_before_finish() {
+        let root = temp_root();
+        let book = DownloadBook::default();
+        let start_url = "https://93.184.216.34/start";
+        let start = book.begin(&root, start_url, "secret.bin");
+        let path = start.path.clone().unwrap();
+        fs::write(&path, b"partial").unwrap();
+        let failed = book
+            .authorize_final_url(&start.update.id, "http://169.254.169.254/latest/meta-data/")
+            .expect_err("metadata redirect must cancel");
+        assert_eq!(failed.phase, DownloadPhase::Failed);
+        let error = failed.error.expect("block reason");
+        assert!(
+            error.contains("169.254") || error.contains("internal"),
+            "{error}"
+        );
+        assert!(!path.exists());
+        assert!(book.finish(start_url, true).is_none());
+        assert!(book.path_for_action(&start.update.id).is_err());
+
+        let later = "https://93.184.216.34/later";
+        let start = book.begin(&root, later, "later.bin");
+        let path = start.path.unwrap();
+        fs::write(&path, b"secret").unwrap();
+        let failed = book
+            .finish_with_final_url(later, Some("http://127.0.0.1/secret"), true)
+            .unwrap();
+        assert_eq!(failed.phase, DownloadPhase::Failed);
+        assert!(failed.error.unwrap().contains("127.0.0.1"));
+        assert!(!path.exists());
+        assert!(book.path_for_action(&failed.id).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_allowed_final_url_can_finish_and_is_quarantined_where_supported() {
+        let root = temp_root();
+        let book = DownloadBook::default();
+        let url = "https://93.184.216.34/files/report.pdf";
+        let start = book.begin(&root, url, "report.pdf");
+        assert!(book.authorize_final_url(&start.update.id, url).is_ok());
+        let path = start.path.unwrap();
+        fs::write(&path, b"%PDF").unwrap();
+        let done = book.finish(url, true).unwrap();
+        assert_eq!(done.phase, DownloadPhase::Done);
+        assert!(path.is_file());
+        #[cfg(target_os = "macos")]
+        {
+            let value = read_quarantine_attribute(&path).expect("quarantine");
+            assert!(value.starts_with("0083;"), "{value}");
+            assert!(value.contains("NeuroBrowser"), "{value}");
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quarantine_attribute_value_marks_a_download() {
+        assert_eq!(
+            quarantine_attribute_value(0x5f3e2a1b, "NeuroBrowser", "ABC"),
+            "0083;5f3e2a1b;NeuroBrowser;ABC"
         );
     }
 
