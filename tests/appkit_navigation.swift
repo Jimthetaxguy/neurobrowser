@@ -3,6 +3,101 @@ import WebKit
 
 @main
 struct ReloadRegression {
+    static func realNavigation(base: String) {
+        let controller = ContentViewController()
+        _ = controller.view
+        controller.addNewTab(pageId: 10)
+        let page = controller.webViews[0]
+        var events: [[String: Any]] = []
+        controller.pageUpdateHandler = { events.append($0) }
+        func wait(_ label: String, _ predicate: () -> Bool) {
+            let deadline = Date().addingTimeInterval(10)
+            while !predicate() {
+                precondition(Date() < deadline, "Timed out: \(label); events: \(events)")
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+        }
+        func finished(_ path: String) -> Bool {
+            events.contains { event in
+                let snapshot = event["snapshot"] as? [String: Any]
+                return event["reason"] as? String == "finish" && snapshot?["url"] as? String == base + path
+            }
+        }
+        func load(_ path: String) {
+            events.removeAll()
+            controller.navigateCurrentTab(to: base + path)
+            wait("finish \(path)") { finished(path) }
+            precondition(controller.reloadButton.title == "↻")
+        }
+        // An idle history command must resolve the panel's pending status.
+        events.removeAll()
+        controller.goBack()
+        wait("empty history") { events.contains { $0["reason"] as? String == "select" } }
+        load("/first")
+        events.removeAll()
+        controller.navigateCurrentTab(to: base + "/redirect")
+        wait("redirect") { finished("/final") }
+        precondition(controller.urlBar.stringValue == base + "/final")
+        precondition(events.contains { $0["type"] as? String == "navigation" && $0["url"] as? String == base + "/final" })
+        events.removeAll()
+        controller.goBack()
+        wait("back") { finished("/first") }
+        events.removeAll()
+        controller.goForward()
+        wait("forward") { finished("/final") }
+        events.removeAll()
+        controller.reloadCurrentPage()
+        wait("reload") { finished("/final") }
+        load("/first")
+        events.removeAll()
+        controller.navigateCurrentTab(to: base + "/failure")
+        wait("failure") { events.contains { $0["type"] as? String == "status" } }
+        precondition(controller.reloadButton.title == "↻")
+        load("/recovered")
+        events.removeAll()
+        controller.navigateCurrentTab(to: base + "/slow")
+        wait("slow start") { events.contains { $0["type"] as? String == "navigation" } }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        page.stopLoading()
+        wait("cancel") { events.contains { $0["message"] as? String == "Navigation cancelled" } }
+        precondition(controller.reloadButton.title == "↻")
+        // Switching away and back must retain the cancellation, not show Loaded.
+        controller.addNewTab(pageId: 11)
+        events.removeAll()
+        controller.selectTab(pageId: 10)
+        wait("cancel selection") { events.contains { $0["reason"] as? String == "select" && $0["message"] as? String == "Navigation cancelled" } }
+        events.removeAll()
+        controller.navigateCurrentTab(to: base + "/slow")
+        wait("replacement start") { events.contains { $0["type"] as? String == "navigation" } }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        events.removeAll()
+        controller.navigateCurrentTab(to: base + "/replacement")
+        wait("replacement finish") { finished("/replacement") }
+        precondition(!events.contains { $0["type"] as? String == "status" }, "old cancellation must not fail the replacement: \(events)")
+        // A selection read already in flight cannot be relabeled with a new load id.
+        events.removeAll()
+        controller.selectTab(pageId: 11)
+        controller.selectTab(pageId: 10)
+        controller.navigateCurrentTab(to: base + "/last")
+        wait("last finish") { finished("/last") }
+        let starts = events.filter { $0["type"] as? String == "navigation" }
+        let latest = starts.last?["navigationId"] as? Int
+        precondition(events.filter { $0["reason"] as? String == "finish" }.allSatisfy { $0["navigationId"] as? Int == latest })
+        precondition(!events.contains { event in
+            let snapshot = event["snapshot"] as? [String: Any]
+            return event["reason"] as? String == "select" && event["navigationId"] as? Int == latest
+                && snapshot?["url"] as? String != base + "/last"
+        }, "a stale selection must not borrow the replacement's navigation id")
+        // A hidden page's network failure must be restored when selected.
+        events.removeAll()
+        controller.navigateCurrentTab(to: base + "/failure")
+        controller.selectTab(pageId: 11)
+        wait("background failure") { events.contains { $0["type"] as? String == "status" && $0["pageId"] as? Int == 10 } }
+        events.removeAll()
+        controller.selectTab(pageId: 10)
+        wait("failure selection") { events.contains { $0["reason"] as? String == "select" && !($0["message"] as? String ?? "").isEmpty } }
+    }
+
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
@@ -69,6 +164,7 @@ struct ReloadRegression {
         precondition(controller.selectTab(pageId: 1))
         precondition(events.contains { $0["type"] as? String == "tabs" && $0["activePageId"] as? Int == 1 },
                      "a tab switch must report the newly active page")
-        print("AppKit navigation: 22/22 assertions passed")
+        realNavigation(base: CommandLine.arguments[1])
+        print("AppKit navigation: delegate regressions and real WebKit navigation passed")
     }
 }

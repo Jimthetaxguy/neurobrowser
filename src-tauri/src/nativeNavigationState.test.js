@@ -30,7 +30,7 @@ test("results are keyed by page and navigation id", () => {
   assert.deepEqual(nativeStatusUpdate(state, finish(1, 6, "background"), 0), {});
   assert.deepEqual(
     nativeStatusUpdate(state, { type: "snapshot", pageId: 0, navigationId: 5, reason: "select", loading: true, snapshot: { url: "https://slow.example/" } }, 0),
-    { status: "Loading https://slow.example/…" }
+    { status: "Loading https://slow.example/…", clearSnapshot: true }
   );
   // The background page's newest id was recorded even though it was not shown.
   assert.deepEqual(nativeStatusUpdate(state, finish(1, 3, "older"), 1), {});
@@ -49,4 +49,17 @@ test("a status without a page id is still shown", () => {
   const state = createNativeNavigationState();
   assert.deepEqual(nativeStatusUpdate(state, { type: "status", message: "Host note" }, 0), { status: "Host note" });
   assert.deepEqual(nativeStatusUpdate(state, { type: "tabs", tabs: [] }, 0), {});
+});
+
+test("selection restores a failed or cancelled page's terminal status", () => {
+  const state = createNativeNavigationState();
+  nativeStatusUpdate(state, { type: "navigation", pageId: 1, navigationId: 1 }, 0);
+  assert.deepEqual(nativeStatusUpdate(state, {
+    ...finish(1, 1, "old"), reason: "select", message: "Navigation cancelled",
+  }, 1), { status: "Navigation cancelled" });
+  nativeStatusUpdate(state, { type: "navigation", pageId: 1, navigationId: 2 }, 1);
+  assert.deepEqual(nativeStatusUpdate(state, {
+    ...finish(1, 1, "old"), reason: "select", message: "Navigation cancelled",
+  }, 1), {});
+  assert.equal(nativeStatusUpdate(state, finish(1, 2, "recovered"), 1).snapshot.title, "recovered");
 });

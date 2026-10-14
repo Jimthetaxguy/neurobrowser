@@ -1014,6 +1014,7 @@ export default function App({ adapter, lane }) {
         // Status follows the active tab's newest WebKit navigation only.
         const next = nativeStatusUpdate(nativeNavigationRef.current, event, currentPageIdRef.current);
         if ("url" in next) setUrlFromPage(next.url);
+        if (next.clearSnapshot) setSnapshot(null);
         if (next.snapshot) updateSnapshot(event.pageId, next.snapshot);
         else if (next.status) setStatus(next.status);
       }
