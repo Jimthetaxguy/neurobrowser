@@ -490,6 +490,8 @@ test("a trusted right-click reports the link, image, and selection without a fil
   assert.equal("path" in payload, false);
   assert.equal("destination" in payload, false);
   assert.equal("filename" in payload, false);
+  assert.equal("token" in payload, false);
+  assert.equal("nonce" in payload, false);
 
   const pic = dom.window.document.getElementById("pic");
   pic.dispatchEvent(trustedMouse(dom, "contextmenu", { button: 2, clientX: 4, clientY: 5 }));

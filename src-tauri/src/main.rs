@@ -1,6 +1,7 @@
 mod context_menu;
 mod downloads;
 mod find_page;
+mod native_context_click;
 mod runtime;
 mod zoom;
 
@@ -329,9 +330,32 @@ async fn create_page(
     })();
 
     if let Err(error) = result {
+        state.context_menu.forget_page(page.id);
+        native_context_click::forget(page.id);
         let _ = close_runtime_page(&app, state.runtimes.as_ref(), page.id);
         let _ = state.session_manager.close_page(&session_id, page.id);
         return Err(error);
+    }
+
+    let app_for_click = app.clone();
+    let runtime_id = page.runtime_id.clone();
+    let page_id = page.id;
+    if let Err(error) = app.run_on_main_thread(move || {
+        let Some(webview) = app_for_click.get_webview(&runtime_id) else {
+            return;
+        };
+        native_context_click::arm(
+            &webview,
+            page_id,
+            std::sync::Arc::new(move || {
+                app_for_click
+                    .state::<AppState>()
+                    .context_menu
+                    .note_native_click(page_id);
+            }),
+        );
+    }) {
+        tracing::warn!("could not arm the page context menu: {error}");
     }
 
     Ok(page.id)
@@ -622,6 +646,8 @@ fn close_page(
         .map_err(|e| e.to_string())?
         .retain(|_, pending| pending.session_id != session_id || pending.page_id != page_id);
     state.find.clear(page_id);
+    state.context_menu.forget_page(page_id);
+    native_context_click::forget(page_id);
     close_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 
@@ -793,19 +819,43 @@ fn present_context_menu(
     let page_url = webview.url().map(|url| url.to_string()).unwrap_or_default();
     let mut hit = context_menu::context_hit_from_report(&page_url, body.as_ref());
     hit.page_id = page_id;
-    state.context_menu.store(hit.clone());
     let window = webview.window();
-    let menu = context_menu::build_menu(&window, &hit).map_err(|error| error.to_string())?;
-    state.context_menu.keep_shown(menu.clone());
-    let scale = window.scale_factor().unwrap_or(1.0);
+    let scale = window
+        .scale_factor()
+        .ok()
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .unwrap_or(1.0);
+    let size = webview.size().unwrap_or_default();
+    let (x, y) = context_menu::clamp_menu_point(
+        hit.x,
+        hit.y,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    );
+    hit.x = x;
+    hit.y = y;
+    let Some(menu_id) =
+        state
+            .context_menu
+            .try_open(page_id, state.runtimes.active_page(), hit.clone())
+    else {
+        return Ok(());
+    };
+    let menu = match context_menu::build_menu(&window, menu_id, &hit) {
+        Ok(menu) => menu,
+        Err(error) => {
+            state.context_menu.finish_showing(menu_id);
+            return Err(error.to_string());
+        }
+    };
     let origin = webview.position().unwrap_or_default();
     let position = tauri::PhysicalPosition::new(
         origin.x as f64 + hit.x * scale,
         origin.y as f64 + hit.y * scale,
     );
-    window
-        .popup_menu_at(&menu, position)
-        .map_err(|error| error.to_string())
+    let shown = window.popup_menu_at(&menu, position);
+    state.context_menu.finish_showing(menu_id);
+    shown.map_err(|error| error.to_string())
 }
 
 fn open_context_tab(app: &AppHandle, page_id: usize, url: &str) {
@@ -853,21 +903,20 @@ fn on_context_menu_item(app: &AppHandle, id: &str) -> bool {
     if !context_menu::is_context_item(id) {
         return false;
     }
-    let Some(hit) = app.state::<AppState>().context_menu.current() else {
+    let Some(command) = app.state::<AppState>().context_menu.command(id) else {
         return true;
     };
-    match context_menu::command_for(id, &hit) {
-        Some(context_menu::ContextCommand::OpenTab { page_id, url }) => {
+    match command {
+        context_menu::ContextCommand::OpenTab { page_id, url } => {
             open_context_tab(app, page_id, &url);
         }
-        Some(context_menu::ContextCommand::Copy { text }) => emit_context_copy(app, &text),
-        Some(context_menu::ContextCommand::SaveImage { page_id, url }) => {
+        context_menu::ContextCommand::Copy { text } => emit_context_copy(app, &text),
+        context_menu::ContextCommand::SaveImage { page_id, url } => {
             save_context_image(app, page_id, &url);
         }
-        Some(context_menu::ContextCommand::Back) => emit_menu_command(app, "back"),
-        Some(context_menu::ContextCommand::Forward) => emit_menu_command(app, "forward"),
-        Some(context_menu::ContextCommand::Reload) => emit_menu_command(app, "reload"),
-        None => {}
+        context_menu::ContextCommand::Back => emit_menu_command(app, "back"),
+        context_menu::ContextCommand::Forward => emit_menu_command(app, "forward"),
+        context_menu::ContextCommand::Reload => emit_menu_command(app, "reload"),
     }
     true
 }
@@ -1663,20 +1712,21 @@ mod tests {
             "reopen closed tab is not a menu accelerator"
         );
         assert_eq!(menu_command("reopen-closed-tab"), None);
-        for context_item in [
-            "ctx-open-link",
-            "ctx-copy-link",
-            "ctx-open-image",
-            "ctx-save-image",
-            "ctx-copy-image",
-            "ctx-copy-selection",
-            "ctx-search-selection",
-            "ctx-back",
-            "ctx-forward",
-            "ctx-reload",
+        for action in [
+            "open-link",
+            "copy-link",
+            "open-image",
+            "save-image",
+            "copy-image",
+            "copy-selection",
+            "search-selection",
+            "back",
+            "forward",
+            "reload",
         ] {
+            let context_item = super::context_menu::item_id(4, action);
             assert_eq!(
-                menu_command(context_item),
+                menu_command(&context_item),
                 None,
                 "{context_item} is not an application menu command"
             );

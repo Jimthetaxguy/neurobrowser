@@ -9,7 +9,17 @@ use serde_json::Value;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Manager, Runtime};
 
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// How long a native right-click still counts. A later report is ignored.
+pub const NATIVE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
+/// Minimum time between menus on the same tab.
+pub const MENU_COOLDOWN: Duration = Duration::from_millis(500);
+
+const BOUND_MENUS: usize = 8;
 
 /// Report id the page script uses for a trusted context menu.
 /// It is not a pending runtime request id.
@@ -59,52 +69,186 @@ pub struct ContextCopy<'a> {
     pub text: &'a str,
 }
 
+struct ShownMenu {
+    menu_id: u64,
+    page_id: usize,
+}
+
+struct MenuBook {
+    clicks: HashMap<usize, Instant>,
+    last_shown: HashMap<usize, Instant>,
+    shown: Option<ShownMenu>,
+    bound: Vec<(u64, ContextHit)>,
+    next_id: u64,
+}
+
+impl Default for MenuBook {
+    fn default() -> Self {
+        Self {
+            clicks: HashMap::new(),
+            last_shown: HashMap::new(),
+            shown: None,
+            bound: Vec::new(),
+            next_id: 0,
+        }
+    }
+}
+
 pub struct ContextMenuSession {
-    hit: Mutex<Option<ContextHit>>,
-    shown: Mutex<Option<Box<dyn std::any::Any + Send>>>,
+    book: Mutex<MenuBook>,
 }
 
 impl Default for ContextMenuSession {
     fn default() -> Self {
         Self {
-            hit: Mutex::new(None),
-            shown: Mutex::new(None),
+            book: Mutex::new(MenuBook::default()),
         }
     }
 }
 
 impl ContextMenuSession {
-    pub fn store(&self, hit: ContextHit) {
-        *self.lock_hit() = Some(hit);
+    /// A native right-click on this tab, recorded outside the page script.
+    pub fn note_native_click(&self, page_id: usize) {
+        self.note_native_click_at(page_id, Instant::now());
     }
 
-    pub fn current(&self) -> Option<ContextHit> {
-        self.lock_hit().clone()
+    fn note_native_click_at(&self, page_id: usize, now: Instant) {
+        self.lock().clicks.insert(page_id, now);
     }
 
-    /// Keep the native menu alive until the next right-click replaces it.
-    pub fn keep_shown<T: Send + 'static>(&self, menu: T) {
-        *self.shown.lock().unwrap_or_else(|error| error.into_inner()) = Some(Box::new(menu));
+    /// Open a menu for this report, or ignore it.
+    ///
+    /// Ignored when no native right-click landed on this tab in the last few
+    /// hundred milliseconds, when the tab is not the visible one, when a menu
+    /// is already showing, or when this tab showed a menu too recently.
+    /// The returned id is embedded in the item ids. A later report cannot
+    /// change what those items do.
+    pub fn try_open(
+        &self,
+        page_id: usize,
+        active_page: Option<usize>,
+        hit: ContextHit,
+    ) -> Option<u64> {
+        self.try_open_at(page_id, active_page, hit, Instant::now())
     }
 
-    fn lock_hit(&self) -> std::sync::MutexGuard<'_, Option<ContextHit>> {
-        self.hit.lock().unwrap_or_else(|error| error.into_inner())
+    fn try_open_at(
+        &self,
+        page_id: usize,
+        active_page: Option<usize>,
+        hit: ContextHit,
+        now: Instant,
+    ) -> Option<u64> {
+        let mut book = self.lock();
+        if book.shown.is_some() || active_page != Some(page_id) {
+            return None;
+        }
+        let fresh = book
+            .clicks
+            .get(&page_id)
+            .is_some_and(|clicked| now.saturating_duration_since(*clicked) <= NATIVE_CLICK_WINDOW);
+        if !fresh {
+            book.clicks.remove(&page_id);
+            return None;
+        }
+        if book
+            .last_shown
+            .get(&page_id)
+            .is_some_and(|shown| now.saturating_duration_since(*shown) < MENU_COOLDOWN)
+        {
+            return None;
+        }
+        book.clicks.remove(&page_id);
+        book.next_id = book.next_id.saturating_add(1);
+        let menu_id = book.next_id;
+        book.last_shown.insert(page_id, now);
+        book.shown = Some(ShownMenu { menu_id, page_id });
+        book.bound.push((menu_id, hit));
+        if book.bound.len() > BOUND_MENUS {
+            book.bound.remove(0);
+        }
+        Some(menu_id)
+    }
+
+    /// The native menu has closed. A new report may be considered.
+    pub fn finish_showing(&self, menu_id: u64) {
+        let mut book = self.lock();
+        if book
+            .shown
+            .as_ref()
+            .is_some_and(|shown| shown.menu_id == menu_id)
+        {
+            book.shown = None;
+        }
+    }
+
+    pub fn forget_page(&self, page_id: usize) {
+        let mut book = self.lock();
+        book.clicks.remove(&page_id);
+        book.last_shown.remove(&page_id);
+        if book
+            .shown
+            .as_ref()
+            .is_some_and(|shown| shown.page_id == page_id)
+        {
+            book.shown = None;
+        }
+    }
+
+    /// The action bound to this item when its menu was built.
+    /// `None` when the id is not one of our items, or that menu was never opened.
+    pub fn command(&self, item_id: &str) -> Option<ContextCommand> {
+        let (menu_id, action) = parse_context_item(item_id)?;
+        let book = self.lock();
+        let hit = book
+            .bound
+            .iter()
+            .find(|(id, _)| *id == menu_id)
+            .map(|(_, hit)| hit)?;
+        command_for(action, hit)
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, MenuBook> {
+        self.book.lock().unwrap_or_else(|error| error.into_inner())
     }
 }
 
 pub fn is_context_item(id: &str) -> bool {
+    parse_context_item(id).is_some()
+}
+
+/// `ctx-7-open-link` -> `(7, "open-link")`. The number is the menu that was
+/// showing when the item was created. A page cannot invent a matching target.
+pub fn parse_context_item(id: &str) -> Option<(u64, &str)> {
+    let rest = id.strip_prefix("ctx-")?;
+    let (id_text, action) = rest.split_once('-')?;
+    if id_text.is_empty() || !id_text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let menu_id: u64 = id_text.parse().ok()?;
+    if menu_id == 0 || id_text != menu_id.to_string() {
+        return None;
+    }
+    is_action(action).then_some((menu_id, action))
+}
+
+pub fn item_id(menu_id: u64, action: &str) -> String {
+    format!("ctx-{menu_id}-{action}")
+}
+
+fn is_action(action: &str) -> bool {
     matches!(
-        id,
-        "ctx-open-link"
-            | "ctx-copy-link"
-            | "ctx-open-image"
-            | "ctx-save-image"
-            | "ctx-copy-image"
-            | "ctx-copy-selection"
-            | "ctx-search-selection"
-            | "ctx-back"
-            | "ctx-forward"
-            | "ctx-reload"
+        action,
+        "open-link"
+            | "copy-link"
+            | "open-image"
+            | "save-image"
+            | "copy-image"
+            | "copy-selection"
+            | "search-selection"
+            | "back"
+            | "forward"
+            | "reload"
     )
 }
 
@@ -112,34 +256,34 @@ pub fn is_context_item(id: &str) -> bool {
 /// for that item. The command never carries a filesystem path.
 pub fn command_for(id: &str, hit: &ContextHit) -> Option<ContextCommand> {
     match id {
-        "ctx-open-link" => Some(ContextCommand::OpenTab {
+        "open-link" => Some(ContextCommand::OpenTab {
             page_id: hit.page_id,
             url: allowed_http_url(hit.link_url.as_deref()?)?,
         }),
-        "ctx-copy-link" => Some(ContextCommand::Copy {
+        "copy-link" => Some(ContextCommand::Copy {
             text: allowed_http_url(hit.link_url.as_deref()?)?,
         }),
-        "ctx-open-image" => Some(ContextCommand::OpenTab {
+        "open-image" => Some(ContextCommand::OpenTab {
             page_id: hit.page_id,
             url: allowed_http_url(hit.image_url.as_deref()?)?,
         }),
-        "ctx-save-image" => Some(ContextCommand::SaveImage {
+        "save-image" => Some(ContextCommand::SaveImage {
             page_id: hit.page_id,
             url: allowed_http_url(hit.image_url.as_deref()?)?,
         }),
-        "ctx-copy-image" => Some(ContextCommand::Copy {
+        "copy-image" => Some(ContextCommand::Copy {
             text: allowed_http_url(hit.image_url.as_deref()?)?,
         }),
-        "ctx-copy-selection" => Some(ContextCommand::Copy {
+        "copy-selection" => Some(ContextCommand::Copy {
             text: hit.selection.clone()?,
         }),
-        "ctx-search-selection" => Some(ContextCommand::OpenTab {
+        "search-selection" => Some(ContextCommand::OpenTab {
             page_id: hit.page_id,
             url: duckduckgo_search_url(hit.selection.as_deref()?),
         }),
-        "ctx-back" => Some(ContextCommand::Back),
-        "ctx-forward" => Some(ContextCommand::Forward),
-        "ctx-reload" => Some(ContextCommand::Reload),
+        "back" => Some(ContextCommand::Back),
+        "forward" => Some(ContextCommand::Forward),
+        "reload" => Some(ContextCommand::Reload),
         _ => None,
     }
 }
@@ -147,39 +291,43 @@ pub fn command_for(id: &str, hit: &ContextHit) -> Option<ContextCommand> {
 pub fn menu_model(hit: &ContextHit) -> ContextMenuModel {
     let mut content = Vec::new();
     if hit.link_url.is_some() {
-        content.push(entry("ctx-open-link", "Open Link in New Tab"));
-        content.push(entry("ctx-copy-link", "Copy Link Address"));
+        content.push(entry("open-link", "Open Link in New Tab"));
+        content.push(entry("copy-link", "Copy Link Address"));
     }
     if hit.image_url.is_some() {
-        content.push(entry("ctx-open-image", "Open Image in New Tab"));
-        content.push(entry("ctx-save-image", "Save Image"));
-        content.push(entry("ctx-copy-image", "Copy Image Address"));
+        content.push(entry("open-image", "Open Image in New Tab"));
+        content.push(entry("save-image", "Save Image"));
+        content.push(entry("copy-image", "Copy Image Address"));
     }
     if let Some(selection) = &hit.selection {
-        content.push(entry("ctx-copy-selection", "Copy"));
-        content.push(entry(
-            "ctx-search-selection",
-            search_label(selection).as_str(),
-        ));
+        content.push(entry("copy-selection", "Copy"));
+        content.push(entry("search-selection", search_label(selection).as_str()));
     }
     ContextMenuModel {
         content,
         page: vec![
-            entry("ctx-back", "Back"),
-            entry("ctx-forward", "Forward"),
-            entry("ctx-reload", "Reload"),
+            entry("back", "Back"),
+            entry("forward", "Forward"),
+            entry("reload", "Reload"),
         ],
     }
 }
 
 pub fn build_menu<R: Runtime, M: Manager<R>>(
     manager: &M,
+    menu_id: u64,
     hit: &ContextHit,
 ) -> tauri::Result<Menu<R>> {
     let model = menu_model(hit);
     let menu = Menu::new(manager)?;
     for item in &model.content {
-        let entry = MenuItem::with_id(manager, item.id, &item.label, true, None::<&str>)?;
+        let entry = MenuItem::with_id(
+            manager,
+            item_id(menu_id, item.id),
+            &item.label,
+            true,
+            None::<&str>,
+        )?;
         menu.append(&entry)?;
     }
     if !model.content.is_empty() {
@@ -187,10 +335,41 @@ pub fn build_menu<R: Runtime, M: Manager<R>>(
         menu.append(&separator)?;
     }
     for item in &model.page {
-        let entry = MenuItem::with_id(manager, item.id, &item.label, true, None::<&str>)?;
+        let entry = MenuItem::with_id(
+            manager,
+            item_id(menu_id, item.id),
+            &item.label,
+            true,
+            None::<&str>,
+        )?;
         menu.append(&entry)?;
     }
     Ok(menu)
+}
+
+/// Keep a page-supplied point inside the webview. Values are CSS pixels.
+pub fn clamp_menu_point(x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
+    let width = if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        0.0
+    };
+    let height = if height.is_finite() && height > 0.0 {
+        height
+    } else {
+        0.0
+    };
+    let x = if x.is_finite() {
+        x.clamp(0.0, width)
+    } else {
+        0.0
+    };
+    let y = if y.is_finite() {
+        y.clamp(0.0, height)
+    } else {
+        0.0
+    };
+    (x, y)
 }
 
 /// Expression the page webview evaluates. One JSON string, the image address.
@@ -384,13 +563,13 @@ mod tests {
         assert_eq!(
             model.content.iter().map(|item| item.id).collect::<Vec<_>>(),
             vec![
-                "ctx-open-link",
-                "ctx-copy-link",
-                "ctx-open-image",
-                "ctx-save-image",
-                "ctx-copy-image",
-                "ctx-copy-selection",
-                "ctx-search-selection",
+                "open-link",
+                "copy-link",
+                "open-image",
+                "save-image",
+                "copy-image",
+                "copy-selection",
+                "search-selection",
             ]
         );
         assert_eq!(
@@ -414,7 +593,7 @@ mod tests {
         assert!(!rendered.contains("/tmp/evil"));
         assert!(!rendered.contains("passwd"));
         assert!(hit.link_url.is_some());
-        let save = command_for("ctx-save-image", &hit).expect("save");
+        let save = command_for("save-image", &hit).expect("save");
         let rendered = format!("{save:?}");
         assert!(rendered.contains("https://8.8.8.8/pic.png"));
         assert!(!rendered.contains("/tmp"));
@@ -445,11 +624,11 @@ mod tests {
         assert!(hit.link_url.is_none());
         assert!(hit.image_url.is_none());
         assert!(hit.selection.is_none());
-        assert!(command_for("ctx-open-link", &hit).is_none());
-        assert!(command_for("ctx-save-image", &hit).is_none());
+        assert!(command_for("open-link", &hit).is_none());
+        assert!(command_for("save-image", &hit).is_none());
         let loopback = hit_from(json!({ "imageUrl": "http://127.0.0.1/pic.png" }));
         assert!(loopback.image_url.is_none());
-        assert!(command_for("ctx-save-image", &loopback).is_none());
+        assert!(command_for("save-image", &loopback).is_none());
     }
 
     #[test]
@@ -462,27 +641,139 @@ mod tests {
             x: 0.0,
             y: 0.0,
         };
-        match command_for("ctx-search-selection", &hit).expect("search") {
+        match command_for("search-selection", &hit).expect("search") {
             ContextCommand::OpenTab { page_id, url } => {
                 assert_eq!(page_id, 4);
                 assert_eq!(url, "https://duckduckgo.com/?q=caf%C3%A9");
             }
             other => panic!("expected a tab, got {other:?}"),
         }
-        assert_eq!(command_for("ctx-back", &hit), Some(ContextCommand::Back));
-        assert_eq!(
-            command_for("ctx-forward", &hit),
-            Some(ContextCommand::Forward)
-        );
-        assert_eq!(
-            command_for("ctx-reload", &hit),
-            Some(ContextCommand::Reload)
-        );
+        assert_eq!(command_for("back", &hit), Some(ContextCommand::Back));
+        assert_eq!(command_for("forward", &hit), Some(ContextCommand::Forward));
+        assert_eq!(command_for("reload", &hit), Some(ContextCommand::Reload));
         assert!(!is_context_item("reload"));
-        assert!(is_context_item("ctx-reload"));
+        assert!(!is_context_item("ctx-reload"));
+        assert!(is_context_item("ctx-1-reload"));
         let long = "word ".repeat(20);
         let label = search_label(long.trim());
         assert!(label.ends_with('…') || label.contains('…'));
         assert!(label.starts_with("Search DuckDuckGo for \""));
+    }
+
+    fn sample_hit(url: &str) -> ContextHit {
+        ContextHit {
+            page_id: 1,
+            link_url: Some(url.into()),
+            image_url: None,
+            selection: None,
+            x: 10.0,
+            y: 12.0,
+        }
+    }
+
+    #[test]
+    fn a_report_without_a_native_right_click_does_not_open_a_menu() {
+        let session = ContextMenuSession::default();
+        let now = Instant::now();
+        assert!(session
+            .try_open_at(1, Some(1), sample_hit("https://8.8.8.8/a"), now)
+            .is_none());
+        session.note_native_click_at(1, now);
+        assert!(session
+            .try_open_at(
+                1,
+                Some(1),
+                sample_hit("https://8.8.8.8/a"),
+                now + NATIVE_CLICK_WINDOW + Duration::from_millis(1)
+            )
+            .is_none());
+    }
+
+    #[test]
+    fn a_fresh_native_click_opens_only_the_active_tab_and_then_waits() {
+        let session = ContextMenuSession::default();
+        let now = Instant::now();
+        session.note_native_click_at(2, now);
+        assert!(session
+            .try_open_at(2, Some(1), sample_hit("https://8.8.8.8/bg"), now)
+            .is_none());
+        assert!(session
+            .try_open_at(2, None, sample_hit("https://8.8.8.8/bg"), now)
+            .is_none());
+        let menu_id = session
+            .try_open_at(2, Some(2), sample_hit("https://8.8.8.8/ok"), now)
+            .expect("active tab");
+        session.finish_showing(menu_id);
+        session.note_native_click_at(2, now + Duration::from_millis(10));
+        assert!(session
+            .try_open_at(
+                2,
+                Some(2),
+                sample_hit("https://8.8.8.8/again"),
+                now + Duration::from_millis(10)
+            )
+            .is_none());
+        let later = now + MENU_COOLDOWN;
+        session.note_native_click_at(2, later);
+        assert!(session
+            .try_open_at(2, Some(2), sample_hit("https://8.8.8.8/later"), later)
+            .is_some());
+    }
+
+    #[test]
+    fn a_report_while_a_menu_is_open_cannot_replace_its_target() {
+        let session = ContextMenuSession::default();
+        let now = Instant::now();
+        session.note_native_click_at(1, now);
+        let menu_id = session
+            .try_open_at(1, Some(1), sample_hit("https://8.8.8.8/first"), now)
+            .expect("menu");
+        session.note_native_click_at(1, now);
+        assert!(session
+            .try_open_at(1, Some(1), sample_hit("https://8.8.8.8/swapped"), now)
+            .is_none());
+        match session
+            .command(&item_id(menu_id, "open-link"))
+            .expect("bound")
+        {
+            ContextCommand::OpenTab { url, .. } => assert_eq!(url, "https://8.8.8.8/first"),
+            other => panic!("expected the original tab, got {other:?}"),
+        }
+        assert!(session
+            .command(&item_id(menu_id + 1, "open-link"))
+            .is_none());
+        session.finish_showing(menu_id);
+        let later = now + MENU_COOLDOWN;
+        session.note_native_click_at(1, later);
+        let next = session
+            .try_open_at(1, Some(1), sample_hit("https://8.8.8.8/second"), later)
+            .expect("next menu");
+        assert_ne!(next, menu_id);
+        match session
+            .command(&item_id(menu_id, "open-link"))
+            .expect("old")
+        {
+            ContextCommand::OpenTab { url, .. } => assert_eq!(url, "https://8.8.8.8/first"),
+            other => panic!("expected the first target, got {other:?}"),
+        }
+        match session.command(&item_id(next, "open-link")).expect("new") {
+            ContextCommand::OpenTab { url, .. } => assert_eq!(url, "https://8.8.8.8/second"),
+            other => panic!("expected the second target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn menu_coordinates_stay_inside_the_page_webview() {
+        assert_eq!(clamp_menu_point(12.0, 4.0, 800.0, 600.0), (12.0, 4.0));
+        assert_eq!(clamp_menu_point(-40.0, -1.0, 800.0, 600.0), (0.0, 0.0));
+        assert_eq!(
+            clamp_menu_point(10_000.0, 900.0, 800.0, 600.0),
+            (800.0, 600.0)
+        );
+        assert_eq!(
+            clamp_menu_point(f64::NAN, f64::INFINITY, 800.0, 600.0),
+            (0.0, 0.0)
+        );
+        assert_eq!(clamp_menu_point(3.0, 4.0, 0.0, -5.0), (0.0, 0.0));
     }
 }
