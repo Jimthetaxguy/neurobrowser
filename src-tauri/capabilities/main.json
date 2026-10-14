@@ -17,6 +17,7 @@
     "allow-get-page-observation",
     "allow-execute-browser-tool",
     "allow-navigate",
+    "allow-search-browsing-history",
     "allow-search-local-memory",
     "allow-set-action-policy",
     "allow-set-active-page",

@@ -16,6 +16,7 @@ fn main() {
             "get_page_observation",
             "execute_browser_tool",
             "navigate",
+            "search_browsing_history",
             "search_local_memory",
             "set_action_policy",
             "set_active_page",

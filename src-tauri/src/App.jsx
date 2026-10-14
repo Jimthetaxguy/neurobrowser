@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyPresentedRun, presentAgentRun } from "./agentRunPresentation.js";
 import { EvidencePanel } from "./EvidencePanel.jsx";
+import { isBlankDocument } from "./historySuggestions.js";
+import { NewTabPage } from "./NewTabPage.jsx";
 import { Omnibox } from "./OmniboxSuggestions.jsx";
 import { classifyOmniboxInput } from "./omniboxInput.js";
 import { createMenuEchoGuard, numberedTabCommand } from "./menuCommands.js";
@@ -462,6 +464,8 @@ export default function App({ adapter, lane }) {
     setCurrentPageId(pageId);
   }, []);
   const [tabs, setTabs] = useState([]);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const [url, setUrl] = useState("");
   const addressDirtyRef = useRef(false);
   const commandLoadToken = useRef(0);
@@ -506,7 +510,13 @@ export default function App({ adapter, lane }) {
     setUrlFromPage(nextSnapshot.url || "");
     setTabs((items) =>
       items.map((tab) =>
-        tab.id === pageId ? { ...tab, title: nextSnapshot.title || tab.title || "Untitled" } : tab
+        tab.id === pageId
+          ? {
+              ...tab,
+              title: nextSnapshot.title || tab.title || "Untitled",
+              url: typeof nextSnapshot.url === "string" ? nextSnapshot.url : tab.url,
+            }
+          : tab
       )
     );
     setStatus(nextSnapshot.title ? `Loaded: ${nextSnapshot.title}` : "Ready");
@@ -565,6 +575,8 @@ export default function App({ adapter, lane }) {
     async (pageId) => {
       if (pageId == null || !sessionId) return;
       setActivePageId(pageId);
+      const known = tabsRef.current.find((tab) => tab.id === pageId);
+      if (known && typeof known.url === "string") setUrlFromPage(known.url);
       await adapter.setActivePage(sessionId, pageId);
       await syncBrowserViewportForPage(pageId);
       // AppKit sends the selected tab's live state itself; a cached snapshot
@@ -577,21 +589,23 @@ export default function App({ adapter, lane }) {
         setStatus(`Page refresh failed: ${messageText(error)}`);
       }
     },
-    [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, updateSnapshot]
+    [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updateSnapshot]
   );
 
   const createNewTab = useCallback(async () => {
     if (!sessionId) return;
     try {
       const pageId = await adapter.createPage(sessionId);
-      setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}` }]);
+      setTabs((items) => [...items, { id: pageId, title: `Tab ${items.length + 1}`, url: "" }]);
       setActivePageId(pageId);
+      setUrlFromPage("");
       await syncBrowserViewportForPage(pageId);
       setStatus("New tab ready");
+      if (!compact) document.querySelector(".location .url-input")?.focus();
     } catch (error) {
       setStatus(`New tab failed: ${messageText(error)}`);
     }
-  }, [adapter, sessionId, setActivePageId, syncBrowserViewportForPage]);
+  }, [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage]);
 
   const closeTab = useCallback(
     async (pageId) => {
@@ -605,6 +619,7 @@ export default function App({ adapter, lane }) {
         const nextTab = nextTabs[closingIndex] || nextTabs[closingIndex - 1] || nextTabs[0];
         if (nextTab) {
           setActivePageId(nextTab.id);
+          if (typeof nextTab.url === "string") setUrlFromPage(nextTab.url);
           await adapter.setActivePage(sessionId, nextTab.id);
           await syncBrowserViewportForPage(nextTab.id);
           if (!compact) {
@@ -620,7 +635,7 @@ export default function App({ adapter, lane }) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, compact, sessionId, setActivePageId, syncBrowserViewportForPage, tabs, updateSnapshot]
+    [adapter, compact, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, tabs, updateSnapshot]
   );
 
   const reorderTabs = useCallback((fromIndex, toIndex) => {
@@ -792,8 +807,9 @@ export default function App({ adapter, lane }) {
         setSessionId(nextSessionId);
         const pageId = await adapter.createPage(nextSessionId);
         if (disposed) return;
-        setTabs([{ id: pageId, title: "Tab 1" }]);
+        setTabs([{ id: pageId, title: "Tab 1", url: "" }]);
         setActivePageId(pageId);
+        if (!compact) document.querySelector(".location .url-input")?.focus();
         if (!compact) {
           try {
             const policy = await adapter.getActionPolicy();
@@ -855,13 +871,31 @@ export default function App({ adapter, lane }) {
       if (updates.loading === true) setPageLoading(true);
       if (updates.loading === false) setPageLoading(false);
       if (typeof updates.url === "string") setUrlFromPage(updates.url);
-      if (typeof updates.title === "string") {
-        const pageId = updates.pageId;
-        const title = updates.title;
-        setTabs((items) => items.map((tab) => (tab.id === pageId ? { ...tab, title } : tab)));
+      const pageId = updates.pageId;
+      const title = typeof updates.title === "string" ? updates.title : null;
+      const nextPageUrl = typeof event.url === "string" && event.url ? event.url : null;
+      if (title || nextPageUrl) {
+        setTabs((items) =>
+          items.map((tab) => {
+            if (tab.id !== pageId) return tab;
+            return {
+              ...tab,
+              ...(title ? { title } : {}),
+              ...(nextPageUrl ? { url: nextPageUrl } : {}),
+            };
+          })
+        );
       }
     });
   }, [adapter, setUrlFromPage]);
+
+  const activeTab = tabs.find((tab) => tab.id === currentPageId);
+  const showStartPage =
+    !compact &&
+    activeTab != null &&
+    isBlankDocument(activeTab.url) &&
+    loading == null &&
+    !pageLoading;
 
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
@@ -1102,10 +1136,14 @@ export default function App({ adapter, lane }) {
           <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} />
           <StatsRow snapshot={snapshot} />
           <div className="browser-stage" ref={browserStageRef}>
-            <div className="stage-placeholder">
-              <h2>{snapshot?.title || "Native page rendering"}</h2>
-              <p>{stageText}</p>
-            </div>
+            {showStartPage ? (
+              <NewTabPage adapter={adapter} onNavigate={navigateCurrentPage} />
+            ) : (
+              <div className="stage-placeholder">
+                <h2>{snapshot?.title || "Native page rendering"}</h2>
+                <p>{stageText}</p>
+              </div>
+            )}
           </div>
         </section>
         <ChatPanel

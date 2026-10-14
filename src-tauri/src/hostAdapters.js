@@ -86,6 +86,9 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     onMenuCommand(callback) {
       return bindMenuCommand(listen, callback);
     },
+    async searchBrowsingHistory(query = "", limit = 8) {
+      return invoke("search_browsing_history", { query, limit });
+    },
     async searchLocalMemory(query, limit = 8) {
       return invoke("search_local_memory", { query, limit });
     },

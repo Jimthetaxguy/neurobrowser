@@ -191,6 +191,14 @@ impl HistoryStore {
         self.ranked(limit, Some(query))
     }
 
+    /// The entry for `url`, using the same canonical URL as [`HistoryStore::record_visit`].
+    ///
+    /// `about:blank` and any non-http(s) URL return `None`.
+    pub fn get(&self, url: &str) -> Option<HistoryEntry> {
+        let url = canonical_http_url(url)?;
+        self.lock().by_url.get(&url).cloned()
+    }
+
     /// Remove every entry and write an empty history file.
     pub fn clear(&self) -> Result<(), HistoryError> {
         let mut index = self.lock();

@@ -5,18 +5,21 @@ use neuro_memory::{
     SearchRequest, SearchResult,
 };
 use neurobrowser::{
-    ActionPolicy, ActionReceipt, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus,
-    ApprovalContext, BrowserInterface, ObservationLimits, PageObservation, PageSnapshot,
-    PolicyDecision, ProviderConfig, ProviderType, ReActAgent, SessionManager, ToolCall,
+    should_record_visit, ActionPolicy, ActionReceipt, AgentConfig, AgentRunEvent, AgentRunResult,
+    AgentRunStatus, ApprovalContext, BrowserInterface, HistoryEntry, HistoryStore,
+    ObservationLimits, PageObservation, PageSnapshot, PolicyDecision, ProviderConfig, ProviderType,
+    ReActAgent, SessionManager, ToolCall,
 };
 use runtime::{
-    close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
-    BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime,
+    close_runtime_page, create_runtime_page, hide_unbrowsed_runtime_page, reveal_runtime_page,
+    set_active_runtime_page, sync_runtime_viewport, BrowserRuntimeRegistry, BrowserViewport,
+    RuntimeReportPayload, TauriBrowserRuntime,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::SystemTime;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, State, WebviewWindow};
 
@@ -32,6 +35,8 @@ struct AppState {
     /// Caller-owned capture rules. `MemoryService::forget` tombstones a host
     /// here for this process. The service does not store the policy itself.
     capture_policy: tokio::sync::Mutex<CapturePolicy>,
+    /// Browsing history (`history.json`), distinct from page memory.
+    history: Arc<HistoryStore>,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
 }
 
@@ -361,8 +366,18 @@ async fn navigate(
         .await?;
     // Host-side scheme/format + netguard check. UI does not preflight.
     let normalized_url = normalize_and_guard_url(url)?;
-    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.navigate(&normalized_url).await?;
+    let (_, browser) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
+    // The new-tab page is the shell. Show the page webview once a real
+    // navigation starts, and put it away again if that navigation never leaves
+    // about:blank.
+    reveal_runtime_page(&app, state.runtimes.as_ref(), page_id)?;
+    if let Err(error) = browser.navigate(&normalized_url).await {
+        if let Err(hide_error) = hide_unbrowsed_runtime_page(&app, state.runtimes.as_ref(), page_id)
+        {
+            tracing::warn!("failed to hide the blank page after navigation failed: {hide_error}");
+        }
+        return Err(error);
+    }
     // Server-driven capture. Policy deny and capture errors stay off the
     // navigation result; the page load already succeeded.
     capture_after_navigate(state.inner(), &browser).await;
@@ -743,6 +758,83 @@ async fn capture_after_navigate(state: &AppState, browser: &TauriBrowserRuntime)
     }
 }
 
+/// How many history rows the address bar and the new-tab page ask for.
+const BROWSING_HISTORY_LIMIT: usize = 8;
+
+/// One history row sent to the shell. `last_visited` stays in the file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowsingHistoryHit {
+    url: String,
+    title: String,
+    visit_count: u64,
+}
+
+fn browsing_history_hit(entry: HistoryEntry) -> BrowsingHistoryHit {
+    BrowsingHistoryHit {
+        url: entry.url,
+        title: entry.title,
+        visit_count: entry.visit_count,
+    }
+}
+
+/// Visit count, then recency, then URL.
+///
+/// [`HistoryStore::search`] orders by recency first and truncates. This reads
+/// every match, then ranks the way the address bar and new-tab page do.
+fn browsing_history_hits(
+    store: &HistoryStore,
+    query: &str,
+    limit: usize,
+) -> Vec<BrowsingHistoryHit> {
+    let limit = limit.min(BROWSING_HISTORY_LIMIT);
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut matches = store.search(query.trim(), usize::MAX);
+    matches.sort_by(|left, right| {
+        right
+            .visit_count
+            .cmp(&left.visit_count)
+            .then_with(|| right.last_visited.cmp(&left.last_visited))
+            .then_with(|| left.url.cmp(&right.url))
+    });
+    matches.truncate(limit);
+    matches.into_iter().map(browsing_history_hit).collect()
+}
+
+/// Record a finished http(s) visit. An empty title keeps a title already stored
+/// for that URL so a load that finishes before the document title does not
+/// wipe it. Errors are logged; a history write never fails the page load.
+fn record_browsing_visit(store: &HistoryStore, url: &str, title: &str) {
+    if !should_record_visit(url, false) {
+        return;
+    }
+    let title_to_store = if title.trim().is_empty() {
+        store
+            .get(url)
+            .map(|entry| entry.title)
+            .filter(|existing| !existing.is_empty())
+            .unwrap_or_default()
+    } else {
+        title.to_string()
+    };
+    if let Err(error) = store.record_visit(url, &title_to_store, SystemTime::now()) {
+        tracing::warn!("browsing history was not recorded: {error}");
+    }
+}
+
+fn open_history(app: &tauri::App) -> Result<Arc<HistoryStore>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("history");
+    HistoryStore::open(dir)
+        .map(Arc::new)
+        .map_err(|err| err.to_string())
+}
+
 fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
     let data_dir = app
         .path()
@@ -752,6 +844,19 @@ fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
     MemoryService::open(&data_dir)
         .map(Arc::new)
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn search_browsing_history(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<BrowsingHistoryHit>, String> {
+    Ok(browsing_history_hits(
+        &state.history,
+        query.as_deref().unwrap_or(""),
+        limit.unwrap_or(BROWSING_HISTORY_LIMIT),
+    ))
 }
 
 #[tauri::command]
@@ -1190,6 +1295,9 @@ fn main() {
             let memory = open_memory(app).map_err(|err| -> Box<dyn std::error::Error> {
                 Box::new(std::io::Error::other(err))
             })?;
+            let history = open_history(app).map_err(|err| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::other(err))
+            })?;
             tracing::info!("memory data dir: {}", memory.data_dir().display());
             app.manage(AppState {
                 session_manager,
@@ -1197,6 +1305,7 @@ fn main() {
                 memory,
                 action_policy: tokio::sync::RwLock::new(ActionPolicy::default()),
                 capture_policy: tokio::sync::Mutex::new(CapturePolicy::default()),
+                history,
                 pending_approvals: Mutex::new(HashMap::new()),
             });
             Ok(())
@@ -1217,6 +1326,7 @@ fn main() {
             get_page_observation,
             execute_browser_tool,
             navigate,
+            search_browsing_history,
             search_local_memory,
             set_active_page,
             set_action_policy,
@@ -1404,5 +1514,79 @@ mod tests {
 
         assert_eq!(events[4], serde_json::json!({ "type": "RunDone" }));
         assert_eq!(events[5], serde_json::json!({ "type": "RunCancelled" }));
+    }
+
+    #[test]
+    fn browsing_history_records_visits_and_ranks_by_count_then_recency() {
+        let dir = std::env::temp_dir().join(format!(
+            "neurobrowser-history-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let store = neurobrowser::HistoryStore::open(&dir).expect("open history");
+        let start = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let gap = neurobrowser::history::VISIT_COLLAPSE_WINDOW + std::time::Duration::from_secs(1);
+
+        super::record_browsing_visit(&store, "about:blank", "Blank");
+        super::record_browsing_visit(&store, "ftp://example.com/file", "File");
+        assert!(store.recent(10).is_empty());
+
+        super::record_browsing_visit(&store, "https://example.com/docs", "Docs");
+        super::record_browsing_visit(&store, "https://example.com/docs", "");
+        let kept = store.get("https://example.com/docs").expect("visit");
+        assert_eq!(kept.title, "Docs");
+        assert_eq!(kept.visit_count, 1);
+
+        store
+            .record_visit("https://example.com/popular", "Popular", start)
+            .expect("popular first");
+        store
+            .record_visit("https://example.com/popular", "Popular", start + gap)
+            .expect("popular second");
+        store
+            .record_visit(
+                "https://example.com/newer",
+                "Newer notes",
+                start + gap + gap,
+            )
+            .expect("newer");
+        store
+            .record_visit("https://example.com/other", "Other", start + gap)
+            .expect("other");
+
+        let ranked = super::browsing_history_hits(&store, "example.com", 100);
+        let urls: Vec<_> = ranked.iter().map(|hit| hit.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "https://example.com/popular",
+                "https://example.com/docs",
+                "https://example.com/newer",
+                "https://example.com/other",
+            ]
+        );
+        assert!(ranked.iter().all(|hit| hit.visit_count >= 1));
+        assert_eq!(ranked[0].visit_count, 2);
+        assert_eq!(ranked[1].visit_count, 1);
+
+        let title_match = super::browsing_history_hits(&store, "NOTES", 8);
+        assert_eq!(title_match.len(), 1);
+        assert_eq!(title_match[0].url, "https://example.com/newer");
+
+        let capped = super::browsing_history_hits(&store, "", 8);
+        assert!(capped.len() <= 8);
+        assert_eq!(capped[0].url, "https://example.com/popular");
+        let json = serde_json::to_value(&capped).expect("serialize hits");
+        assert!(json[0].get("visitCount").is_some());
+        assert!(json[0].get("visit_count").is_none());
+        assert!(json[0].get("last_visited").is_none());
+
+        assert!(super::browsing_history_hits(&store, "missing", 8).is_empty());
+        assert!(super::browsing_history_hits(&store, "example", 0).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
