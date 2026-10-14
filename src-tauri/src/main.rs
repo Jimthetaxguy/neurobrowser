@@ -602,6 +602,19 @@ async fn browser_reload(
 }
 
 #[tauri::command]
+fn stop_page_load(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    // Navigate and reload hold the page lock until the load finishes. Stop has
+    // to run without that lock, or it would wait on the load it is cancelling.
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.stop_page_load()
+}
+
+#[tauri::command]
 async fn browser_back(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -862,6 +875,7 @@ fn main() {
             set_action_policy,
             set_provider,
             start_agent_run,
+            stop_page_load,
             submit_approval,
             sync_browser_viewport,
         ])

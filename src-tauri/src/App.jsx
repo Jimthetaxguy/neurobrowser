@@ -231,7 +231,7 @@ function StatsRow({ snapshot }) {
   );
 }
 
-function BrowserToolbar({ onAction }) {
+function BrowserToolbar({ loading, onAction, onStop }) {
   return (
     <div className="browser-toolbar">
       <button className="btn btn-secondary" onClick={() => onAction("browser_back")} type="button">
@@ -240,9 +240,15 @@ function BrowserToolbar({ onAction }) {
       <button className="btn btn-secondary" onClick={() => onAction("browser_forward")} type="button">
         Forward
       </button>
-      <button className="btn btn-secondary" onClick={() => onAction("browser_reload")} type="button">
-        Reload
-      </button>
+      {loading ? (
+        <button className="btn btn-secondary" onClick={onStop} type="button">
+          Stop
+        </button>
+      ) : (
+        <button className="btn btn-secondary" onClick={() => onAction("browser_reload")} type="button">
+          Reload
+        </button>
+      )}
     </div>
   );
 }
@@ -649,6 +655,17 @@ export default function App({ adapter, lane }) {
     [adapter, compact, currentPageId, expectNativeNavigation, performPageAction, sessionId]
   );
 
+  const stopPageLoad = useCallback(async () => {
+    if (currentPageId == null || !sessionId) return;
+    try {
+      await adapter.browserAction("stop_page_load", sessionId, currentPageId);
+      setLoading(null);
+      setPageLoading(false);
+    } catch (error) {
+      setStatus(`Stop failed: ${messageText(error)}`);
+    }
+  }, [adapter, currentPageId, sessionId]);
+
   const askAssistant = useCallback(async () => {
     const trimmed = prompt.trim();
     if (!trimmed || currentPageId == null || !sessionId) return;
@@ -857,9 +874,31 @@ export default function App({ adapter, lane }) {
   }, [adapter.rendersPageInHost, syncBrowserViewport]);
 
   useEffect(() => {
-    // The page webview does not deliver keys here. These chords run only while
-    // this React chrome is focused; page focus will use native menu accelerators.
+    // The page webview does not deliver keys here. These chords, including
+    // Escape to stop a load, run only while this React chrome is focused.
     const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        if (
+          compact ||
+          event.repeat ||
+          event.defaultPrevented ||
+          event.altKey ||
+          event.metaKey ||
+          event.ctrlKey
+        ) {
+          return;
+        }
+        if (loading == null && !pageLoading) return;
+        if (addressDirtyRef.current) return;
+        if (currentPageId == null || sessionId == null) return;
+        const addressFocused =
+          event.target?.classList?.contains("url-input") ||
+          document.activeElement?.classList?.contains("url-input");
+        if (!addressFocused && typingInTextField(event)) return;
+        event.preventDefault();
+        stopPageLoad();
+        return;
+      }
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
       const key = event.key.toLowerCase();
@@ -911,7 +950,7 @@ export default function App({ adapter, lane }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activatePage, closeTab, compact, createNewTab, currentPageId, runBrowserAction, tabs]);
+  }, [activatePage, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
 
   const stageText =
     "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
@@ -930,7 +969,7 @@ export default function App({ adapter, lane }) {
           url={url}
         />
         <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
-        <BrowserToolbar onAction={runBrowserAction} />
+        <BrowserToolbar loading={false} onAction={runBrowserAction} onStop={stopPageLoad} />
         <StatsRow snapshot={snapshot} />
         <div className="status-bar">
           <span className="status-line">{status}</span>
@@ -958,7 +997,7 @@ export default function App({ adapter, lane }) {
       <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
       <main>
         <section className="browser-panel">
-          <BrowserToolbar onAction={runBrowserAction} />
+          <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} />
           <StatsRow snapshot={snapshot} />
           <div className="browser-stage" ref={browserStageRef}>
             <div className="stage-placeholder">

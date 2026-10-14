@@ -114,6 +114,42 @@ fn reports_require_a_page_webview_and_an_allowed_document() {
 }
 
 #[test]
+fn stop_page_load_is_main_webview_only() {
+    let mut context = context();
+    let authority = context.runtime_authority_mut();
+    assert!(
+        authority
+            .resolve_access("stop_page_load", "main", "main", &Origin::Local)
+            .is_some(),
+        "control webview lost stop_page_load"
+    );
+    for origin in [
+        Origin::Local,
+        remote("about:blank"),
+        remote("http://example.com/"),
+        remote("https://example.com/"),
+    ] {
+        assert!(
+            authority
+                .resolve_access("stop_page_load", "main", "page-runtime-1", &origin)
+                .is_none(),
+            "page webview gained stop_page_load from {origin}"
+        );
+    }
+    assert!(
+        authority
+            .resolve_access(
+                "stop_page_load",
+                "main",
+                "main",
+                &remote("https://example.com/")
+            )
+            .is_none(),
+        "remote control-webview content gained stop_page_load"
+    );
+}
+
+#[test]
 fn page_lifecycle_listen_is_main_webview_only() {
     let mut context = context();
     let authority = context.runtime_authority_mut();
