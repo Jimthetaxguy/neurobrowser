@@ -2,6 +2,7 @@
 name = "neurobrowser"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 description = "HTTP scraper and policy-gated browser agent library"
 
 [dependencies]

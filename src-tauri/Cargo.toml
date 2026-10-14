@@ -2,6 +2,7 @@
 name = "neurobrowser-tauri"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 # Without this, `tauri-cli` (and the macOS bundler, which scans `src/bin/*.rs`
 # and ignores `required-features`) picks the first bin in cargo-metadata
 # order — which can be `neurobrowser-headless` — and bundles/launches that
@@ -35,5 +36,23 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+# Same WebKitGTK the shell already links, so a native right-click can be
+# recorded without a token the page is able to read.
+gtk = "0.18"
+java_script_core = { package = "javascriptcore-rs", version = "=1.1" }
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSObject", "NSString", "NSURL", "NSURLRequest", "NSURLResponse", "NSError", "NSData"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKWebView", "WKDownload", "WKDownloadDelegate", "block2"] }
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSEvent", "NSView", "NSWindow", "NSResponder", "block2"] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+# Accelerator parsing only. Default features pull libxdo, which the app menu does not use.
+muda = { version = "=0.17.1", default-features = false }

@@ -1,0 +1,9 @@
+{
+  "identifier": "main-page-events",
+  "description": "Main webview may listen for page-lifecycle. Child page-runtime webviews are not included.",
+  "webviews": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

@@ -1,4 +1,9 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+import { bindContextCopy } from "./contextCopy.js";
+import { bindDownloads } from "./downloads.js";
+import { bindMenuCommand } from "./menuCommands.js";
+import { bindPageLifecycle, bindPageNewWindow } from "./nativePageEvents.js";
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message;
@@ -13,7 +18,7 @@ function postToAppKit(command, payload = {}) {
   handler.postMessage({ command, payload });
 }
 
-export function createTauriHostAdapter() {
+export function createTauriHostAdapter({ listen = tauriListen } = {}) {
   const invoke = (command, payload = {}) => {
     if (!window.__TAURI_INTERNALS__) {
       throw new Error("Tauri IPC bridge is unavailable. Run this app through the Tauri desktop runtime.");
@@ -26,8 +31,10 @@ export function createTauriHostAdapter() {
     async createSession() {
       return invoke("create_session");
     },
-    async createPage(sessionId) {
-      return invoke("create_page", { sessionId });
+    async createPage(sessionId, options = {}) {
+      const payload = { sessionId };
+      if (options.activate === false) payload.activate = false;
+      return invoke("create_page", payload);
     },
     async closePage(sessionId, pageId) {
       return invoke("close_page", { sessionId, pageId });
@@ -76,6 +83,36 @@ export function createTauriHostAdapter() {
     },
     async setProvider(provider) {
       return invoke("set_provider", { provider });
+    },
+    onPageLifecycle(callback) {
+      return bindPageLifecycle(listen, callback);
+    },
+    onPageNewWindow(callback) {
+      return bindPageNewWindow(listen, callback);
+    },
+    onDownload(callback) {
+      return bindDownloads(listen, callback);
+    },
+    async openDownload(id) {
+      return invoke("open_download", { id });
+    },
+    async showDownloadInFolder(id) {
+      return invoke("show_download_in_folder", { id });
+    },
+    async findInPage(sessionId, pageId, query, direction) {
+      return invoke("find_in_page", { sessionId, pageId, query, direction });
+    },
+    async adjustPageZoom(sessionId, pageId, action) {
+      return invoke("adjust_page_zoom", { sessionId, pageId, action });
+    },
+    onMenuCommand(callback) {
+      return bindMenuCommand(listen, callback);
+    },
+    onContextCopy(callback) {
+      return bindContextCopy(listen, callback);
+    },
+    async searchBrowsingHistory(query = "", limit = 8) {
+      return invoke("search_browsing_history", { query, limit });
     },
     async searchLocalMemory(query, limit = 8) {
       return invoke("search_local_memory", { query, limit });

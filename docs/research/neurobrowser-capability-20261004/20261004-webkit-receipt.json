@@ -1852,7 +1852,7 @@
       "request_id" : "webkit-28"
     }
   ],
-  "runtime_source" : "\/Users\/jamespustorino\/code\/_worktrees\/neurobrowser-capability-20261004\/src-tauri\/src\/runtime.rs",
+  "runtime_source" : "<feature-checkout>\/src-tauri\/src\/runtime.rs",
   "schema_version" : 1,
   "site" : "http:\/\/127.0.0.1:52829\/",
   "storage" : "nonPersistent"

@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 24 tools (22 browser tools plus search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
+description: Drive NeuroBrowser from a Rust agent via the crate's 22 tools, or 24 with memory attached (search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -155,41 +155,11 @@ the Tauri runtime overrides it. `BrowserEngine` does not override `keypress`
 either; that call uses the `BrowserInterface` default error, as do `back`,
 `forward`, and `reload`.
 
-## Autonomy
+## Autonomy and policy gates
 
-| Level | Auto-allow | Gate |
-|---|---|---|
-| `ReadOnly` | Read, wait, scroll | Other actions, including navigate, `Block` |
-| `Assisted` (default) | Read, wait, scroll, navigate that is not cross-domain; a hostless current page (`about:blank`, empty URL) is not cross-domain | otherwise `RequireApproval` |
-| `HighAutonomy` | Remaining non-high-impact actions | Submit / purchase / auth / upload / message / destructive → `RequireApproval` |
-
-Tool/domain denials and injection checks run first and return `Block`.
-`ReadOnly` blocks state-changing actions before sensitive-input or explicit
-approval gates; approval cannot widen read-only authority. Other modes apply
-sensitive-input and explicit approval gates before their remaining mode rules.
-
-## Policy gates
-
-Same order as `ActionPolicy::evaluate`; first match wins:
-
-1. `denied_tools` → `Block`.
-2. Prompt-injection on the page → `Block`.
-3. Unsafe navigation schemes (`javascript:` / `data:` / `file:` / …) → `Block`.
-4. If the URL has a parsed host, block it when it appears in `denied_domains` or misses a non-empty allowlist. A rule matches that host or its subdomains (`example.com` matches `a.example.com`). If the URL has no parsed host, skip this gate.
-5. `ReadOnly` state-changing actions → `Block`.
-6. Sensitive keys or sensitive tool metadata → `RequireApproval`.
-7. `approval_required_tools` → `RequireApproval`.
-8. Remaining mode rules.
-
-Headless `policy.evaluate` reads `params.tool` and `params.arguments`, then
-builds an empty `PageSnapshot` (no URL, HTML, or text) before calling
-evaluate, so prompt-injection cannot fire,
-`is_cross_domain` is false with no host, and non-navigate tools never get a
-domain; allow/deny lists still apply to `navigate` via the argument URL.
-
-Credential tokens (`password`, `token`, `secret`, `api_key`, `authorization`,
-and related), plus every `text` argument, are `[REDACTED]` in decisions and
-agent events. `type` and `type_target` are marked sensitive and require approval.
+The autonomy table and the eight-gate list are in `docs/AGENT-SURFACE.md`
+(Autonomy, then Policy gates). That section matches `ActionPolicy::evaluate`.
+This skill does not copy them.
 
 ## See also
 

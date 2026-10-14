@@ -61,20 +61,21 @@ cargo test --all-targets
 cargo test --manifest-path crates/neuro-memory/Cargo.toml
 ```
 
-Integration tests live in `tests/`:
+Integration tests live in `tests/`. These are examples, not the full list:
 
 - `action_policy.rs` — deny-wins-over-allow, assisted-mode click approval,
   sensitive-arg redaction, prompt-injection blocking.
 - `autonomous_agent.rs` — ReAct loop with a mocked provider.
 - `memory_tools.rs` — personal-memory tools over `MemoryService`.
 - `real_provider_smoke.rs` — `#[ignore]` real HTTP; outside `verify.sh` and CI.
-- Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
-  and run explicitly with the `headless` feature.
+
+Headless argument and policy tests live in `src-tauri/src/headless_bin/main.rs`
+and run explicitly with the `headless` feature.
 
 ## Tauri IPC
 
-The desktop app exposes 22 commands (`tauri::generate_handler!` in
-`src-tauri/src/main.rs`), including `get_page_observation` and
+The desktop app exposes the commands registered by `tauri::generate_handler!`
+in `src-tauri/src/main.rs`, including `get_page_observation` and
 `execute_browser_tool`. From the React frontend:
 
 ```javascript
@@ -89,7 +90,7 @@ const result = await invoke("start_agent_run", { sessionId, pageId, prompt: "Sum
 
 `get_page_snapshot` returns `url`, `title`, and count fields (`link_count`, `image_count`, `form_count`, `price_count`, `table_count`). That payload is not the fuller crate `PageSnapshot` (`html`, `text`, viewport, and the element lists).
 
-`start_agent_run` events keep `tool`, `success`, `reasons`, and `redacted_arguments`. Tool result text, policy `outcome`, `risk_flags`, and `approval_id` stay off the wire.
+`start_agent_run` events keep `tool`, `success`, `reasons`, and `redacted_arguments`. Tool result text, policy `outcome`, and `risk_flags` stay off the wire. `approval_id` is still absent. A `ToolCallResult` for `click_target`, `type_target`, `submit_target`, or `scroll_target` includes `receipt`: an `ActionReceipt` with `dispatch`, `page_ready`, `verification`, `message`, the document stamp, and `target_id`. `start_agent_run` and `execute_browser_tool` also return `approval_context` (`url`, `document`, `target`) when a pending grant has reviewed page evidence.
 
 Memory IPC commands are `search_local_memory`, `explain_memory_result`, and `forget_memory`. The IPC search default limit is 8 (`search_local_memory`; `explain_memory_result` uses the same default when `limit` is omitted). Crate tools `search_personal_memory` and `inspect_active_page` remain as documented in `docs/AGENT-SURFACE.md`, with their own defaults.
 

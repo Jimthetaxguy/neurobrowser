@@ -1,23 +1,35 @@
+mod context_menu;
+mod downloads;
+mod find_page;
+mod native_context_click;
+mod native_image_download;
 mod runtime;
+mod zoom;
 
+use downloads::DownloadBook;
 use neuro_memory::{
     now_millis, CaptureDecision, CapturePolicy, CapturedPage, MemoryService, SearchExplain,
     SearchRequest, SearchResult,
 };
 use neurobrowser::{
-    ActionPolicy, ActionReceipt, AgentConfig, AgentRunEvent, AgentRunResult, AgentRunStatus,
-    ApprovalContext, BrowserInterface, ObservationLimits, PageObservation, PageSnapshot,
-    PolicyDecision, ProviderConfig, ProviderType, ReActAgent, SessionManager, ToolCall,
+    should_record_visit, ActionPolicy, ActionReceipt, AgentConfig, AgentRunEvent, AgentRunResult,
+    AgentRunStatus, ApprovalContext, BrowserInterface, HistoryEntry, HistoryStore,
+    ObservationLimits, PageObservation, PageSnapshot, PolicyDecision, ProviderConfig, ProviderType,
+    ReActAgent, SessionManager, ToolCall,
 };
 use runtime::{
-    close_runtime_page, create_runtime_page, set_active_runtime_page, sync_runtime_viewport,
-    BrowserRuntimeRegistry, BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime,
+    blocked_popup_payload, close_runtime_page, create_runtime_page, emit_page_new_window,
+    foreground_tab_payload, hide_unbrowsed_runtime_page, page_id_from_runtime_label,
+    reveal_runtime_page, set_active_runtime_page, sync_runtime_viewport, BrowserRuntimeRegistry,
+    BrowserViewport, RuntimeReportPayload, TauriBrowserRuntime, POPUP_BLOCKED_REQUEST,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use std::time::SystemTime;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, State, WebviewWindow};
 
 struct AppState {
     session_manager: SessionManager,
@@ -31,6 +43,16 @@ struct AppState {
     /// Caller-owned capture rules. `MemoryService::forget` tombstones a host
     /// here for this process. The service does not store the policy itself.
     capture_policy: tokio::sync::Mutex<CapturePolicy>,
+    /// Browsing history (`history.json`), distinct from page memory.
+    history: Arc<HistoryStore>,
+    /// Files this process has accepted into the user's Downloads folder.
+    downloads: Arc<DownloadBook>,
+    /// Zoom levels remembered per site (scheme, host, and port).
+    zoom: Arc<zoom::SiteZoomMemory>,
+    /// Which find-in-page match each page last showed.
+    find: Arc<find_page::PageFind>,
+    /// The page hit under the context menu that is currently showing.
+    context_menu: context_menu::ContextMenuSession,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
 }
 
@@ -287,8 +309,11 @@ async fn create_page(
     window: WebviewWindow,
     state: State<'_, AppState>,
     session_id: String,
+    activate: Option<bool>,
 ) -> Result<usize, String> {
     let page = state.session_manager.create_page(&session_id)?;
+    // A background tab must not cover the page that opened it.
+    let activate = activate.unwrap_or(true);
     let result = (|| -> Result<(), String> {
         let host_window = app
             .get_window(window.label())
@@ -299,14 +324,39 @@ async fn create_page(
             page.id,
             &page.runtime_id,
         )?;
-        set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+        if activate {
+            set_active_runtime_page(&app, state.runtimes.as_ref(), page.id)?;
+        }
         Ok(())
     })();
 
     if let Err(error) = result {
+        state.context_menu.forget_page(page.id);
+        native_context_click::forget(page.id);
         let _ = close_runtime_page(&app, state.runtimes.as_ref(), page.id);
         let _ = state.session_manager.close_page(&session_id, page.id);
         return Err(error);
+    }
+
+    let app_for_click = app.clone();
+    let runtime_id = page.runtime_id.clone();
+    let page_id = page.id;
+    if let Err(error) = app.run_on_main_thread(move || {
+        let Some(webview) = app_for_click.get_webview(&runtime_id) else {
+            return;
+        };
+        native_context_click::arm(
+            &webview,
+            page_id,
+            std::sync::Arc::new(move || {
+                app_for_click
+                    .state::<AppState>()
+                    .context_menu
+                    .note_native_click(page_id);
+            }),
+        );
+    }) {
+        tracing::warn!("could not arm the page context menu: {error}");
     }
 
     Ok(page.id)
@@ -320,7 +370,16 @@ fn set_active_page(
     page_id: usize,
 ) -> Result<(), String> {
     state.session_manager.get_page(&session_id, page_id)?;
-    set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)
+    set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)?;
+    if let Ok((_, browser)) = browser_for_page(app, state.inner(), &session_id, page_id) {
+        if let Ok(url) = browser.page_url() {
+            let factor = state.zoom.factor_for_url(&url);
+            if let Err(error) = browser.set_page_zoom(factor) {
+                tracing::warn!("page zoom was not applied while switching tabs: {error}");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -360,8 +419,18 @@ async fn navigate(
         .await?;
     // Host-side scheme/format + netguard check. UI does not preflight.
     let normalized_url = normalize_and_guard_url(url)?;
-    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
-    browser.navigate(&normalized_url).await?;
+    let (_, browser) = browser_for_page(app.clone(), state.inner(), &session_id, page_id)?;
+    // The new-tab page is the shell. Show the page webview once a real
+    // navigation starts, and put it away again if that navigation never leaves
+    // about:blank.
+    reveal_runtime_page(&app, state.runtimes.as_ref(), page_id)?;
+    if let Err(error) = browser.navigate(&normalized_url).await {
+        if let Err(hide_error) = hide_unbrowsed_runtime_page(&app, state.runtimes.as_ref(), page_id)
+        {
+            tracing::warn!("failed to hide the blank page after navigation failed: {hide_error}");
+        }
+        return Err(error);
+    }
     // Server-driven capture. Policy deny and capture errors stay off the
     // navigation result; the page load already succeeded.
     capture_after_navigate(state.inner(), &browser).await;
@@ -577,6 +646,9 @@ fn close_page(
         .lock()
         .map_err(|e| e.to_string())?
         .retain(|_, pending| pending.session_id != session_id || pending.page_id != page_id);
+    state.find.clear(page_id);
+    state.context_menu.forget_page(page_id);
+    native_context_click::forget(page_id);
     close_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 
@@ -599,6 +671,80 @@ async fn browser_reload(
              Do not repeat the reload automatically; inspect the page."
         )
     })
+}
+
+#[tauri::command]
+fn open_download(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    downloads::open_download_file(&state.downloads, &id)
+}
+
+#[tauri::command]
+fn show_download_in_folder(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    downloads::show_download_in_folder(&state.downloads, &id)
+}
+
+#[tauri::command]
+fn adjust_page_zoom(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    action: String,
+) -> Result<zoom::ZoomStatus, String> {
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let url = browser.page_url().unwrap_or_default();
+    let site = zoom::site_key(&url);
+    let current = site
+        .as_deref()
+        .map(|key| state.zoom.get(key))
+        .unwrap_or(1.0);
+    let next = match action.as_str() {
+        "get" => current,
+        "in" => zoom::step_zoom(current, 1),
+        "out" => zoom::step_zoom(current, -1),
+        "reset" => 1.0,
+        _ => return Err("Unknown zoom action".into()),
+    };
+    if action != "get" {
+        browser.set_page_zoom(next)?;
+        if let Some(site) = site.as_deref() {
+            state.zoom.remember(site, next);
+        }
+    }
+    Ok(zoom::zoom_status(next))
+}
+
+#[tauri::command]
+async fn find_in_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    query: String,
+    direction: String,
+) -> Result<find_page::FindHit, String> {
+    let direction = find_page::FindDirection::parse(&direction).ok_or("Unknown find direction")?;
+    if query.chars().count() > 200 {
+        return Err("Find text is too long".into());
+    }
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let index = state.find.index_for(page_id, &query, direction);
+    let hit = browser.find_in_page(&query, index).await?;
+    state.find.note(page_id, &query, &hit);
+    Ok(hit)
+}
+
+#[tauri::command]
+fn stop_page_load(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+) -> Result<(), String> {
+    // Navigate and reload hold the page lock until the load finishes. Stop has
+    // to run without that lock, or it would wait on the load it is cancelling.
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    browser.stop_page_load()
 }
 
 #[tauri::command]
@@ -637,6 +783,35 @@ fn browser_runtime_report(
     state: State<'_, AppState>,
     payload: RuntimeReportPayload,
 ) -> Result<(), String> {
+    if payload.request_id == context_menu::CONTEXT_MENU_REQUEST {
+        // Never accept a caller-supplied hit, even during a real right-click.
+        let caller = webview.clone();
+        return native_context_click::read_snapshot(&webview, move |result| {
+            let Some(body) = context_menu::context_snapshot_from_eval(&result) else {
+                return;
+            };
+            let app = caller.app_handle().clone();
+            let caller = caller.clone();
+            let _ = app.clone().run_on_main_thread(move || {
+                if let Err(error) =
+                    present_context_menu(&caller, app.state::<AppState>().inner(), Some(body))
+                {
+                    tracing::warn!("could not present context menu: {error}");
+                }
+            });
+        });
+    }
+    if payload.request_id == POPUP_BLOCKED_REQUEST {
+        let page_id = page_id_from_runtime_label(webview.label())
+            .ok_or("Runtime report caller does not own this page")?;
+        if state.runtimes.page_runtime_id(page_id).ok().as_deref() != Some(webview.label()) {
+            return Err("Runtime report caller does not own this page".into());
+        }
+        if let Some(event) = blocked_popup_payload(webview.label(), payload.payload.as_ref()) {
+            emit_page_new_window(&webview, &event);
+        }
+        return Ok(());
+    }
     state.runtimes.page_runtime_id(payload.page_id)?;
     state.runtimes.resolve_request(
         payload.page_id,
@@ -645,6 +820,120 @@ fn browser_runtime_report(
         payload.payload,
         payload.error,
     )
+}
+
+fn present_context_menu(
+    webview: &tauri::Webview,
+    state: &AppState,
+    body: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let page_id = page_id_from_runtime_label(webview.label())
+        .ok_or("Runtime report caller does not own this page")?;
+    if state.runtimes.page_runtime_id(page_id).ok().as_deref() != Some(webview.label()) {
+        return Err("Runtime report caller does not own this page".into());
+    }
+    let page_url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+    let mut hit = context_menu::context_hit_from_report(&page_url, body.as_ref());
+    hit.page_id = page_id;
+    let window = webview.window();
+    let scale = window
+        .scale_factor()
+        .ok()
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .unwrap_or(1.0);
+    let size = webview.size().unwrap_or_default();
+    let (x, y) = context_menu::clamp_menu_point(
+        hit.x,
+        hit.y,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    );
+    hit.x = x;
+    hit.y = y;
+    let Some(menu_id) =
+        state
+            .context_menu
+            .try_open(page_id, state.runtimes.active_page(), hit.clone())
+    else {
+        return Ok(());
+    };
+    let menu = match context_menu::build_menu(&window, menu_id, &hit) {
+        Ok(menu) => menu,
+        Err(error) => {
+            state.context_menu.finish_showing(menu_id);
+            return Err(error.to_string());
+        }
+    };
+    let origin = webview.position().unwrap_or_default();
+    let position = tauri::PhysicalPosition::new(
+        origin.x as f64 + hit.x * scale,
+        origin.y as f64 + hit.y * scale,
+    );
+    let shown = window.popup_menu_at(&menu, position);
+    state.context_menu.finish_showing(menu_id);
+    shown.map_err(|error| error.to_string())
+}
+
+fn open_context_tab(app: &AppHandle, page_id: usize, url: &str) {
+    let Some(payload) = foreground_tab_payload(page_id, url) else {
+        return;
+    };
+    emit_page_new_window(app, &payload);
+}
+
+fn emit_context_copy(app: &AppHandle, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if let Err(error) = app.emit_to(
+        EventTarget::labeled(runtime::MAIN_WEBVIEW_LABEL),
+        context_menu::CONTEXT_COPY_EVENT,
+        context_menu::ContextCopy { text },
+    ) {
+        let event = context_menu::CONTEXT_COPY_EVENT;
+        tracing::warn!("failed to emit {event}: {error}");
+    }
+}
+
+fn save_context_image(app: &AppHandle, page_id: usize, url: &str) {
+    if neurobrowser::netguard::blocked_reason(url).is_some() {
+        return;
+    }
+    let runtime_id = {
+        let state = app.state::<AppState>();
+        state.runtimes.page_runtime_id(page_id).ok()
+    };
+    let Some(runtime_id) = runtime_id else {
+        return;
+    };
+    let Some(webview) = app.get_webview(&runtime_id) else {
+        return;
+    };
+    if let Err(error) = native_image_download::start(&webview, url) {
+        tracing::warn!("could not save image: {error}");
+    }
+}
+
+fn on_context_menu_item(app: &AppHandle, id: &str) -> bool {
+    if !context_menu::is_context_item(id) {
+        return false;
+    }
+    let Some(command) = app.state::<AppState>().context_menu.command(id) else {
+        return true;
+    };
+    match command {
+        context_menu::ContextCommand::OpenTab { page_id, url } => {
+            open_context_tab(app, page_id, &url);
+        }
+        context_menu::ContextCommand::Copy { text } => emit_context_copy(app, &text),
+        context_menu::ContextCommand::SaveImage { page_id, url } => {
+            save_context_image(app, page_id, &url);
+        }
+        context_menu::ContextCommand::Back => emit_menu_command(app, "back"),
+        context_menu::ContextCommand::Forward => emit_menu_command(app, "forward"),
+        context_menu::ContextCommand::Reload => emit_menu_command(app, "reload"),
+    }
+    true
 }
 
 fn normalize_and_guard_url(url: String) -> Result<String, String> {
@@ -729,6 +1018,92 @@ async fn capture_after_navigate(state: &AppState, browser: &TauriBrowserRuntime)
     }
 }
 
+/// How many history rows the address bar and the new-tab page ask for.
+const BROWSING_HISTORY_LIMIT: usize = 8;
+
+/// One history row sent to the shell. `last_visited` stays in the file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowsingHistoryHit {
+    url: String,
+    title: String,
+    visit_count: u64,
+}
+
+fn browsing_history_hit(entry: HistoryEntry) -> BrowsingHistoryHit {
+    BrowsingHistoryHit {
+        url: entry.url,
+        title: entry.title,
+        visit_count: entry.visit_count,
+    }
+}
+
+/// Visit count, then recency, then URL.
+///
+/// [`HistoryStore::search`] orders by recency first and truncates. This reads
+/// every match, then ranks the way the address bar and new-tab page do.
+fn browsing_history_hits(
+    store: &HistoryStore,
+    query: &str,
+    limit: usize,
+) -> Vec<BrowsingHistoryHit> {
+    let limit = limit.min(BROWSING_HISTORY_LIMIT);
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut matches = store.search(query.trim(), usize::MAX);
+    matches.sort_by(|left, right| {
+        right
+            .visit_count
+            .cmp(&left.visit_count)
+            .then_with(|| right.last_visited.cmp(&left.last_visited))
+            .then_with(|| left.url.cmp(&right.url))
+    });
+    matches.truncate(limit);
+    matches.into_iter().map(browsing_history_hit).collect()
+}
+
+/// Record a finished http(s) visit. An empty title keeps a title already stored
+/// for that URL so a load that finishes before the document title does not
+/// wipe it. Errors are logged; a history write never fails the page load.
+fn record_browsing_visit(store: &HistoryStore, url: &str, title: &str) {
+    if !should_record_visit(url, false) {
+        return;
+    }
+    let title_to_store = if title.trim().is_empty() {
+        store
+            .get(url)
+            .map(|entry| entry.title)
+            .filter(|existing| !existing.is_empty())
+            .unwrap_or_default()
+    } else {
+        title.to_string()
+    };
+    if let Err(error) = store.record_visit(url, &title_to_store, SystemTime::now()) {
+        tracing::warn!("browsing history was not recorded: {error}");
+    }
+}
+
+fn open_zoom(app: &tauri::App) -> Result<Arc<zoom::SiteZoomMemory>, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("site-zoom.json");
+    Ok(Arc::new(zoom::SiteZoomMemory::open(path)))
+}
+
+fn open_history(app: &tauri::App) -> Result<Arc<HistoryStore>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("history");
+    HistoryStore::open(dir)
+        .map(Arc::new)
+        .map_err(|err| err.to_string())
+}
+
 fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
     let data_dir = app
         .path()
@@ -738,6 +1113,19 @@ fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
     MemoryService::open(&data_dir)
         .map(Arc::new)
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn search_browsing_history(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<BrowsingHistoryHit>, String> {
+    Ok(browsing_history_hits(
+        &state.history,
+        query.as_deref().unwrap_or(""),
+        limit.unwrap_or(BROWSING_HISTORY_LIMIT),
+    ))
 }
 
 #[tauri::command]
@@ -809,6 +1197,411 @@ fn set_provider(
     })
 }
 
+/// Emitted to the main control webview when a browser menu item is chosen.
+/// Edit-role items are not emitted; the OS applies them to the focused webview.
+pub const MENU_COMMAND_EVENT: &str = "menu-command";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuSection {
+    File,
+    Edit,
+    View,
+    History,
+}
+
+struct MenuShortcut {
+    section: MenuSection,
+    id: &'static str,
+    label: &'static str,
+    accelerator: &'static str,
+    enabled: bool,
+}
+
+// Reopen Closed Tab (Cmd/Ctrl+Shift+T) is omitted: the shell has no closed-tab stack.
+const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
+    MenuShortcut {
+        section: MenuSection::File,
+        id: "new-tab",
+        label: "New Tab",
+        accelerator: "CmdOrCtrl+T",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::File,
+        id: "close-tab",
+        label: "Close Tab",
+        accelerator: "CmdOrCtrl+W",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::File,
+        id: "focus-address",
+        label: "Focus Address Bar",
+        accelerator: "CmdOrCtrl+L",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::Edit,
+        id: "find",
+        label: "Find in Page",
+        accelerator: "CmdOrCtrl+F",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::Edit,
+        id: "find-next",
+        label: "Find Next",
+        accelerator: "CmdOrCtrl+G",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::Edit,
+        id: "find-previous",
+        label: "Find Previous",
+        accelerator: "CmdOrCtrl+Shift+G",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "reload",
+        label: "Reload",
+        accelerator: "CmdOrCtrl+R",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "stop",
+        label: "Stop",
+        accelerator: "Escape",
+        enabled: false,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-in",
+        label: "Zoom In",
+        accelerator: "CmdOrCtrl+=",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-in-plus",
+        label: "Zoom In",
+        accelerator: "CmdOrCtrl+Shift+=",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-out",
+        label: "Zoom Out",
+        accelerator: "CmdOrCtrl+-",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-reset",
+        label: "Actual Size",
+        accelerator: "CmdOrCtrl+0",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "next-tab",
+        label: "Next Tab",
+        accelerator: "Ctrl+Tab",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "previous-tab",
+        label: "Previous Tab",
+        accelerator: "Ctrl+Shift+Tab",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-1",
+        label: "Tab 1",
+        accelerator: "CmdOrCtrl+1",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-2",
+        label: "Tab 2",
+        accelerator: "CmdOrCtrl+2",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-3",
+        label: "Tab 3",
+        accelerator: "CmdOrCtrl+3",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-4",
+        label: "Tab 4",
+        accelerator: "CmdOrCtrl+4",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-5",
+        label: "Tab 5",
+        accelerator: "CmdOrCtrl+5",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-6",
+        label: "Tab 6",
+        accelerator: "CmdOrCtrl+6",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-7",
+        label: "Tab 7",
+        accelerator: "CmdOrCtrl+7",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-8",
+        label: "Tab 8",
+        accelerator: "CmdOrCtrl+8",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "select-tab-9",
+        label: "Last Tab",
+        accelerator: "CmdOrCtrl+9",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "back",
+        label: "Back",
+        accelerator: "CmdOrCtrl+[",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "forward",
+        label: "Forward",
+        accelerator: "CmdOrCtrl+]",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "back-alt",
+        label: "Back",
+        accelerator: "Alt+Left",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::History,
+        id: "forward-alt",
+        label: "Forward",
+        accelerator: "Alt+Right",
+        enabled: true,
+    },
+];
+
+fn menu_command(id: &str) -> Option<&'static str> {
+    match id {
+        "new-tab" => Some("new-tab"),
+        "close-tab" => Some("close-tab"),
+        "focus-address" => Some("focus-address"),
+        "reload" => Some("reload"),
+        "stop" => Some("stop"),
+        "back" | "back-alt" => Some("back"),
+        "forward" | "forward-alt" => Some("forward"),
+        "find" => Some("find"),
+        "find-next" => Some("find-next"),
+        "find-previous" => Some("find-previous"),
+        "zoom-in" | "zoom-in-plus" => Some("zoom-in"),
+        "zoom-out" => Some("zoom-out"),
+        "zoom-reset" => Some("zoom-reset"),
+        "next-tab" => Some("next-tab"),
+        "previous-tab" => Some("previous-tab"),
+        "select-tab-1" => Some("select-tab-1"),
+        "select-tab-2" => Some("select-tab-2"),
+        "select-tab-3" => Some("select-tab-3"),
+        "select-tab-4" => Some("select-tab-4"),
+        "select-tab-5" => Some("select-tab-5"),
+        "select-tab-6" => Some("select-tab-6"),
+        "select-tab-7" => Some("select-tab-7"),
+        "select-tab-8" => Some("select-tab-8"),
+        "select-tab-9" => Some("select-tab-9"),
+        _ => None,
+    }
+}
+
+fn emit_menu_command(app: &AppHandle, command: &str) {
+    if let Err(error) = app.emit_to(
+        EventTarget::labeled(runtime::MAIN_WEBVIEW_LABEL),
+        MENU_COMMAND_EVENT,
+        command,
+    ) {
+        tracing::warn!("failed to emit {MENU_COMMAND_EVENT} ({command}): {error}");
+    }
+}
+
+fn section_items<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    section: MenuSection,
+) -> tauri::Result<Vec<MenuItem<R>>> {
+    let mut items = Vec::new();
+    for shortcut in BROWSER_MENU_ITEMS {
+        if shortcut.section != section {
+            continue;
+        }
+        items.push(MenuItem::with_id(
+            manager,
+            shortcut.id,
+            shortcut.label,
+            shortcut.enabled,
+            Some(shortcut.accelerator),
+        )?);
+    }
+    Ok(items)
+}
+
+fn append_with_separator_before<R: Runtime, M: Manager<R>>(
+    submenu: &Submenu<R>,
+    manager: &M,
+    items: &[MenuItem<R>],
+    separator_before: &[&str],
+) -> tauri::Result<()> {
+    for item in items {
+        let id: &str = item.id().as_ref();
+        if separator_before.contains(&id) {
+            submenu.append(&PredefinedMenuItem::separator(manager)?)?;
+        }
+        submenu.append(item)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_submenu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Submenu<R>> {
+    let about = PredefinedMenuItem::about(manager, None, None)?;
+    let services = PredefinedMenuItem::services(manager, None)?;
+    let hide = PredefinedMenuItem::hide(manager, None)?;
+    let hide_others = PredefinedMenuItem::hide_others(manager, None)?;
+    let show_all = PredefinedMenuItem::show_all(manager, None)?;
+    let quit = PredefinedMenuItem::quit(manager, None)?;
+    let after_about = PredefinedMenuItem::separator(manager)?;
+    let after_services = PredefinedMenuItem::separator(manager)?;
+    let before_quit = PredefinedMenuItem::separator(manager)?;
+    Submenu::with_items(
+        manager,
+        "NeuroBrowser",
+        true,
+        &[
+            &about,
+            &after_about,
+            &services,
+            &after_services,
+            &hide,
+            &hide_others,
+            &show_all,
+            &before_quit,
+            &quit,
+        ],
+    )
+}
+
+fn browser_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<(Menu<R>, MenuItem<R>)> {
+    let file_items = section_items(manager, MenuSection::File)?;
+    let view_items = section_items(manager, MenuSection::View)?;
+    let history_items = section_items(manager, MenuSection::History)?;
+    let stop = view_items
+        .iter()
+        .find(|item| item.id().as_ref() == "stop")
+        .cloned()
+        .expect("View menu includes Stop");
+
+    let file = Submenu::new(manager, "File", true)?;
+    append_with_separator_before(&file, manager, &file_items, &["focus-address"])?;
+
+    // Predefined edit items target the focused webview, including a page.
+    let undo = PredefinedMenuItem::undo(manager, None)?;
+    let redo = PredefinedMenuItem::redo(manager, None)?;
+    let cut = PredefinedMenuItem::cut(manager, None)?;
+    let copy = PredefinedMenuItem::copy(manager, None)?;
+    let paste = PredefinedMenuItem::paste(manager, None)?;
+    let select_all = PredefinedMenuItem::select_all(manager, None)?;
+    let edit_history_sep = PredefinedMenuItem::separator(manager)?;
+    let edit_select_sep = PredefinedMenuItem::separator(manager)?;
+    let find_sep = PredefinedMenuItem::separator(manager)?;
+    let find_items = section_items(manager, MenuSection::Edit)?;
+    let edit = Submenu::new(manager, "Edit", true)?;
+    edit.append(&undo)?;
+    edit.append(&redo)?;
+    edit.append(&edit_history_sep)?;
+    edit.append(&cut)?;
+    edit.append(&copy)?;
+    edit.append(&paste)?;
+    edit.append(&edit_select_sep)?;
+    edit.append(&select_all)?;
+    edit.append(&find_sep)?;
+    for item in &find_items {
+        edit.append(item)?;
+    }
+
+    let view = Submenu::new(manager, "View", true)?;
+    append_with_separator_before(
+        &view,
+        manager,
+        &view_items,
+        &["zoom-in", "next-tab", "select-tab-1"],
+    )?;
+
+    let history = Submenu::new(manager, "History", true)?;
+    append_with_separator_before(&history, manager, &history_items, &["back-alt"])?;
+
+    let menu = Menu::new(manager)?;
+    #[cfg(target_os = "macos")]
+    menu.append(&macos_app_submenu(manager)?)?;
+    menu.append(&file)?;
+    menu.append(&edit)?;
+    menu.append(&view)?;
+    menu.append(&history)?;
+    Ok((menu, stop))
+}
+
+fn install_app_menu(app: &tauri::App, runtimes: &BrowserRuntimeRegistry) -> tauri::Result<()> {
+    let handle = app.handle();
+    let (menu, stop) = browser_menu(handle)?;
+    let app_handle = handle.clone();
+    let stop_item = stop.clone();
+    runtimes.set_active_loading_hook(std::sync::Arc::new(move |loading| {
+        let stop_item = stop_item.clone();
+        let app_handle = app_handle.clone();
+        if let Err(error) = app_handle.run_on_main_thread(move || {
+            if let Err(error) = stop_item.set_enabled(loading) {
+                tracing::warn!("failed to update Stop menu item: {error}");
+            }
+        }) {
+            tracing::warn!("failed to schedule Stop menu update: {error}");
+        }
+    }));
+    handle.set_menu(menu)?;
+    handle.on_menu_event(|app, event| {
+        if on_context_menu_item(app, event.id().as_ref()) {
+            return;
+        }
+        if let Some(command) = menu_command(event.id().as_ref()) {
+            emit_menu_command(app, command);
+        }
+    });
+    Ok(())
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -827,7 +1620,18 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            install_app_menu(app, runtimes.as_ref()).map_err(
+                |err| -> Box<dyn std::error::Error> {
+                    Box::new(std::io::Error::other(err.to_string()))
+                },
+            )?;
             let memory = open_memory(app).map_err(|err| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::other(err))
+            })?;
+            let history = open_history(app).map_err(|err| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::other(err))
+            })?;
+            let zoom = open_zoom(app).map_err(|err| -> Box<dyn std::error::Error> {
                 Box::new(std::io::Error::other(err))
             })?;
             tracing::info!("memory data dir: {}", memory.data_dir().display());
@@ -837,6 +1641,11 @@ fn main() {
                 memory,
                 action_policy: tokio::sync::RwLock::new(ActionPolicy::default()),
                 capture_policy: tokio::sync::Mutex::new(CapturePolicy::default()),
+                history,
+                downloads: Arc::new(DownloadBook::default()),
+                zoom,
+                find: Arc::new(find_page::PageFind::default()),
+                context_menu: context_menu::ContextMenuSession::default(),
                 pending_approvals: Mutex::new(HashMap::new()),
             });
             Ok(())
@@ -856,12 +1665,18 @@ fn main() {
             get_page_snapshot,
             get_page_observation,
             execute_browser_tool,
+            adjust_page_zoom,
+            find_in_page,
             navigate,
+            open_download,
+            search_browsing_history,
+            show_download_in_folder,
             search_local_memory,
             set_active_page,
             set_action_policy,
             set_provider,
             start_agent_run,
+            stop_page_load,
             submit_approval,
             sync_browser_viewport,
         ])
@@ -871,9 +1686,89 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_run_response, AgentRunEvent, AgentRunResult, AgentRunStatus, ToolCall};
+    use super::{
+        agent_run_response, menu_command, AgentRunEvent, AgentRunResult, AgentRunStatus, ToolCall,
+        BROWSER_MENU_ITEMS,
+    };
     use neurobrowser::{PolicyDecision, PolicyOutcome, RiskFlag};
     use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::str::FromStr;
+
+    #[test]
+    fn browser_menu_accelerators_parse_and_skip_edit_roles() {
+        let mut ids = HashSet::new();
+        let mut accelerators = HashSet::new();
+        for shortcut in BROWSER_MENU_ITEMS {
+            assert!(ids.insert(shortcut.id), "duplicate id {}", shortcut.id);
+            assert!(
+                accelerators.insert(shortcut.accelerator),
+                "duplicate accelerator {}",
+                shortcut.accelerator
+            );
+            muda::accelerator::Accelerator::from_str(shortcut.accelerator).unwrap_or_else(
+                |error| panic!("{} failed to parse: {error}", shortcut.accelerator),
+            );
+            let command = menu_command(shortcut.id).unwrap_or_else(|| {
+                panic!("{} is not forwarded to the control webview", shortcut.id)
+            });
+            let expected = match shortcut.id {
+                "back-alt" => "back",
+                "forward-alt" => "forward",
+                "zoom-in-plus" => "zoom-in",
+                id => id,
+            };
+            assert_eq!(command, expected);
+        }
+        assert!(
+            !accelerators
+                .iter()
+                .any(|item| *item == "CmdOrCtrl+Shift+T" || *item == "Ctrl+Shift+T"),
+            "reopen closed tab is not a menu accelerator"
+        );
+        assert_eq!(menu_command("reopen-closed-tab"), None);
+        for action in [
+            "open-link",
+            "copy-link",
+            "open-image",
+            "save-image",
+            "copy-image",
+            "copy-selection",
+            "search-selection",
+            "back",
+            "forward",
+            "reload",
+        ] {
+            let context_item = super::context_menu::item_id(4, action);
+            assert_eq!(
+                menu_command(&context_item),
+                None,
+                "{context_item} is not an application menu command"
+            );
+        }
+        for edit in [
+            "undo",
+            "redo",
+            "cut",
+            "copy",
+            "paste",
+            "select_all",
+            "separator",
+        ] {
+            assert_eq!(
+                menu_command(edit),
+                None,
+                "{edit} stays on the focused webview"
+            );
+        }
+        let stop = BROWSER_MENU_ITEMS
+            .iter()
+            .find(|item| item.id == "stop")
+            .expect("stop item");
+        assert_eq!(stop.accelerator, "Escape");
+        assert!(!stop.enabled);
+        assert_eq!(menu_command("select-tab-9"), Some("select-tab-9"));
+    }
 
     #[test]
     fn agent_run_response_drops_unread_bodies() {
@@ -982,5 +1877,79 @@ mod tests {
 
         assert_eq!(events[4], serde_json::json!({ "type": "RunDone" }));
         assert_eq!(events[5], serde_json::json!({ "type": "RunCancelled" }));
+    }
+
+    #[test]
+    fn browsing_history_records_visits_and_ranks_by_count_then_recency() {
+        let dir = std::env::temp_dir().join(format!(
+            "neurobrowser-history-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let store = neurobrowser::HistoryStore::open(&dir).expect("open history");
+        let start = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let gap = neurobrowser::history::VISIT_COLLAPSE_WINDOW + std::time::Duration::from_secs(1);
+
+        super::record_browsing_visit(&store, "about:blank", "Blank");
+        super::record_browsing_visit(&store, "ftp://example.com/file", "File");
+        assert!(store.recent(10).is_empty());
+
+        super::record_browsing_visit(&store, "https://example.com/docs", "Docs");
+        super::record_browsing_visit(&store, "https://example.com/docs", "");
+        let kept = store.get("https://example.com/docs").expect("visit");
+        assert_eq!(kept.title, "Docs");
+        assert_eq!(kept.visit_count, 1);
+
+        store
+            .record_visit("https://example.com/popular", "Popular", start)
+            .expect("popular first");
+        store
+            .record_visit("https://example.com/popular", "Popular", start + gap)
+            .expect("popular second");
+        store
+            .record_visit(
+                "https://example.com/newer",
+                "Newer notes",
+                start + gap + gap,
+            )
+            .expect("newer");
+        store
+            .record_visit("https://example.com/other", "Other", start + gap)
+            .expect("other");
+
+        let ranked = super::browsing_history_hits(&store, "example.com", 100);
+        let urls: Vec<_> = ranked.iter().map(|hit| hit.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "https://example.com/popular",
+                "https://example.com/docs",
+                "https://example.com/newer",
+                "https://example.com/other",
+            ]
+        );
+        assert!(ranked.iter().all(|hit| hit.visit_count >= 1));
+        assert_eq!(ranked[0].visit_count, 2);
+        assert_eq!(ranked[1].visit_count, 1);
+
+        let title_match = super::browsing_history_hits(&store, "NOTES", 8);
+        assert_eq!(title_match.len(), 1);
+        assert_eq!(title_match[0].url, "https://example.com/newer");
+
+        let capped = super::browsing_history_hits(&store, "", 8);
+        assert!(capped.len() <= 8);
+        assert_eq!(capped[0].url, "https://example.com/popular");
+        let json = serde_json::to_value(&capped).expect("serialize hits");
+        assert!(json[0].get("visitCount").is_some());
+        assert!(json[0].get("visit_count").is_none());
+        assert!(json[0].get("last_visited").is_none());
+
+        assert!(super::browsing_history_hits(&store, "missing", 8).is_empty());
+        assert!(super::browsing_history_hits(&store, "example", 0).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

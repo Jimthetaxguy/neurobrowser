@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod browser;
 pub mod capability;
+pub mod history;
 pub mod netguard;
 pub mod providers;
 pub mod session;
@@ -30,3 +31,4 @@ pub use capability::{
     ObservedTarget, PageObservation, RuntimeCapabilities, RuntimeKind, TargetAction, TargetCommand,
     TargetDispatchError, VerificationState,
 };
+pub use history::{should_record_visit, HistoryEntry, HistoryError, HistoryStore};

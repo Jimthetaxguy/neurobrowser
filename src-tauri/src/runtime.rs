@@ -9,8 +9,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::webview::{PageLoadEvent, WebviewBuilder};
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Webview, WebviewUrl, Window};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
+use tauri::{
+    AppHandle, Emitter, EventTarget, LogicalPosition, LogicalSize, Manager, Runtime, Webview,
+    WebviewUrl, Window,
+};
 use tokio::sync::oneshot;
 use tokio::time::sleep;
 
@@ -544,6 +547,209 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
     }
   };
 
+  // Links and window.open ask the shell for a tab. The carrier URL is not a
+  // page: the new-window handler reads it and refuses the real OS window.
+  // A call with no user gesture never reaches that handler on this webview,
+  // so it is reported on the existing report command instead.
+  const nativeOpen = typeof window.open === 'function' ? window.open.bind(window) : () => null;
+  const userOpened = () => {
+    const activation = navigator.userActivation;
+    if (!activation || typeof activation.isActive !== 'boolean') return true;
+    return activation.isActive === true;
+  };
+  const popupTarget = (value) => {
+    if (value == null || value === '') return 'about:blank';
+    try {
+      return new URL(String(value), location.href).href;
+    } catch (_) {
+      return String(value);
+    }
+  };
+  const shellCarrier = (target, disposition) => {
+    const params = new URLSearchParams();
+    params.set('disposition', disposition);
+    params.set('url', target);
+    return 'https://new-window.neurobrowser.invalid/?' + params.toString();
+  };
+  const reportBlockedPopup = (target) => {
+    if (typeof invoke !== 'function') return;
+    const notice = invoke('browser_runtime_report', {
+      payload: {
+        page_id: 0,
+        request_id: 'popup-blocked',
+        payload: { url: target },
+        error: null
+      }
+    });
+    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
+  };
+  const requestOpen = (target, background) => {
+    if (!userOpened()) {
+      reportBlockedPopup(target);
+      return null;
+    }
+    try {
+      return nativeOpen(shellCarrier(target, background ? 'background' : 'foreground'), '_blank');
+    } catch (_) {
+      return null;
+    }
+  };
+  const linkOpenKind = (event) => {
+    const node = event.target && event.target.closest && event.target.closest('a[href]');
+    if (!node || !node.href) return null;
+    const modified = event.metaKey === true || event.ctrlKey === true || event.button === 1;
+    const target = (node.getAttribute('target') || '').toLowerCase();
+    if (!modified && target !== '_blank') return null;
+    return { href: node.href, background: modified };
+  };
+  let pointerClaimed = false;
+  const trustedClick = (event) => event.isTrusted === true;
+  document.addEventListener('pointerdown', (event) => {
+    const kind = linkOpenKind(event);
+    if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    pointerClaimed = true;
+    event.preventDefault();
+    event.stopPropagation();
+    requestOpen(kind.href, kind.background);
+  }, true);
+  document.addEventListener('click', (event) => {
+    const kind = linkOpenKind(event);
+    if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (pointerClaimed) {
+      pointerClaimed = false;
+      return;
+    }
+    requestOpen(kind.href, kind.background);
+  }, true);
+  document.addEventListener('auxclick', (event) => {
+    if (event.button !== 1) return;
+    const kind = linkOpenKind(event);
+    if (!kind) return;
+    if (!trustedClick(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (pointerClaimed) {
+      pointerClaimed = false;
+      return;
+    }
+    requestOpen(kind.href, true);
+  }, true);
+  const shellOpen = function(url) {
+    const target = arguments.length === 0 ? 'about:blank' : popupTarget(url);
+    return requestOpen(target, false);
+  };
+  window.open = shellOpen;
+  if (typeof Window === 'function' && Window.prototype) Window.prototype.open = shellOpen;
+
+  // Only this document-start closure can write a hit. IPC reports merely wake
+  // the host, which reads the snapshot via native evaluation completion.
+  // Pages can drain it (deny their own menu), but cannot replace its contents.
+  const stringifyContext = JSON.stringify.bind(JSON);
+  const contextClock = performance.now.bind(performance);
+  // Independent of native-click freshness: iframe clicks do not bubble here.
+  const contextLifetimeMs = 400;
+  const contextHits = new WeakMap();
+  const rememberContext = contextHits.set.bind(contextHits);
+  const readContext = contextHits.get.bind(contextHits);
+  const deleteContext = contextHits.delete.bind(contextHits);
+  const readSelection = window.getSelection.bind(window);
+  const selectionString = Function.prototype.call.bind(Selection.prototype.toString);
+  const closestContext = Function.prototype.call.bind(Element.prototype.closest);
+  const contextTarget = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Event.prototype, 'target').get);
+  const linkHref = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'href').get);
+  const imageSrc = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src').get);
+  const imageCurrentSrc = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'currentSrc').get);
+  const contextX = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientX').get);
+  const contextY = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientY').get);
+  let pendingContext = null;
+  // A later click must never consume a snapshot left by an earlier event.
+  window.addEventListener('mousedown', (event) => {
+    if (trustedClick(event)) pendingContext = null;
+  }, true);
+  Object.defineProperty(window, '__NEUROBROWSER_TAKE_CONTEXT__', {
+    value: () => {
+      const hit = pendingContext;
+      pendingContext = null;
+      if (!hit) return null;
+      const age = contextClock() - hit.at;
+      return age >= 0 && age <= contextLifetimeMs ? hit.text : null;
+    }, writable: false, configurable: false
+  });
+
+  const contextNodeType = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType').get);
+  const contextParent = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype, 'parentElement').get);
+  const contextTag = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Element.prototype, 'tagName').get);
+  const contextCanceled = Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Event.prototype, 'defaultPrevented').get);
+  const contextTrim = Function.prototype.call.bind(String.prototype.trim);
+  const contextSlice = Function.prototype.call.bind(String.prototype.slice);
+  const inputGetters = ['type', 'value', 'selectionStart', 'selectionEnd'].map(key =>
+    Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, key).get));
+  const areaGetters = ['type', 'value', 'selectionStart', 'selectionEnd'].map(key =>
+    Function.prototype.call.bind(Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, key).get));
+  const fieldSelection = (node) => {
+    if (!node || contextNodeType(node) !== 1) return '';
+    const tag = contextTag(node);
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') return '';
+    const getters = tag === 'INPUT' ? inputGetters : areaGetters;
+    const type = getters[0](node);
+    if (type === 'password' || type === 'hidden' || type === 'file') return '';
+    const start = getters[2](node);
+    const end = getters[3](node);
+    if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return '';
+    return contextSlice(contextTrim(contextSlice(getters[1](node), start, end)), 0, 2000);
+  };
+  // Capture before page handlers can replace DOM methods or change the target.
+  window.addEventListener('contextmenu', (event) => {
+    if (!trustedClick(event)) return;
+    pendingContext = null;
+    const capturedAt = contextClock();
+    const target = contextTarget(event);
+    const element = target && (contextNodeType(target) === 1 ? target : contextParent(target));
+    const link = element && closestContext(element, 'a[href]');
+    const image = element && closestContext(element, 'img');
+    const fieldType = element && contextTag(element) === 'INPUT' ? inputGetters[0](element) : '';
+    const excludedField = fieldType === 'password' || fieldType === 'hidden' || fieldType === 'file';
+    let selection = fieldSelection(element);
+    if (!selection && !excludedField) {
+      const selected = readSelection();
+      selection = selected ? contextSlice(contextTrim(selectionString(selected)), 0, 2000) : '';
+    }
+    rememberContext(event, { __proto__: null, at: capturedAt, text: stringifyContext({
+      __proto__: null,
+      linkUrl: link ? linkHref(link) : '',
+      imageUrl: image ? imageCurrentSrc(image) || imageSrc(image) : '',
+      selection,
+      x: contextX(event), y: contextY(event)
+    }) });
+  }, true);
+  window.addEventListener('contextmenu', (event) => {
+    const hit = readContext(event);
+    deleteContext(event);
+    if (!hit || contextCanceled(event) || typeof invoke !== 'function') return;
+    event.preventDefault();
+    pendingContext = hit;
+    const notice = invoke('browser_runtime_report', {
+      payload: { page_id: 0, request_id: 'context-menu', payload: null, error: null }
+    });
+    if (notice && typeof notice.catch === 'function') notice.catch(() => {});
+  }, false);
+
   Object.defineProperty(window, '__NEUROBROWSER_RUNTIME__', {
     value: Object.freeze(runtime), writable: false, configurable: false
   });
@@ -571,6 +777,9 @@ struct RuntimePage {
     /// Netguard refused a hop. Distinct from `loading == false`, which also
     /// means a load finished, so a waiter can tell cancel from success.
     navigation_cancel: Option<String>,
+    /// The refused hop must not be emitted as a finished success. Kept apart
+    /// from `navigation_cancel` so a waiter can still take the reason.
+    suppress_finished_event: bool,
 }
 
 struct PendingRuntimeRequest {
@@ -579,11 +788,17 @@ struct PendingRuntimeRequest {
     sender: oneshot::Sender<Result<Value, String>>,
 }
 
+type ActiveLoadingHook = Arc<dyn Fn(bool) + Send + Sync>;
+
 #[derive(Default)]
 pub struct BrowserRuntimeRegistry {
     pages: Mutex<HashMap<usize, RuntimePage>>,
     pending: Mutex<HashMap<String, PendingRuntimeRequest>>,
     active_page: Mutex<Option<usize>>,
+    /// Last flag delivered to the loading hook. `None` until the first report
+    /// so a hook attached later still hears the current value.
+    last_active_loading: Mutex<Option<bool>>,
+    active_loading_hook: Mutex<Option<ActiveLoadingHook>>,
 }
 
 impl BrowserRuntimeRegistry {
@@ -595,6 +810,7 @@ impl BrowserRuntimeRegistry {
                 viewport: BrowserViewport::default(),
                 loading: false,
                 navigation_cancel: None,
+                suppress_finished_event: false,
             },
         );
     }
@@ -618,6 +834,9 @@ impl BrowserRuntimeRegistry {
                 ));
             }
         }
+        drop(pending);
+        drop(active_page);
+        self.notify_active_loading();
         removed.map(|page| page.runtime_id)
     }
 
@@ -692,6 +911,7 @@ impl BrowserRuntimeRegistry {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.loading = loading;
         }
+        self.notify_active_loading();
     }
 
     /// A finished load clears `loading` and leaves any cancellation recorded.
@@ -705,7 +925,9 @@ impl BrowserRuntimeRegistry {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.loading = false;
             page.navigation_cancel = Some(reason.into());
+            page.suppress_finished_event = true;
         }
+        self.notify_active_loading();
     }
 
     /// Netguard allowed a new hop. A refusal recorded for an earlier hop
@@ -716,11 +938,28 @@ impl BrowserRuntimeRegistry {
             page.navigation_cancel = None;
             page.loading = true;
         }
+        self.notify_active_loading();
     }
 
     pub fn clear_navigation_cancel(&self, page_id: usize) {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
             page.navigation_cancel = None;
+        }
+    }
+
+    /// Peek. Does not take `navigation_cancel`.
+    pub fn suppress_finished_event(&self, page_id: usize) -> bool {
+        self.pages
+            .lock()
+            .unwrap()
+            .get(&page_id)
+            .is_some_and(|page| page.suppress_finished_event)
+    }
+
+    /// An allowed hop may report Finished. Does not clear a recorded refusal.
+    pub fn note_navigation_allowed(&self, page_id: usize) {
+        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
+            page.suppress_finished_event = false;
         }
     }
 
@@ -761,10 +1000,47 @@ impl BrowserRuntimeRegistry {
 
     pub fn set_active_page(&self, page_id: Option<usize>) {
         *self.active_page.lock().unwrap() = page_id;
+        self.notify_active_loading();
     }
 
     pub fn active_page(&self) -> Option<usize> {
         *self.active_page.lock().unwrap()
+    }
+
+    /// Whether the visible page is loading. Background tabs do not count.
+    pub fn active_page_is_loading(&self) -> bool {
+        let Some(page_id) = self.active_page() else {
+            return false;
+        };
+        self.pages
+            .lock()
+            .unwrap()
+            .get(&page_id)
+            .is_some_and(|page| page.loading)
+    }
+
+    /// Called when the active page starts or stops loading, including a tab
+    /// switch onto a page that is already loading. The Stop menu item uses
+    /// this so Escape is a menu accelerator only while a load can be stopped.
+    pub fn set_active_loading_hook(&self, hook: ActiveLoadingHook) {
+        *self.active_loading_hook.lock().unwrap() = Some(hook);
+        self.last_active_loading.lock().unwrap().take();
+        self.notify_active_loading();
+    }
+
+    fn notify_active_loading(&self) {
+        let loading = self.active_page_is_loading();
+        {
+            let mut last = self.last_active_loading.lock().unwrap();
+            if *last == Some(loading) {
+                return;
+            }
+            *last = Some(loading);
+        }
+        let hook = self.active_loading_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(loading);
+        }
     }
 
     pub fn all_pages(&self) -> Vec<(usize, String)> {
@@ -871,6 +1147,45 @@ impl TauriBrowserRuntime {
     pub async fn wait_for_ready(&self, timeout_ms: u64) -> Result<(), String> {
         wait_for_page_ready(&self.registry, self.page_id, timeout_ms).await
     }
+
+    /// Stop the current document load and clear loading so waiters and the
+    /// chrome leave the loading state. `window.stop()` is the webview stop.
+    /// A stopped load does not always deliver [`PageLoadEvent::Finished`], so
+    /// the shell event is emitted here.
+    pub fn stop_page_load(&self) -> Result<(), String> {
+        let webview = self.webview()?;
+        webview
+            .eval("window.stop()")
+            .map_err(|error| error.to_string())?;
+        let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+        emit_page_lifecycle(
+            &webview,
+            stopped_page_payload(&self.registry, self.page_id, &url),
+        );
+        Ok(())
+    }
+
+    pub fn page_url(&self) -> Result<String, String> {
+        self.webview()?
+            .url()
+            .map(|url| url.to_string())
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn set_page_zoom(&self, factor: f64) -> Result<(), String> {
+        self.webview()?
+            .set_zoom(factor)
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn find_in_page(
+        &self,
+        query: &str,
+        index: usize,
+    ) -> Result<crate::find_page::FindHit, String> {
+        self.request_json(&crate::find_page::search_expression(query, index), false)
+            .await
+    }
 }
 
 async fn wait_for_page_ready(
@@ -897,6 +1212,350 @@ async fn wait_for_page_ready(
 /// as an error the agent can act on rather than an indefinite hang.
 const NAVIGATION_READY_TIMEOUT_MS: u64 = 10_000;
 
+/// One event for load start, load finish, and document title changes.
+/// The main webview listens; child page webviews are not granted that.
+pub const PAGE_LIFECYCLE_EVENT: &str = "page-lifecycle";
+
+/// Default label of the control webview created from `tauri.conf.json`.
+pub(crate) const MAIN_WEBVIEW_LABEL: &str = "main";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PageLifecyclePhase {
+    Started,
+    Finished,
+    Title,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageLifecyclePayload {
+    pub page_id: usize,
+    pub phase: PageLifecyclePhase,
+    pub url: String,
+    pub title: String,
+}
+
+/// Build the shell event payload. A finished load is omitted when netguard
+/// already refused the hop, or when the URL's scheme is one netguard always
+/// refuses, so cancel is not reported as success. `Started` and `Title` are
+/// still built; only `Finished` is dropped.
+pub fn page_lifecycle_payload(
+    page_id: usize,
+    phase: PageLifecyclePhase,
+    url: impl Into<String>,
+    title: impl Into<String>,
+    navigation_cancelled: bool,
+) -> Option<PageLifecyclePayload> {
+    let url = url.into();
+    let title = title.into();
+    let refused_scheme = neurobrowser::netguard::disallowed_scheme(&url).is_some();
+    if phase == PageLifecyclePhase::Finished && (navigation_cancelled || refused_scheme) {
+        return None;
+    }
+    Some(PageLifecyclePayload {
+        page_id,
+        phase,
+        url,
+        title,
+    })
+}
+
+/// A user stop is a finished load for waiters. A netguard refusal stays
+/// suppressed, so this does not report that hop as a successful finish.
+fn stopped_page_payload(
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+    url: &str,
+) -> Option<PageLifecyclePayload> {
+    registry.finish_loading(page_id);
+    page_lifecycle_payload(
+        page_id,
+        PageLifecyclePhase::Finished,
+        url,
+        String::new(),
+        registry.suppress_finished_event(page_id),
+    )
+}
+
+/// `http` and `https` documents are shown in the page webview.
+/// `about:blank` stays hidden so the shell can draw the new-tab page.
+pub(crate) fn is_browsed_document(url: &str) -> bool {
+    let url = url.trim();
+    starts_with_ignore_ascii_case(url, "https://") || starts_with_ignore_ascii_case(url, "http://")
+}
+
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value.len() >= prefix.len()
+        && value
+            .as_bytes()
+            .iter()
+            .zip(prefix.as_bytes())
+            .all(|(left, right)| left.to_ascii_lowercase() == *right)
+}
+
+fn apply_remembered_zoom(webview: &Webview<impl Runtime>, url: &str) {
+    let Some(state) = webview.try_state::<crate::AppState>() else {
+        return;
+    };
+    let factor = state.zoom.factor_for_url(url);
+    if let Err(error) = webview.set_zoom(factor) {
+        tracing::warn!("page zoom was not applied: {error}");
+    }
+}
+
+fn show_if_browsed(webview: &Webview<impl Runtime>, url: &str, active: bool) {
+    // A background tab must stay hidden while it loads, or it covers the page
+    // the user is looking at. The visible page keeps the previous rule.
+    if !active {
+        if let Err(error) = webview.hide() {
+            tracing::warn!("failed to keep a background page hidden: {error}");
+        }
+        return;
+    }
+    let result = if is_browsed_document(url) {
+        webview.show()
+    } else {
+        webview.hide()
+    };
+    if let Err(error) = result {
+        tracing::warn!("failed to update page webview visibility: {error}");
+    }
+}
+
+fn note_browsing_visit<R: Runtime>(webview: &Webview<R>, url: &str, title: &str) {
+    let Some(state) = webview.try_state::<super::AppState>() else {
+        return;
+    };
+    super::record_browsing_visit(&state.history, url, title);
+}
+
+fn emit_page_lifecycle<R: Runtime>(webview: &Webview<R>, payload: Option<PageLifecyclePayload>) {
+    let Some(payload) = payload else {
+        return;
+    };
+    let page_id = payload.page_id;
+    if let Err(error) = webview.emit_to(
+        EventTarget::labeled(MAIN_WEBVIEW_LABEL),
+        PAGE_LIFECYCLE_EVENT,
+        payload,
+    ) {
+        tracing::warn!("failed to emit {PAGE_LIFECYCLE_EVENT} for page {page_id}: {error}");
+    }
+}
+
+/// The main webview listens. Page webviews are not granted a popup command.
+pub const PAGE_NEW_WINDOW_EVENT: &str = "page-new-window";
+
+/// Report id the page script uses when `window.open` has no user gesture.
+/// It is not a pending runtime request id.
+pub const POPUP_BLOCKED_REQUEST: &str = "popup-blocked";
+
+/// Host the page script uses so the new-window handler can see foreground,
+/// background, or blocked. The handler never loads this host.
+const NEW_WINDOW_CARRIER_HOST: &str = "new-window.neurobrowser.invalid";
+
+/// Drop a second delivery of the same open, such as a click the script
+/// handled and the webview also reported.
+const NEW_WINDOW_DEDUPE: Duration = Duration::from_millis(400);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NewWindowDisposition {
+    Foreground,
+    Background,
+    Blocked,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageNewWindowPayload {
+    pub page_id: usize,
+    pub url: String,
+    pub disposition: NewWindowDisposition,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NewWindowRequest {
+    url: String,
+    disposition: NewWindowDisposition,
+}
+
+enum PopupTarget {
+    Blank,
+    Allowed(String),
+    Refused,
+}
+
+/// `page-runtime-N` is the label `SessionManager` gives a page webview.
+pub fn page_id_from_runtime_label(label: &str) -> Option<usize> {
+    label.strip_prefix("page-runtime-")?.parse().ok()
+}
+
+fn normalize_popup_target(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("about:blank") {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Empty is a blank tab. Anything else must be a URL netguard will load.
+fn classify_popup_target(url: &str) -> PopupTarget {
+    let url = normalize_popup_target(url);
+    if url.is_empty() {
+        return PopupTarget::Blank;
+    }
+    if url.len() > 16_384 {
+        return PopupTarget::Refused;
+    }
+    if neurobrowser::netguard::blocked_reason(&url).is_some() {
+        return PopupTarget::Refused;
+    }
+    PopupTarget::Allowed(url)
+}
+
+fn parse_carrier(raw: &str) -> Option<NewWindowRequest> {
+    let parsed = tauri::Url::parse(raw).ok()?;
+    if !parsed.scheme().eq_ignore_ascii_case("https") {
+        return None;
+    }
+    if parsed.host_str()? != NEW_WINDOW_CARRIER_HOST {
+        return None;
+    }
+    let mut disposition = None;
+    let mut target = None;
+    for (key, value) in parsed.query_pairs() {
+        match key.as_ref() {
+            "disposition" => {
+                disposition = match value.as_ref() {
+                    "foreground" => Some(NewWindowDisposition::Foreground),
+                    "background" => Some(NewWindowDisposition::Background),
+                    "blocked" => Some(NewWindowDisposition::Blocked),
+                    _ => return None,
+                };
+            }
+            "url" => target = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+    Some(NewWindowRequest {
+        url: normalize_popup_target(&target.unwrap_or_default()),
+        disposition: disposition?,
+    })
+}
+
+/// A carrier URL keeps the script's disposition. Any other URL is a
+/// user-gesture open of that URL in the foreground. A broken carrier is
+/// refused here so it is never looked up as a real host.
+fn parse_new_window_url(raw: &str) -> Option<NewWindowRequest> {
+    if let Ok(parsed) = tauri::Url::parse(raw) {
+        if parsed.host_str() == Some(NEW_WINDOW_CARRIER_HOST) {
+            return parse_carrier(raw);
+        }
+    }
+    Some(NewWindowRequest {
+        url: normalize_popup_target(raw),
+        disposition: NewWindowDisposition::Foreground,
+    })
+}
+
+/// Decide what the shell should hear. `None` means netguard refused the URL,
+/// so no tab and no indicator are created.
+pub fn page_new_window_payload(page_id: usize, raw_url: &str) -> Option<PageNewWindowPayload> {
+    let request = parse_new_window_url(raw_url)?;
+    let url = match classify_popup_target(&request.url) {
+        PopupTarget::Refused => {
+            tracing::warn!("Blocked new window from page {page_id} to {}", request.url);
+            return None;
+        }
+        PopupTarget::Blank => String::new(),
+        PopupTarget::Allowed(url) => url,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: request.disposition,
+    })
+}
+
+/// A context-menu open. The address is not parsed as a new-window carrier,
+/// so a page cannot hide a disposition inside the link it asked to open.
+pub fn foreground_tab_payload(page_id: usize, url: &str) -> Option<PageNewWindowPayload> {
+    let url = match classify_popup_target(url) {
+        PopupTarget::Allowed(url) => url,
+        PopupTarget::Blank | PopupTarget::Refused => return None,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: NewWindowDisposition::Foreground,
+    })
+}
+
+/// A blocked `window.open` reported by the page script. Disposition is
+/// always blocked; the page does not get to choose it here.
+pub fn blocked_popup_payload(
+    runtime_label: &str,
+    body: Option<&serde_json::Value>,
+) -> Option<PageNewWindowPayload> {
+    let page_id = page_id_from_runtime_label(runtime_label)?;
+    let url = body
+        .and_then(|value| value.get("url"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let url = match classify_popup_target(url) {
+        PopupTarget::Refused => return None,
+        PopupTarget::Blank => String::new(),
+        PopupTarget::Allowed(url) => url,
+    };
+    Some(PageNewWindowPayload {
+        page_id,
+        url,
+        disposition: NewWindowDisposition::Blocked,
+    })
+}
+
+#[derive(Default)]
+struct NewWindowCoalescer {
+    recent: Vec<(usize, String, NewWindowDisposition, Instant)>,
+}
+
+impl NewWindowCoalescer {
+    fn accept(&mut self, page_id: usize, url: &str, disposition: NewWindowDisposition) -> bool {
+        let now = Instant::now();
+        self.recent
+            .retain(|(_, _, _, at)| now.duration_since(*at) < NEW_WINDOW_DEDUPE);
+        // Disposition is not part of the key. A click the script already
+        // classified must not also open when the webview reports the raw URL.
+        if self
+            .recent
+            .iter()
+            .any(|(id, seen, _, _)| *id == page_id && seen == url)
+        {
+            return false;
+        }
+        self.recent
+            .push((page_id, url.to_string(), disposition, now));
+        true
+    }
+}
+
+pub fn emit_page_new_window<R: Runtime>(
+    emitter: &impl tauri::Emitter<R>,
+    payload: &PageNewWindowPayload,
+) {
+    let page_id = payload.page_id;
+    if let Err(error) = emitter.emit_to(
+        EventTarget::labeled(MAIN_WEBVIEW_LABEL),
+        PAGE_NEW_WINDOW_EVENT,
+        payload.clone(),
+    ) {
+        tracing::warn!("failed to emit {PAGE_NEW_WINDOW_EVENT} for page {page_id}: {error}");
+    }
+}
+
 fn missing_runtime_response(error: &str, action_request: bool) -> String {
     if action_request {
         format!(
@@ -905,171 +1564,6 @@ fn missing_runtime_response(error: &str, action_request: bool) -> String {
         )
     } else {
         error.to_string()
-    }
-}
-
-#[cfg(test)]
-mod response_tests {
-    use super::missing_runtime_response;
-
-    #[test]
-    fn incomplete_action_acknowledgments_cannot_be_treated_as_dispatch_success() {
-        for payload in [
-            serde_json::Value::Null,
-            serde_json::json!({"ok": true}),
-            serde_json::json!({"state": "acknowledged"}),
-            serde_json::json!({"message": "claimed success"}),
-            serde_json::json!({"state": "unrecognized", "message": "claimed success"}),
-        ] {
-            assert!(serde_json::from_value::<super::TargetAcknowledgment>(payload).is_err());
-        }
-        let acknowledgment: super::TargetAcknowledgment = serde_json::from_value(
-            serde_json::json!({"state": "acknowledged", "message": "dispatch acknowledged"}),
-        )
-        .unwrap();
-        assert_eq!(
-            acknowledgment.state,
-            neurobrowser::capability::DispatchState::Acknowledged
-        );
-    }
-
-    #[test]
-    fn report_ownership_mismatch_does_not_consume_pending_request() {
-        let registry = super::BrowserRuntimeRegistry::default();
-        registry.register_page(1, "page-runtime-1".into());
-        registry.register_page(2, "page-runtime-2".into());
-        let (id, mut receiver) = registry.begin_request(1, "page-runtime-1").unwrap();
-        assert!(registry
-            .resolve_request(2, "page-runtime-2", &id, None, None)
-            .is_err());
-        assert!(registry
-            .resolve_request(1, "page-runtime-2", &id, None, None)
-            .is_err());
-        assert!(matches!(
-            receiver.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ));
-        registry
-            .resolve_request(
-                1,
-                "page-runtime-1",
-                &id,
-                Some(serde_json::json!("correct")),
-                None,
-            )
-            .unwrap();
-        assert_eq!(
-            receiver.try_recv().unwrap().unwrap(),
-            serde_json::json!("correct")
-        );
-        assert!(registry
-            .resolve_request(1, "page-runtime-1", &id, None, None)
-            .is_err());
-    }
-
-    #[test]
-    fn closing_page_drains_only_its_pending_requests() {
-        let registry = super::BrowserRuntimeRegistry::default();
-        registry.register_page(1, "page-runtime-1".into());
-        registry.register_page(2, "page-runtime-2".into());
-        let (_, mut first) = registry.begin_request(1, "page-runtime-1").unwrap();
-        let (second_id, mut second) = registry.begin_request(2, "page-runtime-2").unwrap();
-        registry.unregister_page(1);
-        assert!(first.try_recv().unwrap().unwrap_err().contains("closed"));
-        assert!(matches!(
-            second.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ));
-        registry
-            .resolve_request(
-                2,
-                "page-runtime-2",
-                &second_id,
-                Some(serde_json::json!(true)),
-                None,
-            )
-            .unwrap();
-        assert_eq!(second.try_recv().unwrap().unwrap(), serde_json::json!(true));
-        assert!(registry.begin_request(1, "page-runtime-1").is_err());
-    }
-
-    #[test]
-    fn missing_action_acknowledgment_warns_of_unknown_outcome() {
-        for error in [
-            "Timed out waiting for browser runtime response for page 1",
-            "Browser runtime response channel closed",
-        ] {
-            let message = missing_runtime_response(error, true);
-            assert!(message.contains("Action outcome is unknown"));
-            assert!(message.contains("may have executed"));
-            assert!(message.contains("Do not repeat it automatically"));
-            assert!(message.contains(error));
-            assert!(!message.contains("Action executed,"));
-            assert_eq!(missing_runtime_response(error, false), error);
-        }
-    }
-
-    #[test]
-    fn cancelled_navigation_wait_returns_error_instead_of_success() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        runtime.block_on(async {
-            let registry = super::BrowserRuntimeRegistry::default();
-            registry.register_page(4, "page-runtime-4".into());
-            registry.set_loading(4, true);
-            registry
-                .cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
-            // Finish must not erase the cancellation and make the wait succeed.
-            registry.finish_loading(4);
-            let error = super::wait_for_page_ready(&registry, 4, 500)
-                .await
-                .expect_err("cancelled hop");
-            assert!(
-                error.contains("disallowed scheme"),
-                "unexpected wait error: {error}"
-            );
-
-            registry.clear_navigation_cancel(4);
-            registry.set_loading(4, true);
-            registry.finish_loading(4);
-            super::wait_for_page_ready(&registry, 4, 500)
-                .await
-                .expect("finished load");
-        });
-    }
-
-    #[test]
-    fn allowed_navigation_clears_an_earlier_refusal() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        runtime.block_on(async {
-            let registry = super::BrowserRuntimeRegistry::default();
-            registry.register_page(5, "page-runtime-5".into());
-            // A page-initiated hop is refused while nobody is waiting.
-            registry.cancel_navigation(5, "Refusing to navigate to disallowed scheme 'file:'");
-            // The next hop is allowed and finishes; its wait must not read the old refusal.
-            registry.begin_allowed_navigation(5);
-            registry.finish_loading(5);
-            super::wait_for_page_ready(&registry, 5, 500)
-                .await
-                .expect("allowed load after an earlier refusal");
-
-            // A refusal during the current load is still reported.
-            registry.begin_allowed_navigation(5);
-            registry.cancel_navigation(5, "Refusing to navigate to disallowed scheme 'file:'");
-            registry.finish_loading(5);
-            let error = super::wait_for_page_ready(&registry, 5, 500)
-                .await
-                .expect_err("refused redirect");
-            assert!(
-                error.contains("disallowed scheme"),
-                "unexpected wait error: {error}"
-            );
-        });
     }
 }
 
@@ -1255,9 +1749,21 @@ pub fn create_runtime_page(
         .map_err(|e| e.to_string())?;
     let registry_for_nav = registry.clone();
     let registry_for_load = registry.clone();
+    let opener_for_window = window.clone();
+    let new_window_coalescer = Arc::new(Mutex::new(NewWindowCoalescer::default()));
 
     let builder = WebviewBuilder::new(runtime_id, WebviewUrl::External(external_url))
         .initialization_script(RUNTIME_INIT_SCRIPT)
+        // Never let the webview open an OS window. The shell opens a tab.
+        .on_new_window(move |url, _features| {
+            if let Some(payload) = page_new_window_payload(page_id, url.as_str()) {
+                let mut recent = new_window_coalescer.lock().unwrap();
+                if recent.accept(page_id, &payload.url, payload.disposition) {
+                    emit_page_new_window(&opener_for_window, &payload);
+                }
+            }
+            NewWindowResponse::Deny
+        })
         // Cancel hops the shared netguard rejects (redirects, JS, clicked links).
         .on_navigation(move |url| {
             if let Some(reason) = neurobrowser::netguard::blocked_reason(url.as_str()) {
@@ -1265,12 +1771,63 @@ pub fn create_runtime_page(
                 registry_for_nav.cancel_navigation(page_id, reason.to_string());
                 return false;
             }
+            registry_for_nav.note_navigation_allowed(page_id);
             registry_for_nav.begin_allowed_navigation(page_id);
             true
         })
-        .on_page_load(move |_webview, payload| match payload.event() {
-            PageLoadEvent::Started => registry_for_load.set_loading(page_id, true),
-            PageLoadEvent::Finished => registry_for_load.finish_loading(page_id),
+        .on_download(crate::downloads::handle_download_event)
+        .on_page_load(move |webview, payload| {
+            let url = payload.url().to_string();
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    registry_for_load.set_loading(page_id, true);
+                    apply_remembered_zoom(&webview, &url);
+                    show_if_browsed(
+                        &webview,
+                        &url,
+                        registry_for_load.active_page() == Some(page_id),
+                    );
+                    emit_page_lifecycle(
+                        &webview,
+                        page_lifecycle_payload(
+                            page_id,
+                            PageLifecyclePhase::Started,
+                            url,
+                            String::new(),
+                            false,
+                        ),
+                    );
+                }
+                PageLoadEvent::Finished => {
+                    registry_for_load.finish_loading(page_id);
+                    apply_remembered_zoom(&webview, &url);
+                    let payload = page_lifecycle_payload(
+                        page_id,
+                        PageLifecyclePhase::Finished,
+                        url.as_str(),
+                        String::new(),
+                        registry_for_load.suppress_finished_event(page_id),
+                    );
+                    // A refused hop is not a visit and does not change visibility.
+                    if let Some(payload) = &payload {
+                        note_browsing_visit(&webview, &payload.url, &payload.title);
+                        show_if_browsed(
+                            &webview,
+                            &payload.url,
+                            registry_for_load.active_page() == Some(page_id),
+                        );
+                    }
+                    emit_page_lifecycle(&webview, payload);
+                }
+            }
+        })
+        .on_document_title_changed(move |webview, title| {
+            let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+            note_browsing_visit(&webview, &url, &title);
+            emit_page_lifecycle(
+                &webview,
+                page_lifecycle_payload(page_id, PageLifecyclePhase::Title, url, title, false),
+            );
         });
 
     let webview = window
@@ -1321,12 +1878,60 @@ pub fn set_active_runtime_page(
                     viewport.height.max(1.0),
                 ))
                 .map_err(|e| e.to_string())?;
-            webview.show().map_err(|e| e.to_string())?;
+            let show = webview
+                .url()
+                .map(|url| is_browsed_document(url.as_str()))
+                .unwrap_or(true);
+            if show {
+                webview.show().map_err(|e| e.to_string())?;
+            } else {
+                webview.hide().map_err(|e| e.to_string())?;
+            }
         } else {
             webview.hide().map_err(|e| e.to_string())?;
         }
     }
     Ok(())
+}
+
+/// Show the page webview for a navigation that is leaving the new-tab page.
+/// A background tab stays hidden until the shell selects it.
+pub fn reveal_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    if registry.active_page() != Some(page_id) {
+        return Ok(());
+    }
+    let runtime_id = registry.page_runtime_id(page_id)?;
+    let webview = app
+        .get_webview(&runtime_id)
+        .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
+    webview.show().map_err(|e| e.to_string())
+}
+
+/// Hide the page webview when it is still a blank document.
+///
+/// A URL that cannot be read stays visible, so a real page is not covered by
+/// the new-tab page just because the webview refused to report its location.
+pub fn hide_unbrowsed_runtime_page(
+    app: &AppHandle,
+    registry: &BrowserRuntimeRegistry,
+    page_id: usize,
+) -> Result<(), String> {
+    let runtime_id = registry.page_runtime_id(page_id)?;
+    let webview = app
+        .get_webview(&runtime_id)
+        .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
+    let browsed = webview
+        .url()
+        .map(|url| is_browsed_document(url.as_str()))
+        .unwrap_or(true);
+    if browsed {
+        return Ok(());
+    }
+    webview.hide().map_err(|e| e.to_string())
 }
 
 pub fn sync_runtime_viewport(
@@ -1352,4 +1957,492 @@ pub fn sync_runtime_viewport(
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::missing_runtime_response;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn blank_documents_stay_off_the_page_webview() {
+        assert!(super::is_browsed_document("https://example.com/"));
+        assert!(super::is_browsed_document(" HTTP://Example.COM/a "));
+        assert!(!super::is_browsed_document("about:blank"));
+        assert!(!super::is_browsed_document(""));
+        assert!(!super::is_browsed_document("about:blankevil"));
+        assert!(!super::is_browsed_document("file:///tmp/x"));
+        assert!(!super::is_browsed_document("http:/example.com"));
+    }
+
+    #[test]
+    fn stop_menu_hook_tracks_only_the_active_page() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(1, "page-runtime-1".into());
+        registry.register_page(2, "page-runtime-2".into());
+        registry.set_active_page(Some(1));
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_hook = seen.clone();
+        registry.set_active_loading_hook(Arc::new(move |loading| {
+            seen_hook.lock().unwrap().push(loading);
+        }));
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false]);
+
+        registry.set_loading(2, true);
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[false],
+            "a background load must not enable Stop"
+        );
+
+        registry.set_active_page(Some(2));
+        registry.set_loading(2, true);
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false, true]);
+
+        registry.set_active_page(Some(1));
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false, true, false]);
+
+        registry.begin_allowed_navigation(1);
+        registry.begin_allowed_navigation(1);
+        assert_eq!(seen.lock().unwrap().as_slice(), &[false, true, false, true]);
+
+        registry.finish_loading(1);
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[false, true, false, true, false]
+        );
+
+        registry.set_loading(1, true);
+        registry.cancel_navigation(1, "refused");
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[false, true, false, true, false, true, false]
+        );
+
+        registry.set_loading(1, true);
+        registry.unregister_page(1);
+        assert_eq!(seen.lock().unwrap().last().copied(), Some(false));
+        assert!(!registry.active_page_is_loading());
+    }
+
+    #[test]
+    fn incomplete_action_acknowledgments_cannot_be_treated_as_dispatch_success() {
+        for payload in [
+            serde_json::Value::Null,
+            serde_json::json!({"ok": true}),
+            serde_json::json!({"state": "acknowledged"}),
+            serde_json::json!({"message": "claimed success"}),
+            serde_json::json!({"state": "unrecognized", "message": "claimed success"}),
+        ] {
+            assert!(serde_json::from_value::<super::TargetAcknowledgment>(payload).is_err());
+        }
+        let acknowledgment: super::TargetAcknowledgment = serde_json::from_value(
+            serde_json::json!({"state": "acknowledged", "message": "dispatch acknowledged"}),
+        )
+        .unwrap();
+        assert_eq!(
+            acknowledgment.state,
+            neurobrowser::capability::DispatchState::Acknowledged
+        );
+    }
+
+    #[test]
+    fn report_ownership_mismatch_does_not_consume_pending_request() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(1, "page-runtime-1".into());
+        registry.register_page(2, "page-runtime-2".into());
+        let (id, mut receiver) = registry.begin_request(1, "page-runtime-1").unwrap();
+        assert!(registry
+            .resolve_request(2, "page-runtime-2", &id, None, None)
+            .is_err());
+        assert!(registry
+            .resolve_request(1, "page-runtime-2", &id, None, None)
+            .is_err());
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        registry
+            .resolve_request(
+                1,
+                "page-runtime-1",
+                &id,
+                Some(serde_json::json!("correct")),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            receiver.try_recv().unwrap().unwrap(),
+            serde_json::json!("correct")
+        );
+        assert!(registry
+            .resolve_request(1, "page-runtime-1", &id, None, None)
+            .is_err());
+    }
+
+    #[test]
+    fn closing_page_drains_only_its_pending_requests() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(1, "page-runtime-1".into());
+        registry.register_page(2, "page-runtime-2".into());
+        let (_, mut first) = registry.begin_request(1, "page-runtime-1").unwrap();
+        let (second_id, mut second) = registry.begin_request(2, "page-runtime-2").unwrap();
+        registry.unregister_page(1);
+        assert!(first.try_recv().unwrap().unwrap_err().contains("closed"));
+        assert!(matches!(
+            second.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        registry
+            .resolve_request(
+                2,
+                "page-runtime-2",
+                &second_id,
+                Some(serde_json::json!(true)),
+                None,
+            )
+            .unwrap();
+        assert_eq!(second.try_recv().unwrap().unwrap(), serde_json::json!(true));
+        assert!(registry.begin_request(1, "page-runtime-1").is_err());
+    }
+
+    #[test]
+    fn missing_action_acknowledgment_warns_of_unknown_outcome() {
+        for error in [
+            "Timed out waiting for browser runtime response for page 1",
+            "Browser runtime response channel closed",
+        ] {
+            let message = missing_runtime_response(error, true);
+            assert!(message.contains("Action outcome is unknown"));
+            assert!(message.contains("may have executed"));
+            assert!(message.contains("Do not repeat it automatically"));
+            assert!(message.contains(error));
+            assert!(!message.contains("Action executed,"));
+            assert_eq!(missing_runtime_response(error, false), error);
+        }
+    }
+
+    #[test]
+    fn stop_clears_loading_and_reports_finish_unless_the_hop_was_refused() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = super::BrowserRuntimeRegistry::default();
+            registry.register_page(4, "page-runtime-4".into());
+            registry.set_loading(4, true);
+            let payload = super::stopped_page_payload(&registry, 4, "https://example.com/partial")
+                .expect("stop reports finish");
+            assert_eq!(payload.phase, super::PageLifecyclePhase::Finished);
+            assert_eq!(payload.url, "https://example.com/partial");
+            assert_eq!(payload.title, "");
+            super::wait_for_page_ready(&registry, 4, 200)
+                .await
+                .expect("waiter sees the stop");
+
+            registry.begin_allowed_navigation(4);
+            registry.cancel_navigation(4, "Refusing to navigate to disallowed scheme 'file:'");
+            assert!(
+                super::stopped_page_payload(&registry, 4, "https://example.com/blocked").is_none()
+            );
+            let error = super::wait_for_page_ready(&registry, 4, 200)
+                .await
+                .expect_err("refusal remains");
+            assert!(
+                error.contains("disallowed scheme"),
+                "unexpected wait error: {error}"
+            );
+        });
+    }
+
+    #[test]
+    fn cancelled_navigation_wait_returns_error_instead_of_success() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = super::BrowserRuntimeRegistry::default();
+            registry.register_page(4, "page-runtime-4".into());
+            registry.set_loading(4, true);
+            registry
+                .cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
+            // Finish must not erase the cancellation and make the wait succeed.
+            registry.finish_loading(4);
+            let error = super::wait_for_page_ready(&registry, 4, 500)
+                .await
+                .expect_err("cancelled hop");
+            assert!(
+                error.contains("disallowed scheme"),
+                "unexpected wait error: {error}"
+            );
+
+            registry.clear_navigation_cancel(4);
+            registry.set_loading(4, true);
+            registry.finish_loading(4);
+            super::wait_for_page_ready(&registry, 4, 500)
+                .await
+                .expect("finished load");
+        });
+    }
+
+    #[test]
+    fn page_lifecycle_payload_shapes_and_cancelled_finish() {
+        let started = super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Started,
+            "https://example.com/next",
+            "",
+            true,
+        )
+        .expect("started is not a success claim");
+        assert_eq!(
+            serde_json::to_value(&started).unwrap(),
+            serde_json::json!({
+                "pageId": 3,
+                "phase": "started",
+                "url": "https://example.com/next",
+                "title": ""
+            })
+        );
+
+        let finished = super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/next",
+            "Example",
+            false,
+        )
+        .expect("allowed finish");
+        assert_eq!(finished.phase, super::PageLifecyclePhase::Finished);
+        assert_eq!(
+            serde_json::to_value(&finished).unwrap(),
+            serde_json::json!({
+                "pageId": 3,
+                "phase": "finished",
+                "url": "https://example.com/next",
+                "title": "Example"
+            })
+        );
+        assert!(super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Finished,
+            "javascript:alert(1)",
+            "Example",
+            true,
+        )
+        .is_none());
+        assert!(
+            super::page_lifecycle_payload(
+                3,
+                super::PageLifecyclePhase::Finished,
+                "javascript:alert(1)",
+                "Example",
+                false,
+            )
+            .is_none(),
+            "a disallowed scheme is not a successful finish"
+        );
+        assert!(super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Finished,
+            "about:blank",
+            "",
+            false,
+        )
+        .is_some());
+
+        let title = super::page_lifecycle_payload(
+            3,
+            super::PageLifecyclePhase::Title,
+            "https://example.com/next",
+            "Renamed",
+            true,
+        )
+        .expect("title is not a success claim");
+        assert_eq!(
+            serde_json::to_value(&title).unwrap(),
+            serde_json::json!({
+                "pageId": 3,
+                "phase": "title",
+                "url": "https://example.com/next",
+                "title": "Renamed"
+            })
+        );
+    }
+
+    #[test]
+    fn netguard_cancel_blocks_finished_event_until_a_later_hop_is_allowed() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(4, "page-runtime-4".into());
+        registry.set_loading(4, true);
+        registry.cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
+        assert!(registry.suppress_finished_event(4));
+        assert!(super::page_lifecycle_payload(
+            4,
+            super::PageLifecyclePhase::Finished,
+            "javascript:alert(1)",
+            "",
+            registry.suppress_finished_event(4),
+        )
+        .is_none());
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            registry.finish_loading(4);
+            let error = super::wait_for_page_ready(&registry, 4, 200)
+                .await
+                .expect_err("cancelled hop");
+            assert!(error.contains("disallowed scheme"), "{error}");
+        });
+        // The waiter took the reason. The finished event stays suppressed.
+        assert!(registry.suppress_finished_event(4));
+        assert!(super::page_lifecycle_payload(
+            4,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/",
+            "Example",
+            registry.suppress_finished_event(4),
+        )
+        .is_none());
+
+        registry.note_navigation_allowed(4);
+        assert!(!registry.suppress_finished_event(4));
+        let allowed = super::page_lifecycle_payload(
+            4,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/",
+            "Example",
+            registry.suppress_finished_event(4),
+        )
+        .expect("later allowed hop");
+        assert_eq!(allowed.phase, super::PageLifecyclePhase::Finished);
+    }
+
+    #[test]
+    fn allowed_navigation_clears_an_earlier_refusal() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = super::BrowserRuntimeRegistry::default();
+            registry.register_page(5, "page-runtime-5".into());
+            // A page-initiated hop is refused while nobody is waiting.
+            registry.cancel_navigation(5, "Refusing to navigate to disallowed scheme 'file:'");
+            // The next hop is allowed and finishes; its wait must not read the old refusal.
+            registry.begin_allowed_navigation(5);
+            registry.finish_loading(5);
+            super::wait_for_page_ready(&registry, 5, 500)
+                .await
+                .expect("allowed load after an earlier refusal");
+
+            // A refusal during the current load is still reported.
+            registry.begin_allowed_navigation(5);
+            registry.cancel_navigation(5, "Refusing to navigate to disallowed scheme 'file:'");
+            registry.finish_loading(5);
+            let error = super::wait_for_page_ready(&registry, 5, 500)
+                .await
+                .expect_err("refused redirect");
+            assert!(
+                error.contains("disallowed scheme"),
+                "unexpected wait error: {error}"
+            );
+        });
+    }
+
+    #[test]
+    fn new_window_requests_keep_disposition_and_refuse_blocked_urls() {
+        let foreground = super::page_new_window_payload(2, "about:blank").expect("blank tab");
+        assert_eq!(foreground.page_id, 2);
+        assert_eq!(foreground.url, "");
+        assert_eq!(
+            foreground.disposition,
+            super::NewWindowDisposition::Foreground
+        );
+
+        let carrier =
+            "https://new-window.neurobrowser.invalid/?disposition=background&url=about%3Ablank";
+        let background = super::page_new_window_payload(2, carrier).expect("background blank");
+        assert_eq!(
+            background.disposition,
+            super::NewWindowDisposition::Background
+        );
+        assert_eq!(background.url, "");
+
+        assert!(super::page_new_window_payload(2, "javascript:alert(1)").is_none());
+        assert!(super::page_new_window_payload(2, "http://127.0.0.1/secret").is_none());
+        assert!(super::page_new_window_payload(
+            2,
+            "https://new-window.neurobrowser.invalid/?disposition=foreground&url=http%3A%2F%2F127.0.0.1%2F"
+        )
+        .is_none());
+        assert!(super::page_new_window_payload(
+            2,
+            "https://new-window.neurobrowser.invalid/?disposition=nope&url=about%3Ablank"
+        )
+        .is_none());
+
+        let blocked = super::blocked_popup_payload(
+            "page-runtime-4",
+            Some(&serde_json::json!({ "url": "about:blank" })),
+        )
+        .expect("blocked blank");
+        assert_eq!(blocked.page_id, 4);
+        assert_eq!(blocked.disposition, super::NewWindowDisposition::Blocked);
+        assert!(super::blocked_popup_payload(
+            "page-runtime-4",
+            Some(&serde_json::json!({ "url": "file:///tmp/x" })),
+        )
+        .is_none());
+        assert!(super::blocked_popup_payload("main", None).is_none());
+        assert_eq!(super::page_id_from_runtime_label("page-runtime-4"), Some(4));
+
+        let mut recent = super::NewWindowCoalescer::default();
+        assert!(recent.accept(
+            1,
+            "https://example.test/",
+            super::NewWindowDisposition::Foreground
+        ));
+        assert!(!recent.accept(
+            1,
+            "https://example.test/",
+            super::NewWindowDisposition::Foreground
+        ));
+        assert!(!recent.accept(
+            1,
+            "https://example.test/",
+            super::NewWindowDisposition::Background
+        ));
+    }
+
+    #[test]
+    fn init_script_asks_the_shell_for_tabs_without_a_new_command() {
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(super::NEW_WINDOW_CARRIER_HOST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(super::POPUP_BLOCKED_REQUEST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains("browser_runtime_report"));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains(crate::context_menu::CONTEXT_MENU_REQUEST));
+        assert!(super::RUNTIME_INIT_SCRIPT.contains("__NEUROBROWSER_TAKE_CONTEXT__"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("savePath"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("showSaveFilePicker"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("open_popup"));
+        assert!(!super::RUNTIME_INIT_SCRIPT.contains("create_popup"));
+        let image =
+            super::foreground_tab_payload(3, "https://8.8.8.8/pic.png").expect("public image");
+        assert_eq!(image.page_id, 3);
+        assert_eq!(image.url, "https://8.8.8.8/pic.png");
+        assert_eq!(image.disposition, super::NewWindowDisposition::Foreground);
+        assert!(super::foreground_tab_payload(3, "file:///tmp/pic.png").is_none());
+        assert!(super::foreground_tab_payload(3, "javascript:alert(1)").is_none());
+        assert!(super::foreground_tab_payload(
+            3,
+            "https://new-window.neurobrowser.invalid/?disposition=background&url=https://8.8.8.8/"
+        )
+        .is_none());
+    }
 }
