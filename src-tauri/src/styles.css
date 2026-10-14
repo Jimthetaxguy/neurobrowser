@@ -547,6 +547,53 @@ main {
   padding: 12px 18px;
 }
 
+.zoom-level {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.find-bar {
+  align-items: center;
+  background: rgba(10, 15, 28, 0.94);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.find-bar input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  min-width: 0;
+  padding: 6px 10px;
+  width: min(320px, 40vw);
+}
+
+.find-bar input:focus {
+  border-color: rgba(255, 165, 82, 0.7);
+  outline: none;
+}
+
+.find-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 6.5em;
+}
+
+.find-bar button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
 .appkit-shell .browser-toolbar {
   padding: 10px 12px;
 }

@@ -177,6 +177,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the adjust_page_zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-adjust-page-zoom",
+          "markdownDescription": "Enables the adjust_page_zoom command without any pre-configured scope."
+        },
+        {
           "description": "Enables the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "allow-browser-back",
@@ -235,6 +241,12 @@
           "type": "string",
           "const": "allow-explain-memory-result",
           "markdownDescription": "Enables the explain_memory_result command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the find_in_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-find-in-page",
+          "markdownDescription": "Enables the find_in_page command without any pre-configured scope."
         },
         {
           "description": "Enables the forget_memory command without any pre-configured scope.",
@@ -333,6 +345,12 @@
           "markdownDescription": "Enables the sync_browser_viewport command without any pre-configured scope."
         },
         {
+          "description": "Denies the adjust_page_zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-adjust-page-zoom",
+          "markdownDescription": "Denies the adjust_page_zoom command without any pre-configured scope."
+        },
+        {
           "description": "Denies the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "deny-browser-back",
@@ -391,6 +409,12 @@
           "type": "string",
           "const": "deny-explain-memory-result",
           "markdownDescription": "Denies the explain_memory_result command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the find_in_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-find-in-page",
+          "markdownDescription": "Denies the find_in_page command without any pre-configured scope."
         },
         {
           "description": "Denies the forget_memory command without any pre-configured scope.",

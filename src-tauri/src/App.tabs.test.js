@@ -31,8 +31,16 @@ async function withApp(check, {
   history = null,
   keepStartFocus = false,
   memory = null,
+  findInPage = null,
+  adjustPageZoom = null,
 } = {}) {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://shell.example" });
+  for (const name of ["Element", "HTMLElement", "HTMLInputElement"]) {
+    const proto = dom.window[name]?.prototype;
+    if (!proto || typeof proto.attachEvent === "function") continue;
+    proto.attachEvent = () => {};
+    proto.detachEvent = () => {};
+  }
   const globals = {
     window: dom.window,
     document: dom.window.document,
@@ -103,6 +111,8 @@ async function withApp(check, {
     },
     openDownload: async (id) => { calls.push(["open-download", id]); },
     showDownloadInFolder: async (id) => { calls.push(["show-download", id]); },
+    ...(typeof findInPage === "function" ? { findInPage } : {}),
+    ...(typeof adjustPageZoom === "function" ? { adjustPageZoom } : {}),
     ...(history == null ? {} : {
       searchBrowsingHistory: async (query, limit) => {
         calls.push(["history", query, limit]);
@@ -164,11 +174,6 @@ async function withApp(check, {
     });
   };
   const root = createRoot(document.getElementById("root"));
-  const elementProto = dom.window.HTMLElement.prototype;
-  if (typeof elementProto.attachEvent !== "function") {
-    elementProto.attachEvent = () => {};
-    elementProto.detachEvent = () => {};
-  }
   const click = async (element) => {
     assert.ok(element, "expected a mounted control");
     await act(async () => { element.click(); });
@@ -1623,5 +1628,66 @@ test("downloads show progress, done, and failed, and a finished file can be open
     const failed = document.querySelector(".downloads [data-phase='failed']");
     assert.match(failed.textContent, /Failed: Refusing to fetch internal\/loopback address/);
     assert.equal(failed.querySelector("button"), null);
+  });
+});
+
+test("find in page shows the match count and zoom shortcuts change the page", async () => {
+  const finds = [];
+  const zooms = [];
+  await withApp(async ({ click, dispatchLifecycle, dispatchMenu, document, keydown }) => {
+    assert.equal(document.querySelector(".zoom-level").textContent, "100%");
+    assert.equal(document.querySelector(".find-bar"), null);
+
+    await keydown("f", { meta: true });
+    const input = document.querySelector(".find-bar input");
+    assert.ok(input);
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      setter.call(input, "cats");
+      input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(document.querySelector(".find-count").textContent, "2 of 4");
+    assert.deepEqual(finds.at(-1).slice(2), ["cats", "start"]);
+
+    await click(document.querySelector("[aria-label='Next match']"));
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(document.querySelector(".find-count").textContent, "3 of 4");
+    assert.equal(finds.at(-1)[3], "next");
+
+    await dispatchMenu("find-previous");
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(finds.at(-1)[3], "previous");
+
+    await keydown("=", { meta: true });
+    await keydown("-", { ctrl: true });
+    await keydown("0", { meta: true });
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(zooms, ["in", "out", "reset"]);
+    assert.equal(document.querySelector(".zoom-level").textContent, "100%");
+
+    await dispatchLifecycle({ pageId: 0, phase: "finished", url: "https://docs.example/guide", title: "Guide" });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(zooms.at(-1), "get");
+    assert.equal(document.querySelector(".zoom-level").textContent, "150%");
+
+    await keydown("Escape");
+    assert.equal(document.querySelector(".find-bar"), null);
+    assert.equal(finds.at(-1)[2], "");
+  }, {
+    findInPage: async (sessionId, pageId, query, direction) => {
+      finds.push([sessionId, pageId, query, direction]);
+      if (!query) return { total: 0, current: 0 };
+      if (direction === "next") return { total: 4, current: 3 };
+      if (direction === "previous") return { total: 4, current: 2 };
+      return { total: 4, current: 2 };
+    },
+    adjustPageZoom: async (sessionId, pageId, action) => {
+      zooms.push(action);
+      if (action === "get") return { zoom: 1.5, percent: 150 };
+      if (action === "in") return { zoom: 1.1, percent: 110 };
+      if (action === "out") return { zoom: 0.9, percent: 90 };
+      return { zoom: 1, percent: 100 };
+    },
   });
 });

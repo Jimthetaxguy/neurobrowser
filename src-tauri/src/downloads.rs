@@ -50,6 +50,8 @@ pub struct DownloadUpdate {
 struct Entry {
     id: String,
     url: String,
+    /// WebKit or wry download id, when the engine reported one.
+    engine_id: Option<String>,
     filename: String,
     path: PathBuf,
     root: PathBuf,
@@ -143,6 +145,7 @@ impl DownloadBook {
         let entry = Entry {
             id,
             url: url.to_string(),
+            engine_id: None,
             filename,
             path: path.clone(),
             root: root.to_path_buf(),
@@ -159,52 +162,43 @@ impl DownloadBook {
         }
     }
 
-    /// WebKit finished a download and reported `reported_url`.
+    /// Remember a WebKit or wry download id for an in-progress row.
     ///
-    /// That address is the one netguard judges. The address checked when the
-    /// download started is not reused for this decision. The row is the
-    /// in-progress download started for this address. When WebKit reports a
-    /// different address, the oldest download still in progress is the one
-    /// that finished. A blocked address deletes the partial file. macOS does
-    /// not report the saved path, so the path reserved at the start is the
-    /// one that counts.
-    pub fn finish(&self, reported_url: &str, success: bool) -> Option<DownloadUpdate> {
-        let started_url = {
-            let inner = self.lock();
-            if inner.inflight.contains_key(reported_url) {
-                reported_url.to_string()
-            } else {
-                oldest_inflight_url(&inner)?
-            }
-        };
-        self.finish_reported(&started_url, reported_url, success)
-    }
-
-    /// Finish the download that started at `started_url`, judging `reported_url`.
-    ///
-    /// `reported_url` is the address WebKit put on the finished event. It is
-    /// the only address this check consults. A blocked address is cancelled,
-    /// which deletes the partial file.
-    fn finish_reported(
-        &self,
-        started_url: &str,
-        reported_url: &str,
-        success: bool,
-    ) -> Option<DownloadUpdate> {
-        if let Some(reason) = rejection_for(reported_url) {
-            let id = {
-                let mut inner = self.lock();
-                let queue = inner.inflight.get_mut(started_url)?;
-                let id = queue.pop_front()?;
-                if queue.is_empty() {
-                    inner.inflight.remove(started_url);
-                }
-                id
-            };
-            return Some(self.cancel(&id, reason));
+    /// The id is the engine's identity for that download, not the shell's
+    /// `dl-N` id. A later finish can select the row with it.
+    pub fn remember_engine_id(&self, id: &str, engine_id: &str) -> bool {
+        let engine_id = engine_id.trim();
+        if engine_id.is_empty() {
+            return false;
         }
         let mut inner = self.lock();
-        apply_finish(&mut inner, started_url, success)
+        let Some(entry) = inner.by_id.get_mut(id) else {
+            return false;
+        };
+        if entry.phase != DownloadPhase::Progress {
+            return false;
+        }
+        entry.engine_id = Some(engine_id.to_string());
+        true
+    }
+
+    /// WebKit finished a download.
+    ///
+    /// The row is chosen from what the engine actually reported. A WebKit or
+    /// wry download id wins when one was stored. Otherwise a destination path
+    /// selects the reserved file. When neither is available, the address has
+    /// to match the address the download started with, and the oldest
+    /// in-progress row for that exact address is the one that finishes.
+    /// Nothing is marked when none of those match. The reported address is
+    /// still judged by netguard: a blocked address cancels the matched row
+    /// and deletes the partial file.
+    pub fn finish(&self, report: DownloadFinish<'_>) -> Option<DownloadUpdate> {
+        let mut inner = self.lock();
+        let id = locate(&inner, &report)?;
+        if let Some(reason) = rejection_for(report.url) {
+            return Some(cancel_in(&mut inner, &id, reason));
+        }
+        apply_finish_id(&mut inner, &id, report.success)
     }
 
     /// Mark an in-progress download failed and delete any partial file.
@@ -273,6 +267,7 @@ impl DownloadBook {
         let entry = Entry {
             id,
             url: url.to_string(),
+            engine_id: None,
             filename: safe_download_filename(suggested),
             path: root.join("download"),
             root: root.to_path_buf(),
@@ -291,44 +286,78 @@ impl DownloadBook {
     }
 }
 
+/// What WebKit reported when a download finished.
+pub struct DownloadFinish<'a> {
+    pub url: &'a str,
+    pub success: bool,
+    /// WebKit or wry download id, when the engine has one.
+    pub engine_id: Option<&'a str>,
+    /// Destination path, when the engine reports where the file went.
+    pub path: Option<&'a Path>,
+}
+
 fn rejection_for(url: &str) -> Option<String> {
     neurobrowser::netguard::blocked_reason(url).map(|reason| reason.to_string())
 }
 
-fn oldest_inflight_url(inner: &BookInner) -> Option<String> {
-    let id = inner
-        .inflight
-        .values()
-        .filter_map(|queue| queue.front())
-        .min_by_key(|id| id_number(id))?;
-    inner.by_id.get(id).map(|entry| entry.url.clone())
-}
-
-fn id_number(id: &str) -> u64 {
-    id.strip_prefix("dl-")
-        .and_then(|number| number.parse().ok())
-        .unwrap_or(0)
-}
-
-fn apply_finish(inner: &mut BookInner, started_url: &str, success: bool) -> Option<DownloadUpdate> {
-    let id = {
-        let queue = inner.inflight.get_mut(started_url)?;
-        let id = queue.pop_front()?;
-        if queue.is_empty() {
-            inner.inflight.remove(started_url);
-        }
-        id
-    };
-    let entry = inner.by_id.get_mut(&id)?;
-    if entry.phase == DownloadPhase::Failed {
-        return Some(entry.update());
+fn locate(inner: &BookInner, report: &DownloadFinish<'_>) -> Option<String> {
+    if let Some(engine_id) = report
+        .engine_id
+        .map(str::trim)
+        .filter(|engine_id| !engine_id.is_empty())
+    {
+        return inner
+            .by_id
+            .values()
+            .find(|entry| {
+                entry.phase == DownloadPhase::Progress
+                    && entry.engine_id.as_deref() == Some(engine_id)
+            })
+            .map(|entry| entry.id.clone());
     }
-    if success && entry.path.is_file() {
-        if is_regular_file(&entry.path) {
-            if let Err(error) = apply_download_quarantine(&entry.path) {
-                return Some(fail_entry(entry, error));
-            }
+    if let Some(path) = report.path.filter(|path| !path.as_os_str().is_empty()) {
+        return inner
+            .by_id
+            .values()
+            .find(|entry| entry.phase == DownloadPhase::Progress && paths_match(&entry.path, path))
+            .map(|entry| entry.id.clone());
+    }
+    inner
+        .inflight
+        .get(report.url)
+        .and_then(|queue| queue.front().cloned())
+}
+
+fn paths_match(reserved: &Path, reported: &Path) -> bool {
+    if reserved == reported {
+        return true;
+    }
+    match (
+        std::fs::canonicalize(reserved),
+        std::fs::canonicalize(reported),
+    ) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn apply_finish_id(inner: &mut BookInner, id: &str, success: bool) -> Option<DownloadUpdate> {
+    let url = inner.by_id.get(id)?.url.clone();
+    let quarantine_error = {
+        let entry = inner.by_id.get(id)?;
+        if entry.phase != DownloadPhase::Progress {
+            return None;
         }
+        if success && entry.path.is_file() && is_regular_file(&entry.path) {
+            apply_download_quarantine(&entry.path).err()
+        } else {
+            None
+        }
+    };
+    let entry = inner.by_id.get_mut(id)?;
+    let update = if let Some(error) = quarantine_error {
+        fail_entry(entry, error)
+    } else if success && entry.path.is_file() {
         let len = std::fs::metadata(&entry.path)
             .map(|meta| meta.len())
             .unwrap_or(entry.received);
@@ -336,14 +365,18 @@ fn apply_finish(inner: &mut BookInner, started_url: &str, success: bool) -> Opti
         entry.received = len;
         entry.total = Some(len);
         entry.error = None;
+        entry.update()
     } else if success {
         entry.phase = DownloadPhase::Failed;
         entry.error = Some("The download finished without a file".into());
+        entry.update()
     } else {
         entry.phase = DownloadPhase::Failed;
         entry.error = Some("The download did not finish".into());
-    }
-    Some(entry.update())
+        entry.update()
+    };
+    dequeue(inner, &url, id);
+    Some(update)
 }
 
 fn cancel_in(inner: &mut BookInner, id: &str, error: String) -> DownloadUpdate {
@@ -722,10 +755,12 @@ fn watch_progress<R: Runtime>(
 /// request path returns as soon as the destination is chosen. It does not
 /// follow redirects with its own request and does not wait on another thread.
 /// When the download finishes, netguard judges the address on that event.
-/// wry reports the original request address on macOS and Linux, and
-/// `DownloadOperation.Uri` on Windows. A blocked address cancels the row and
-/// deletes the partial file. Page navigations wry does expose are already
-/// refused by the webview navigation hook.
+/// The row is the one whose WebKit id or destination path matches, when the
+/// engine reported either. Otherwise the address has to match exactly. A
+/// different address does not pick some other in-progress download. A blocked
+/// address cancels the matched row and deletes the partial file. Page
+/// navigations wry does expose are already refused by the webview navigation
+/// hook.
 pub fn handle_download_event<R: Runtime>(webview: Webview<R>, event: DownloadEvent<'_>) -> bool {
     let Some(state) = webview.try_state::<crate::AppState>() else {
         return false;
@@ -752,8 +787,16 @@ pub fn handle_download_event<R: Runtime>(webview: Webview<R>, event: DownloadEve
             watch_progress(webview.clone(), book, start.update.id, path);
             true
         }
-        DownloadEvent::Finished { url, success, .. } => {
-            if let Some(update) = book.finish(url.as_str(), success) {
+        DownloadEvent::Finished { url, path, success } => {
+            // wry does not put a download id on this event. The destination
+            // path is set on Windows and Linux and is always empty on macOS,
+            // where the original request address is what identifies the row.
+            if let Some(update) = book.finish(DownloadFinish {
+                url: url.as_str(),
+                success,
+                engine_id: None,
+                path: path.as_deref(),
+            }) {
                 emit_download(&webview, &update);
             }
             true
@@ -807,6 +850,15 @@ mod tests {
     }
 
     static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn ended(book: &DownloadBook, url: &str, success: bool) -> Option<DownloadUpdate> {
+        book.finish(DownloadFinish {
+            url,
+            success,
+            engine_id: None,
+            path: None,
+        })
+    }
 
     fn temp_root() -> PathBuf {
         let n = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -888,7 +940,7 @@ mod tests {
         assert!(book.path_for_action("dl-1").is_err());
 
         fs::write(&path, b"pdf-bytes").unwrap();
-        let done = book.finish(url, true).unwrap();
+        let done = ended(&book, url, true).unwrap();
         assert_eq!(done.phase, DownloadPhase::Done);
         assert_eq!(done.received, b"pdf-bytes".len() as u64);
         assert_eq!(done.total, Some(b"pdf-bytes".len() as u64));
@@ -907,7 +959,7 @@ mod tests {
         let url = "https://93.184.216.34/empty.bin";
         let start = book.begin(&root, url, "empty.bin");
         assert!(start.path.is_some());
-        let finished = book.finish(url, true).unwrap();
+        let finished = ended(&book, url, true).unwrap();
         assert_eq!(finished.phase, DownloadPhase::Failed);
         assert!(book.path_for_action(&finished.id).is_err());
 
@@ -917,7 +969,7 @@ mod tests {
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("/etc/passwd", &path).unwrap();
-            let done = book.finish(url, true).unwrap();
+            let done = ended(&book, url, true).unwrap();
             assert_eq!(done.phase, DownloadPhase::Done);
             assert!(book.path_for_action(&done.id).is_err());
         }
@@ -932,11 +984,11 @@ mod tests {
         let first = book.begin(&root, url, "twice.txt").path.unwrap();
         let second = book.begin(&root, url, "twice.txt").path.unwrap();
         fs::write(&second, b"two").unwrap();
-        let failed = book.finish(url, false).unwrap();
+        let failed = ended(&book, url, false).unwrap();
         assert_eq!(failed.filename, "twice.txt");
         assert_eq!(failed.phase, DownloadPhase::Failed);
         fs::write(&first, b"one").unwrap();
-        let done = book.finish(url, true).unwrap();
+        let done = ended(&book, url, true).unwrap();
         assert_eq!(done.filename, "twice (1).txt");
         assert_eq!(done.phase, DownloadPhase::Done);
         let _ = fs::remove_dir_all(root);
@@ -1019,9 +1071,16 @@ mod tests {
         let start = book.begin(&root, start_url, "secret.bin");
         let path = start.path.clone().unwrap();
         fs::write(&path, b"partial").unwrap();
+        assert!(book.remember_engine_id(&start.update.id, "wk-metadata"));
         let failed = book
-            .finish_reported(start_url, "http://169.254.169.254/latest/meta-data/", true)
+            .finish(DownloadFinish {
+                url: "http://169.254.169.254/latest/meta-data/",
+                success: true,
+                engine_id: Some("wk-metadata"),
+                path: None,
+            })
             .expect("reported metadata address");
+        assert_eq!(failed.id, start.update.id);
         assert_eq!(failed.phase, DownloadPhase::Failed);
         let error = failed.error.expect("block reason");
         assert!(
@@ -1029,16 +1088,22 @@ mod tests {
             "{error}"
         );
         assert!(!path.exists());
-        assert!(book.finish(start_url, true).is_none());
+        assert!(ended(&book, start_url, true).is_none());
         assert!(book.path_for_action(&start.update.id).is_err());
 
         let later = "https://93.184.216.34/later";
         let start = book.begin(&root, later, "later.bin");
-        let path = start.path.unwrap();
+        let path = start.path.clone().unwrap();
         fs::write(&path, b"secret").unwrap();
         let failed = book
-            .finish_reported(later, "http://127.0.0.1/secret", true)
+            .finish(DownloadFinish {
+                url: "http://127.0.0.1/secret",
+                success: true,
+                engine_id: None,
+                path: Some(&path),
+            })
             .unwrap();
+        assert_eq!(failed.id, start.update.id);
         assert_eq!(failed.phase, DownloadPhase::Failed);
         assert!(failed.error.unwrap().contains("127.0.0.1"));
         assert!(!path.exists());
@@ -1046,10 +1111,16 @@ mod tests {
 
         let file_url = "https://93.184.216.34/passwd";
         let start = book.begin(&root, file_url, "passwd");
-        let path = start.path.unwrap();
+        let path = start.path.clone().unwrap();
         fs::write(&path, b"partial").unwrap();
+        assert!(book.remember_engine_id(&start.update.id, "wk-file"));
         let failed = book
-            .finish_reported(file_url, "file:///etc/passwd", true)
+            .finish(DownloadFinish {
+                url: "file:///etc/passwd",
+                success: true,
+                engine_id: Some("wk-file"),
+                path: Some(&path),
+            })
             .unwrap();
         assert_eq!(failed.phase, DownloadPhase::Failed);
         assert!(failed.error.unwrap().contains("file"));
@@ -1058,50 +1129,81 @@ mod tests {
     }
 
     #[test]
-    fn a_finished_event_url_that_differs_from_the_start_still_deletes_the_partial() {
+    fn a_different_url_without_an_id_or_path_does_not_mark_a_download() {
         let root = temp_root();
         let book = DownloadBook::default();
         let start_url = "https://93.184.216.34/start";
         let start = book.begin(&root, start_url, "secret.bin");
         let path = start.path.unwrap();
         fs::write(&path, b"partial").unwrap();
-        let failed = book
-            .finish("http://169.254.169.254/latest/meta-data/", true)
-            .expect("in-progress download");
-        assert_eq!(failed.id, start.update.id);
-        assert_eq!(failed.phase, DownloadPhase::Failed);
-        assert!(!path.exists());
-        assert!(book.finish(start_url, true).is_none());
-        assert!(!book.is_in_progress(&failed.id));
+        assert!(ended(&book, "http://169.254.169.254/latest/meta-data/", true).is_none());
+        assert!(path.is_file());
+        assert!(book.is_in_progress(&start.update.id));
+        let done = ended(&book, start_url, true).unwrap();
+        assert_eq!(done.id, start.update.id);
+        assert_eq!(done.phase, DownloadPhase::Done);
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn a_reported_url_matching_one_download_leaves_the_other_in_progress() {
+    fn two_concurrent_downloads_are_not_marked_by_the_other_url() {
         let root = temp_root();
         let book = DownloadBook::default();
         let first_url = "https://93.184.216.34/first";
         let second_url = "https://93.184.216.34/second";
         let first = book.begin(&root, first_url, "first.bin");
-        let first_path = first.path.unwrap();
+        let first_path = first.path.clone().unwrap();
         let second = book.begin(&root, second_url, "second.bin");
-        let second_path = second.path.unwrap();
+        let second_path = second.path.clone().unwrap();
         fs::write(&first_path, b"one").unwrap();
         fs::write(&second_path, b"two").unwrap();
+        assert!(book.remember_engine_id(&first.update.id, "wk-first"));
+        assert!(book.remember_engine_id(&second.update.id, "wk-second"));
 
-        let done = book.finish(second_url, true).unwrap();
+        assert!(ended(&book, "https://93.184.216.34/neither", true).is_none());
+        assert!(book.is_in_progress(&first.update.id));
+        assert!(book.is_in_progress(&second.update.id));
+        assert!(first_path.is_file());
+        assert!(second_path.is_file());
+
+        let missed = book.finish(DownloadFinish {
+            url: second_url,
+            success: true,
+            engine_id: None,
+            path: Some(Path::new("/tmp/not-the-download")),
+        });
+        assert!(missed.is_none());
+        assert!(book.is_in_progress(&first.update.id));
+        assert!(book.is_in_progress(&second.update.id));
+
+        let done = book
+            .finish(DownloadFinish {
+                url: "https://93.184.216.34/renamed.pdf",
+                success: true,
+                engine_id: Some("wk-second"),
+                path: None,
+            })
+            .unwrap();
         assert_eq!(done.id, second.update.id);
         assert_eq!(done.phase, DownloadPhase::Done);
         assert!(book.is_in_progress(&first.update.id));
         assert!(second_path.is_file());
 
-        let failed = book.finish("http://127.0.0.1/secret", true).unwrap();
+        let failed = book
+            .finish(DownloadFinish {
+                url: "http://127.0.0.1/secret",
+                success: true,
+                engine_id: None,
+                path: Some(&first_path),
+            })
+            .unwrap();
         assert_eq!(failed.id, first.update.id);
         assert_eq!(failed.phase, DownloadPhase::Failed);
         assert!(failed.error.unwrap().contains("127.0.0.1"));
         assert!(!first_path.exists());
         assert!(second_path.is_file());
-        assert!(book.finish(first_url, true).is_none());
+        assert!(ended(&book, first_url, true).is_none());
+        assert!(!book.is_in_progress(&second.update.id));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1112,9 +1214,17 @@ mod tests {
         let start_url = "https://93.184.216.34/start";
         let reported = "https://93.184.216.34/files/report.pdf";
         let start = book.begin(&root, start_url, "report.pdf");
-        let path = start.path.unwrap();
+        let path = start.path.clone().unwrap();
         fs::write(&path, b"%PDF").unwrap();
-        let done = book.finish_reported(start_url, reported, true).unwrap();
+        assert!(book.remember_engine_id(&start.update.id, "wk-report"));
+        let done = book
+            .finish(DownloadFinish {
+                url: reported,
+                success: true,
+                engine_id: Some("wk-report"),
+                path: None,
+            })
+            .unwrap();
         assert_eq!(done.phase, DownloadPhase::Done);
         assert!(path.is_file());
         #[cfg(target_os = "macos")]
@@ -1125,9 +1235,16 @@ mod tests {
         }
 
         let start = book.begin(&root, start_url, "other.pdf");
-        let path = start.path.unwrap();
+        let path = start.path.clone().unwrap();
         fs::write(&path, b"%PDF").unwrap();
-        let done = book.finish(reported, true).unwrap();
+        let done = book
+            .finish(DownloadFinish {
+                url: reported,
+                success: true,
+                engine_id: None,
+                path: Some(&path),
+            })
+            .unwrap();
         assert_eq!(done.id, start.update.id);
         assert_eq!(done.phase, DownloadPhase::Done);
         assert!(path.is_file());

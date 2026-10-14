@@ -98,6 +98,12 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     async showDownloadInFolder(id) {
       return invoke("show_download_in_folder", { id });
     },
+    async findInPage(sessionId, pageId, query, direction) {
+      return invoke("find_in_page", { sessionId, pageId, query, direction });
+    },
+    async adjustPageZoom(sessionId, pageId, action) {
+      return invoke("adjust_page_zoom", { sessionId, pageId, action });
+    },
     onMenuCommand(callback) {
       return bindMenuCommand(listen, callback);
     },

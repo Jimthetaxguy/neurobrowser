@@ -1,5 +1,7 @@
 mod downloads;
+mod find_page;
 mod runtime;
+mod zoom;
 
 use downloads::DownloadBook;
 use neuro_memory::{
@@ -42,6 +44,10 @@ struct AppState {
     history: Arc<HistoryStore>,
     /// Files this process has accepted into the user's Downloads folder.
     downloads: Arc<DownloadBook>,
+    /// Zoom levels remembered per site (scheme, host, and port).
+    zoom: Arc<zoom::SiteZoomMemory>,
+    /// Which find-in-page match each page last showed.
+    find: Arc<find_page::PageFind>,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
 }
 
@@ -336,7 +342,16 @@ fn set_active_page(
     page_id: usize,
 ) -> Result<(), String> {
     state.session_manager.get_page(&session_id, page_id)?;
-    set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)
+    set_active_runtime_page(&app, state.runtimes.as_ref(), page_id)?;
+    if let Ok((_, browser)) = browser_for_page(app, state.inner(), &session_id, page_id) {
+        if let Ok(url) = browser.page_url() {
+            let factor = state.zoom.factor_for_url(&url);
+            if let Err(error) = browser.set_page_zoom(factor) {
+                tracing::warn!("page zoom was not applied while switching tabs: {error}");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -603,6 +618,7 @@ fn close_page(
         .lock()
         .map_err(|e| e.to_string())?
         .retain(|_, pending| pending.session_id != session_id || pending.page_id != page_id);
+    state.find.clear(page_id);
     close_runtime_page(&app, state.runtimes.as_ref(), page_id)
 }
 
@@ -635,6 +651,57 @@ fn open_download(state: State<'_, AppState>, id: String) -> Result<(), String> {
 #[tauri::command]
 fn show_download_in_folder(state: State<'_, AppState>, id: String) -> Result<(), String> {
     downloads::show_download_in_folder(&state.downloads, &id)
+}
+
+#[tauri::command]
+fn adjust_page_zoom(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    action: String,
+) -> Result<zoom::ZoomStatus, String> {
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let url = browser.page_url().unwrap_or_default();
+    let site = zoom::site_key(&url);
+    let current = site
+        .as_deref()
+        .map(|key| state.zoom.get(key))
+        .unwrap_or(1.0);
+    let next = match action.as_str() {
+        "get" => current,
+        "in" => zoom::step_zoom(current, 1),
+        "out" => zoom::step_zoom(current, -1),
+        "reset" => 1.0,
+        _ => return Err("Unknown zoom action".into()),
+    };
+    if action != "get" {
+        browser.set_page_zoom(next)?;
+        if let Some(site) = site.as_deref() {
+            state.zoom.remember(site, next);
+        }
+    }
+    Ok(zoom::zoom_status(next))
+}
+
+#[tauri::command]
+async fn find_in_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    page_id: usize,
+    query: String,
+    direction: String,
+) -> Result<find_page::FindHit, String> {
+    let direction = find_page::FindDirection::parse(&direction).ok_or("Unknown find direction")?;
+    if query.chars().count() > 200 {
+        return Err("Find text is too long".into());
+    }
+    let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+    let index = state.find.index_for(page_id, &query, direction);
+    let hit = browser.find_in_page(&query, index).await?;
+    state.find.note(page_id, &query, &hit);
+    Ok(hit)
 }
 
 #[tauri::command]
@@ -855,6 +922,15 @@ fn record_browsing_visit(store: &HistoryStore, url: &str, title: &str) {
     }
 }
 
+fn open_zoom(app: &tauri::App) -> Result<Arc<zoom::SiteZoomMemory>, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("site-zoom.json");
+    Ok(Arc::new(zoom::SiteZoomMemory::open(path)))
+}
+
 fn open_history(app: &tauri::App) -> Result<Arc<HistoryStore>, String> {
     let dir = app
         .path()
@@ -966,6 +1042,7 @@ pub const MENU_COMMAND_EVENT: &str = "menu-command";
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MenuSection {
     File,
+    Edit,
     View,
     History,
 }
@@ -1002,6 +1079,27 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
         enabled: true,
     },
     MenuShortcut {
+        section: MenuSection::Edit,
+        id: "find",
+        label: "Find in Page",
+        accelerator: "CmdOrCtrl+F",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::Edit,
+        id: "find-next",
+        label: "Find Next",
+        accelerator: "CmdOrCtrl+G",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::Edit,
+        id: "find-previous",
+        label: "Find Previous",
+        accelerator: "CmdOrCtrl+Shift+G",
+        enabled: true,
+    },
+    MenuShortcut {
         section: MenuSection::View,
         id: "reload",
         label: "Reload",
@@ -1014,6 +1112,34 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
         label: "Stop",
         accelerator: "Escape",
         enabled: false,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-in",
+        label: "Zoom In",
+        accelerator: "CmdOrCtrl+=",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-in-plus",
+        label: "Zoom In",
+        accelerator: "CmdOrCtrl+Shift+=",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-out",
+        label: "Zoom Out",
+        accelerator: "CmdOrCtrl+-",
+        enabled: true,
+    },
+    MenuShortcut {
+        section: MenuSection::View,
+        id: "zoom-reset",
+        label: "Actual Size",
+        accelerator: "CmdOrCtrl+0",
+        enabled: true,
     },
     MenuShortcut {
         section: MenuSection::View,
@@ -1131,6 +1257,12 @@ fn menu_command(id: &str) -> Option<&'static str> {
         "stop" => Some("stop"),
         "back" | "back-alt" => Some("back"),
         "forward" | "forward-alt" => Some("forward"),
+        "find" => Some("find"),
+        "find-next" => Some("find-next"),
+        "find-previous" => Some("find-previous"),
+        "zoom-in" | "zoom-in-plus" => Some("zoom-in"),
+        "zoom-out" => Some("zoom-out"),
+        "zoom-reset" => Some("zoom-reset"),
         "next-tab" => Some("next-tab"),
         "previous-tab" => Some("previous-tab"),
         "select-tab-1" => Some("select-tab-1"),
@@ -1243,24 +1375,29 @@ fn browser_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<(Menu<R
     let select_all = PredefinedMenuItem::select_all(manager, None)?;
     let edit_history_sep = PredefinedMenuItem::separator(manager)?;
     let edit_select_sep = PredefinedMenuItem::separator(manager)?;
-    let edit = Submenu::with_items(
-        manager,
-        "Edit",
-        true,
-        &[
-            &undo,
-            &redo,
-            &edit_history_sep,
-            &cut,
-            &copy,
-            &paste,
-            &edit_select_sep,
-            &select_all,
-        ],
-    )?;
+    let find_sep = PredefinedMenuItem::separator(manager)?;
+    let find_items = section_items(manager, MenuSection::Edit)?;
+    let edit = Submenu::new(manager, "Edit", true)?;
+    edit.append(&undo)?;
+    edit.append(&redo)?;
+    edit.append(&edit_history_sep)?;
+    edit.append(&cut)?;
+    edit.append(&copy)?;
+    edit.append(&paste)?;
+    edit.append(&edit_select_sep)?;
+    edit.append(&select_all)?;
+    edit.append(&find_sep)?;
+    for item in &find_items {
+        edit.append(item)?;
+    }
 
     let view = Submenu::new(manager, "View", true)?;
-    append_with_separator_before(&view, manager, &view_items, &["next-tab", "select-tab-1"])?;
+    append_with_separator_before(
+        &view,
+        manager,
+        &view_items,
+        &["zoom-in", "next-tab", "select-tab-1"],
+    )?;
 
     let history = Submenu::new(manager, "History", true)?;
     append_with_separator_before(&history, manager, &history_items, &["back-alt"])?;
@@ -1329,6 +1466,9 @@ fn main() {
             let history = open_history(app).map_err(|err| -> Box<dyn std::error::Error> {
                 Box::new(std::io::Error::other(err))
             })?;
+            let zoom = open_zoom(app).map_err(|err| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::other(err))
+            })?;
             tracing::info!("memory data dir: {}", memory.data_dir().display());
             app.manage(AppState {
                 session_manager,
@@ -1338,6 +1478,8 @@ fn main() {
                 capture_policy: tokio::sync::Mutex::new(CapturePolicy::default()),
                 history,
                 downloads: Arc::new(DownloadBook::default()),
+                zoom,
+                find: Arc::new(find_page::PageFind::default()),
                 pending_approvals: Mutex::new(HashMap::new()),
             });
             Ok(())
@@ -1357,6 +1499,8 @@ fn main() {
             get_page_snapshot,
             get_page_observation,
             execute_browser_tool,
+            adjust_page_zoom,
+            find_in_page,
             navigate,
             open_download,
             search_browsing_history,
@@ -1402,13 +1546,13 @@ mod tests {
             let command = menu_command(shortcut.id).unwrap_or_else(|| {
                 panic!("{} is not forwarded to the control webview", shortcut.id)
             });
-            if shortcut.id == "back-alt" {
-                assert_eq!(command, "back");
-            } else if shortcut.id == "forward-alt" {
-                assert_eq!(command, "forward");
-            } else {
-                assert_eq!(command, shortcut.id);
-            }
+            let expected = match shortcut.id {
+                "back-alt" => "back",
+                "forward-alt" => "forward",
+                "zoom-in-plus" => "zoom-in",
+                id => id,
+            };
+            assert_eq!(command, expected);
         }
         assert!(
             !accelerators

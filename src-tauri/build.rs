@@ -1,6 +1,7 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "adjust_page_zoom",
             "browser_back",
             "browser_forward",
             "browser_reload",
@@ -10,6 +11,7 @@ fn main() {
             "create_page",
             "create_session",
             "explain_memory_result",
+            "find_in_page",
             "forget_memory",
             "get_action_policy",
             "get_page_snapshot",
