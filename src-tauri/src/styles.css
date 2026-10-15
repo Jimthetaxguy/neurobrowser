@@ -469,10 +469,14 @@ main {
 }
 
 .browser-panel {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   position: relative;
+}
+
+.browser-panel > :not(.browser-stage) {
+  flex: none;
 }
 
 .downloads {
@@ -619,6 +623,7 @@ main {
 
 .browser-stage {
   background: linear-gradient(180deg, rgba(245, 247, 251, 0.95), rgba(225, 232, 243, 0.98));
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   position: relative;

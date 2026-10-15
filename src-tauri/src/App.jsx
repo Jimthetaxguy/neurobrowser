@@ -1498,9 +1498,7 @@ export default function App({ adapter, lane }) {
             />
           ) : null}
           <StatsRow snapshot={snapshot} />
-          <div className="downloads-slot">
-            <Downloads items={downloads} onOpen={openDownload} onShow={showDownload} />
-          </div>
+          <Downloads items={downloads} onOpen={openDownload} onShow={showDownload} />
           <div className="browser-stage" ref={browserStageRef}>
             {showStartPage ? (
               <NewTabPage adapter={adapter} onNavigate={navigateCurrentPage} />

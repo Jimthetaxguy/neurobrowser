@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { createServer } from "vite";
+
+const browserStyles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 let server;
 let App;
@@ -1689,6 +1692,57 @@ test("find in page shows the match count and zoom shortcuts change the page", as
       if (action === "out") return { zoom: 0.9, percent: 90 };
       return { zoom: 1, percent: 100 };
     },
+  });
+});
+
+test("the browser stage stays the flexing row while find is open", async () => {
+  await withApp(async ({ dispatchDownload, document, keydown }) => {
+    const style = document.createElement("style");
+    style.textContent = browserStyles;
+    document.head.append(style);
+
+    await keydown("f", { meta: true });
+    await dispatchDownload({
+      id: "dl-1",
+      phase: "progress",
+      url: "https://cdn.example/report.pdf",
+      filename: "report.pdf",
+      received: 10,
+      total: 100,
+    });
+
+    const panel = document.querySelector(".browser-panel");
+    const stage = document.querySelector(".browser-stage");
+    const findBar = document.querySelector(".find-bar");
+    const downloads = document.querySelector(".downloads");
+    assert.equal(stage.parentElement, panel);
+    assert.equal(findBar.parentElement, panel);
+    assert.equal(downloads.parentElement, panel);
+    assert.equal(document.querySelector(".downloads-slot"), null);
+    assert.deepEqual([...panel.children].map((child) => child.className), [
+      "browser-toolbar",
+      "find-bar",
+      "page-stats",
+      "downloads",
+      "browser-stage",
+    ]);
+
+    const view = document.defaultView;
+    const panelStyle = view.getComputedStyle(panel);
+    assert.equal(panelStyle.display, "flex");
+    assert.equal(panelStyle.flexDirection, "column");
+
+    const stageStyle = view.getComputedStyle(stage);
+    assert.equal(stageStyle.flexGrow, "1");
+    assert.equal(stageStyle.flexBasis, "0%");
+    assert.equal(stageStyle.minHeight, "0px");
+
+    for (const child of panel.children) {
+      if (child === stage) continue;
+      const childStyle = view.getComputedStyle(child);
+      assert.equal(childStyle.flexGrow, "0", child.className);
+      assert.equal(childStyle.flexShrink, "0", child.className);
+    }
   });
 });
 
