@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-task_repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-task_output="$(mktemp -d "${TMPDIR:-/tmp}/neurobrowser-capability-webkit.XXXXXX")"
-task_server_pid=""
-trap 'if [[ -n "$task_server_pid" ]]; then kill "$task_server_pid" 2>/dev/null || true; wait "$task_server_pid" 2>/dev/null || true; fi' EXIT
-
-# kill -0 is true for a zombie, so a crashed server would look alive for the
-# whole wait and its stderr would stay hidden until the timeout.
+# Shared with tests/run_appkit_navigation.sh, which sets
+# task_import_http_helpers=1 and sources this file. kill -0 is true for a
+# zombie, so a crashed server would look alive for the whole wait and its
+# stderr would stay hidden until the timeout. An empty ps status still counts
+# as alive: a blank stat line is not proof the process died.
 task_http_server_alive() {
   local stat
   kill -0 "$task_server_pid" 2>/dev/null || return 1
@@ -15,6 +13,30 @@ task_http_server_alive() {
   stat="${stat//[[:space:]]/}"
   [[ -z "$stat" || "$stat" != Z* ]]
 }
+
+# Poll until the port file has contents. Fail as soon as the server exits or
+# becomes a zombie. attempts is how many 0.1s pauses to allow.
+task_wait_for_http_port() {
+  local port_file="$1"
+  local attempts="$2"
+  local attempt
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    [[ -s "$port_file" ]] && return 0
+    task_http_server_alive || return 1
+    sleep 0.1
+  done
+  [[ -s "$port_file" ]]
+}
+
+if [[ "${task_import_http_helpers:-}" == 1 ]]; then
+  unset task_import_http_helpers
+  return 0
+fi
+
+task_repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+task_output="$(mktemp -d "${TMPDIR:-/tmp}/neurobrowser-capability-webkit.XXXXXX")"
+task_server_pid=""
+trap 'if [[ -n "$task_server_pid" ]]; then kill "$task_server_pid" 2>/dev/null || true; wait "$task_server_pid" 2>/dev/null || true; fi' EXIT
 
 task_dump_http_failure() {
   echo 'Local workload HTTP server did not start' >&2
@@ -32,32 +54,20 @@ task_dump_http_failure() {
 }
 
 # Bind an ephemeral loopback port and write it only after the listener is ready.
-# HTTPServer.server_bind calls socket.getfqdn on 127.0.0.1 before the constructor
-# returns. On the macOS 26 GitHub runner that reverse lookup stalls (often longer
-# than this wait) with no stderr, so the port file never appears. Bind through
-# TCPServer and keep the numeric host instead.
-python3 - "$task_repo_root/tests/fixtures/capability-site" "$task_output/port" >"$task_output/http.log" 2>&1 <<'PY' &
-import functools, http.server, pathlib, socketserver, sys
+# LoopbackHTTPServer in navigation_server.py skips the reverse lookup described there.
+python3 - "$task_repo_root/tests/fixtures/capability-site" "$task_output/port" "$task_repo_root/tests/navigation_server.py" >"$task_output/http.log" 2>&1 <<'PY' &
+import functools, http.server, importlib.util, pathlib, sys
 
-class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
-    def server_bind(self):
-        socketserver.TCPServer.server_bind(self)
-        host, port = self.server_address[:2]
-        self.server_name = host
-        self.server_port = port
-
+spec = importlib.util.spec_from_file_location("navigation_server", sys.argv[3])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
 handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[1])
-with LoopbackHTTPServer(('127.0.0.1', 0), handler) as server:
+with module.LoopbackHTTPServer(("127.0.0.1", 0), handler) as server:
     pathlib.Path(sys.argv[2]).write_text(str(server.server_port))
     server.serve_forever()
 PY
 task_server_pid=$!
-for _ in {1..200}; do
-  [[ -s "$task_output/port" ]] && break
-  task_http_server_alive || { task_dump_http_failure; exit 1; }
-  sleep 0.1
-done
-[[ -s "$task_output/port" ]] || { task_dump_http_failure; exit 1; }
+task_wait_for_http_port "$task_output/port" 200 || { task_dump_http_failure; exit 1; }
 task_port="$(cat "$task_output/port")"
 xcrun swiftc -parse-as-library "$task_repo_root/tests/capability_webkit.swift" -o "$task_output/capability-webkit"
 if "$task_output/capability-webkit" "$task_repo_root/src-tauri/src/runtime.rs" \

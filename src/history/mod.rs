@@ -1,4 +1,4 @@
-//! Browsing history for a later desktop slice.
+//! Browsing history. The desktop shell stores visits in [`HistoryStore`].
 //!
 //! This is not page memory. `neuro-memory` stores captured pages; this module
 //! stores visits. The root crate already depends on `serde_json` and does not

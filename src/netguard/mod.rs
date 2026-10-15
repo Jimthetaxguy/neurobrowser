@@ -247,8 +247,8 @@ fn normalize_dns_host(host: &str) -> String {
 mod tests {
     use super::*;
 
-    /// The exact vectors two independent reviewers flagged on PR #3, plus the
-    /// IPv4-mapped forms that made the guard's own named example reachable.
+    /// IPv4-mapped and v4-compatible forms, including the mapped addresses
+    /// that made the guard's own named example reachable.
     #[test]
     fn blocks_ipv4_mapped_and_compatible_forms() {
         for s in [

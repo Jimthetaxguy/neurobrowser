@@ -417,7 +417,6 @@ mod tests {
         let prompt = build_system_prompt(&empty_context());
         assert!(prompt.contains("ToolCall:"));
         assert!(!prompt.contains("Action:"));
-        // The hand-maintained catalog is gone.
         assert!(!prompt.contains("navigate(url)"));
         assert!(!prompt.contains("Navigate to an HTTP(S) URL"));
 
