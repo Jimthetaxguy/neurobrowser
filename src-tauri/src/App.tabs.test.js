@@ -1691,3 +1691,23 @@ test("find in page shows the match count and zoom shortcuts change the page", as
     },
   });
 });
+
+
+test("AppKit selecting a loading tab clears the previous tab's statistics", async () => {
+  await withApp(async ({ click, dispatch, document }) => {
+    await dispatch({ type: "navigation", pageId: 0, navigationId: 1 });
+    await dispatch({
+      type: "snapshot", pageId: 0, navigationId: 1, reason: "finish", loading: false,
+      snapshot: { url: "https://first.example/", title: "First", link_count: 17, image_count: 9 },
+    });
+    assert.equal(document.querySelector(".stat-value").textContent, "17");
+    await click(document.querySelector(".header > button"));
+    await dispatch({ type: "navigation", pageId: 1, navigationId: 2 });
+    await dispatch({
+      type: "snapshot", pageId: 1, navigationId: 2, reason: "select", loading: true,
+      snapshot: { url: "https://slow.example/", title: "Previous document", link_count: 100 },
+    });
+    assert.match(statusText(document), /Loading/);
+    assert.deepEqual([...document.querySelectorAll(".stat-value")].map((node) => node.textContent), ["0", "0", "0", "0", "0"]);
+  }, { lane: "appkit" });
+});

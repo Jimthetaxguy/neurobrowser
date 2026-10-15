@@ -68,8 +68,9 @@ export function nativeStatusUpdate(state, event, activePageId) {
     return { status: event.message };
   }
   if (event.loading) {
-    return { status: loadingStatus(event.snapshot?.url || "") };
+    return { status: loadingStatus(event.snapshot?.url || ""), clearSnapshot: true };
   }
+  if (event.reason === "select" && event.message) return { status: event.message };
   if (event.reason !== "select" && (id ?? 0) <= entry.floor) return {};
   return event.snapshot ? { snapshot: event.snapshot } : {};
 }

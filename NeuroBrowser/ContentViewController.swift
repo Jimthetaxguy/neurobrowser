@@ -25,7 +25,10 @@ class ContentViewController: NSViewController {
     /// older load or another tab.
     private var nextNavigationId = 0
     private var latestNavigationIds: [ObjectIdentifier: Int] = [:]
-    private var navigationIds: [ObjectIdentifier: Int] = [:]
+    // Weak object keys cannot mistake a recycled WKNavigation address for an
+    // earlier request that WebKit discarded without a terminal callback.
+    private let navigationIds = NSMapTable<WKNavigation, NSNumber>(keyOptions: .weakMemory, valueOptions: .strongMemory)
+    private var navigationStatuses: [ObjectIdentifier: String] = [:]
     var currentPageId: Int? {
         pageIds.indices.contains(currentTabIndex) ? pageIds[currentTabIndex] : nil
     }
@@ -166,6 +169,9 @@ class ContentViewController: NSViewController {
 
         let webView = webViews[index]
         latestNavigationIds.removeValue(forKey: ObjectIdentifier(webView))
+        navigationStatuses.removeValue(forKey: ObjectIdentifier(webView))
+        webView.navigationDelegate = nil
+        webView.stopLoading()
         webView.removeFromSuperview()
         webViews.remove(at: index)
         pageIds.remove(at: index)
@@ -267,17 +273,32 @@ class ContentViewController: NSViewController {
     
     @objc func goBack() {
         guard currentTabIndex < webViews.count else { return }
-        webViews[currentTabIndex].goBack()
+        let webView = webViews[currentTabIndex]
+        if let navigation = webView.goBack() {
+            beginNavigation(webView, navigation: navigation)
+        } else {
+            emitSnapshot(reason: "select")
+        }
     }
     
     @objc func goForward() {
         guard currentTabIndex < webViews.count else { return }
-        webViews[currentTabIndex].goForward()
+        let webView = webViews[currentTabIndex]
+        if let navigation = webView.goForward() {
+            beginNavigation(webView, navigation: navigation)
+        } else {
+            emitSnapshot(reason: "select")
+        }
     }
     
     @objc func reloadCurrentPage() {
         guard currentTabIndex < webViews.count else { return }
-        webViews[currentTabIndex].reload()
+        let webView = webViews[currentTabIndex]
+        if let navigation = webView.reload() {
+            beginNavigation(webView, navigation: navigation)
+        } else {
+            emitSnapshot(reason: "select")
+        }
     }
     
     @objc private func urlBarAction() {
@@ -293,7 +314,10 @@ class ContentViewController: NSViewController {
             return
         }
         urlBar.stringValue = url.absoluteString
-        webViews[currentTabIndex].load(URLRequest(url: url))
+        let webView = webViews[currentTabIndex]
+        if let navigation = webView.load(URLRequest(url: url)) {
+            beginNavigation(webView, navigation: navigation)
+        }
     }
 
     private func tabPageId(for webView: WKWebView) -> Int? {
@@ -308,12 +332,15 @@ class ContentViewController: NSViewController {
 
     private func takeNavigationId(_ navigation: WKNavigation?) -> Int? {
         guard let navigation = navigation else { return nil }
-        return navigationIds.removeValue(forKey: ObjectIdentifier(navigation))
+        let id = navigationIds.object(forKey: navigation)?.intValue
+        navigationIds.removeObject(forKey: navigation)
+        return id
     }
 
     /// Status for the page in `webView`, stamped with its newest navigation.
     private func emitStatus(_ message: String, for webView: WKWebView) {
         guard let pageId = tabPageId(for: webView) else { return }
+        navigationStatuses[ObjectIdentifier(webView)] = message
         pageUpdateHandler?([
             "type": "status",
             "pageId": pageId,
@@ -400,11 +427,13 @@ class ContentViewController: NSViewController {
     private func emitSnapshot(reason: String, finishedNavigationId: Int? = nil) {
         guard let pageId = currentPageId, currentTabIndex < webViews.count else { return }
         let webView = webViews[currentTabIndex]
+        let capturedNavigationId = latestNavigationId(for: webView)
         snapshotCurrentPage { [weak self] snapshot in
             guard let self, self.currentPageId == pageId,
                   self.pageIds.contains(pageId) else { return }
             let latest = self.latestNavigationId(for: webView)
             // A newer navigation started while the page was being read.
+            guard capturedNavigationId == latest else { return }
             if let finishedNavigationId, finishedNavigationId != latest { return }
             self.pageUpdateHandler?([
                 "type": "snapshot",
@@ -412,6 +441,7 @@ class ContentViewController: NSViewController {
                 "navigationId": latest,
                 "reason": reason,
                 "loading": finishedNavigationId == nil ? webView.isLoading : false,
+                "message": self.navigationStatuses[ObjectIdentifier(webView)] ?? "",
                 "snapshot": snapshot
             ])
         }
@@ -445,13 +475,20 @@ extension ContentViewController: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        // Native URL bar, back/forward/reload, links, and control-surface
-        // commands all start here, on any tab.
+        beginNavigation(webView, navigation: navigation)
+    }
+
+    private func beginNavigation(_ webView: WKWebView, navigation: WKNavigation?) {
+        // Host commands reserve their id immediately: WebKit may cancel the
+        // old load before delivering didStart for its replacement.
+        if let navigation, navigationIds.object(forKey: navigation) != nil { return }
+        guard tabPageId(for: webView) != nil else { return }
         nextNavigationId += 1
         let navigationId = nextNavigationId
         latestNavigationIds[ObjectIdentifier(webView)] = navigationId
+        navigationStatuses.removeValue(forKey: ObjectIdentifier(webView))
         if let navigation = navigation {
-            navigationIds[ObjectIdentifier(navigation)] = navigationId
+            navigationIds.setObject(NSNumber(value: navigationId), forKey: navigation)
         }
         if let pageId = tabPageId(for: webView) {
             var event: [String: Any] = ["type": "navigation", "pageId": pageId, "navigationId": navigationId]
@@ -464,11 +501,26 @@ extension ContentViewController: WKNavigationDelegate {
         reloadButton.title = "◌"
     }
 
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        guard let pageId = tabPageId(for: webView), let url = webView.url?.absoluteString,
+              let navigation,
+              navigationIds.object(forKey: navigation)?.intValue == latestNavigationId(for: webView) else { return }
+        pageUpdateHandler?(["type": "navigation", "pageId": pageId,
+                            "navigationId": latestNavigationId(for: webView), "url": url])
+        if currentPageId == pageId { urlBar.stringValue = url }
+    }
+
     /// The navigation id for a finished or failed `navigation`, or nil when it
     /// is older than the newest navigation in `webView`.
     private func currentNavigationId(_ navigation: WKNavigation?, in webView: WKWebView) -> Int? {
         let latest = latestNavigationId(for: webView)
-        let navigationId = takeNavigationId(navigation) ?? latest
+        let navigationId: Int
+        if navigation != nil {
+            guard let knownId = takeNavigationId(navigation) else { return nil }
+            navigationId = knownId
+        } else {
+            navigationId = latest
+        }
         return navigationId == latest ? navigationId : nil
     }
     
@@ -488,30 +540,34 @@ extension ContentViewController: WKNavigationDelegate {
     
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let navigationId = currentNavigationId(navigation, in: webView)
-        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView,
-              navigationId != nil else { return }
-        reloadButton.title = "↻"
-        updateNavigationButtons()
+        guard navigationId != nil, tabPageId(for: webView) != nil else { return }
+        if webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView {
+            reloadButton.title = "↻"
+            updateNavigationButtons()
+        }
         emitNavigationFailure(error, in: webView)
     }
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let navigationId = currentNavigationId(navigation, in: webView)
-        guard webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView,
-              navigationId != nil else { return }
-        reloadButton.title = "↻"
-        updateNavigationButtons()
+        guard navigationId != nil, tabPageId(for: webView) != nil else { return }
+        if webViews.indices.contains(currentTabIndex), webViews[currentTabIndex] === webView {
+            reloadButton.title = "↻"
+            updateNavigationButtons()
+        }
         emitNavigationFailure(error, in: webView)
     }
 
     private func emitNavigationFailure(_ error: Error, in webView: WKWebView) {
         let nsError = error as NSError
-        // Policy rejection already emitted its own status. WebKit then reports the cancel.
+        // Preserve a policy rejection; an ordinary cancellation must end Loading.
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            emitStatus(navigationStatuses[ObjectIdentifier(webView)] ?? "Navigation cancelled", for: webView)
             return
         }
         // WebKitErrorFrameLoadInterruptedByPolicyChange (102) has no WKError.Code case.
         if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
+            emitStatus(navigationStatuses[ObjectIdentifier(webView)] ?? "Navigation cancelled", for: webView)
             return
         }
         let message = nsError.localizedDescription.isEmpty ? "Page failed to load" : nsError.localizedDescription
