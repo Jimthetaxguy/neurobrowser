@@ -13,6 +13,14 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - #111: five scoped target tools (`observe_page`, `click_target`, `type_target`,
   `submit_target`, `scroll_target`), plus desktop commands `get_page_observation`
   and `execute_browser_tool`.
+- A blank tab shows a local new-tab page, and the address bar lists matching
+  history (#130).
+- A user-gesture popup or new window opens as a shell tab. A popup without a
+  gesture stays blocked (#132).
+- Allowed page downloads are saved and listed in the chrome (#133).
+- Find in page and per-site zoom are available from the main window (#135).
+- A page right-click menu can open or copy a link, save or copy an image, copy
+  or search selected text, and go back, forward, or reload (#136).
 
 ### Changed
 
@@ -38,6 +46,11 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - `BrowserTool::definition()` is required. Before, a tool that did not
   override it defaulted to `Read` risk, which `Assisted` allows without
   approval. The registry keys each tool by `definition().name`.
+- The runbook points at `tauri::generate_handler!` instead of a fixed IPC
+  command count, and the tracked WebKit receipt no longer contains a
+  home-directory path (#131).
+- macOS navigation and WebKit tests share one test-server bind and one wait
+  that notices a crashed server (#139).
 
 ### Fixed
 
@@ -62,6 +75,13 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - Frontend dependency lockfile updated within the existing package constraints.
 - The release bundle picks `neurobrowser-tauri`. The Anthropic default sends no
   `temperature`.
+- The macOS WebKit test server no longer stalls before it listens (#129).
+- A download is checked again after redirects. Windows opens a finished file
+  without a shell, and macOS downloads get the quarantine attribute (#134).
+- Navigation status follows the active tab's newest navigation (#137).
+- The page area stays open when the find bar is showing (#138).
+- A finished download is matched by its destination path, then by the same-URL
+  queue (#140).
 
 ### Removed
 

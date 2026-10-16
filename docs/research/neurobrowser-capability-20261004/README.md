@@ -10,7 +10,11 @@ summary: Reviewed browser development plan and dated evidence, preserved in repo
 
 # Browser capability assessment checkpoint
 
-Frozen record from before #111 merged (baseline d0271f7 / f50f5ae). Slices 2–8 are not built.
+Frozen record from before #111 merged (baseline d0271f7 / f50f5ae). Chrome that
+shipped after the freeze is the new-tab page and history suggestions, popups as
+tabs, downloads, find and per-site zoom, the page right-click menu, and
+navigation status. The architectural slices still absent are the session
+service, profiles, MCP transport, and screenshots.
 
 This package preserves the October 3–4 design assessment, reviewed implementation
 plan, and verification evidence from before that merge. CI states in receipts
