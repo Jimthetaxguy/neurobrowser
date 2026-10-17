@@ -1,3 +1,5 @@
+import { bindHostListen } from "./hostListen.js";
+
 /** Event the native menu emits to the main control webview only. */
 export const MENU_COMMAND_EVENT = "menu-command";
 
@@ -45,29 +47,9 @@ export function createMenuEchoGuard(now = () => Date.now()) {
  * `callback` receives the command string (`"new-tab"`, `"back"`, …).
  */
 export function bindMenuCommand(listen, callback) {
-  let stop = () => {};
-  let cancelled = false;
-  Promise.resolve()
-    .then(() => listen(MENU_COMMAND_EVENT, (event) => {
-      const command = menuCommandFromEvent(event);
-      if (!command) return;
-      try {
-        callback(command);
-      } catch (error) {
-        console.error("menu command handler failed", error);
-      }
-    }))
-    .then((unsubscribe) => {
-      if (typeof unsubscribe !== "function") return;
-      if (cancelled) unsubscribe();
-      else stop = unsubscribe;
-    })
-    .catch((error) => {
-      console.error("menu command listen failed", error);
-    });
-  return () => {
-    cancelled = true;
-    stop();
-    stop = () => {};
-  };
+  return bindHostListen(listen, MENU_COMMAND_EVENT, (event) => {
+    const command = menuCommandFromEvent(event);
+    if (!command) return;
+    callback(command);
+  }, "menu command handler failed", "menu command listen failed");
 }

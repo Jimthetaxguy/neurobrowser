@@ -746,9 +746,9 @@ pub fn handle_download_event<R: Runtime>(webview: Webview<R>, event: DownloadEve
             true
         }
         DownloadEvent::Finished { url, path, success } => {
-            // The destination path is set on Windows and Linux and is always
-            // empty on macOS, where the original request address is what
-            // identifies the row.
+            // The destination path is set on Windows and Linux. On macOS a
+            // page download leaves it empty and the request address identifies
+            // the row. Image downloads pass a path.
             if let Some(update) = book.finish(DownloadFinish {
                 url: url.as_str(),
                 success,
