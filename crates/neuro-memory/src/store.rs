@@ -242,19 +242,6 @@ async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 
     match tokio::fs::rename(&tmp, path).await {
         Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            // Windows rejects rename over an existing file. Drop the published
-            // page and retry once so a repeat put of the same body replaces it.
-            if let Err(remove_err) = tokio::fs::remove_file(path).await {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                return Err(StoreError::io(path, remove_err));
-            }
-            if let Err(rename_err) = tokio::fs::rename(&tmp, path).await {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                return Err(StoreError::io(path, rename_err));
-            }
-            Ok(())
-        }
         Err(err) => {
             let _ = tokio::fs::remove_file(&tmp).await;
             Err(StoreError::io(path, err))

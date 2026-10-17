@@ -389,18 +389,6 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), HistoryError> {
 
     match fs::rename(&temporary, path) {
         Ok(()) => Ok(()),
-        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-            // Windows refuses to rename over a file that already exists.
-            if let Err(remove_error) = fs::remove_file(path) {
-                let _ = fs::remove_file(&temporary);
-                return Err(HistoryError::io(path, remove_error));
-            }
-            if let Err(rename_error) = fs::rename(&temporary, path) {
-                let _ = fs::remove_file(&temporary);
-                return Err(HistoryError::io(path, rename_error));
-            }
-            Ok(())
-        }
         Err(error) => {
             let _ = fs::remove_file(&temporary);
             Err(HistoryError::Io {
