@@ -1,168 +1,80 @@
-# NeuroBrowser Code Analysis Report
+# NeuroBrowser Code Analysis
 
-**Generated:** 2026-03-01  
-**Status:** Post-refactor, 10 issues fixed
+Updated: 2026-05-22
 
----
+## Summary
 
-## 1. Architecture Overview
+NeuroBrowser is no longer in the February/March "Tauri blocked" state. The
+current repo has a working Rust core, focused autonomous-agent tests, a React +
+Tauri primary frontend, and an AppKit comparison spike.
 
-### Module Structure
+The app should be evaluated as a native desktop browser, not as a Chrome-hosted
+web app. Playwright/Chrome is useful for fast React-shell smoke tests only; it
+does not exercise Tauri IPC, native child webviews, page focus, or runtime
+snapshots.
+
+The primary cleanup need is keeping the system boundary sharp:
+
+- Rust owns sessions, page state, provider configuration, tool execution, and
+  action-policy decisions.
+- React owns the control surface and renders state returned by the native host.
+- Tauri is the primary command bridge.
+- AppKit is a spike until it reaches Rust-backed parity.
+
+## Architecture Health
+
+| Dimension | Current read |
+| --- | --- |
+| Layering | Good: browser/session/tools/providers/agent modules are separated. |
+| Runtime boundary | Good in Tauri: React fails closed when IPC is unavailable; browser runtime still requires native Tauri validation. |
+| AppKit boundary | Partial: host messaging exists, but Rust provider/agent parity is deferred. |
+| Error handling | Improved: typed tool/provider/agent errors are covered by tests. |
+| Real systems | Good: providers are real env-backed adapters; no production mock provider lane should be added. |
+| Documentation | Improved by this cleanup; stale pre-spike docs were the main drift risk. |
+
+## Active Strengths
+
+- `./verify.sh` is a single local gate for format, clippy, tests, frontend build,
+  Tauri cargo check, and release build.
+- CI covers Rust and Tauri lanes and includes guard checks for mock dependency
+  drift, merge conflict markers, and iCloud duplicate files.
+- The React control surface now exposes tabs, navigation, provider selection,
+  policy mode, page stats, agent runs, approvals, and action history through one
+  host adapter contract.
+- The ADR makes React + Tauri the accepted primary path, preventing the AppKit
+  spike from becoming a second source of truth.
+
+## Remaining Risks
+
+| Priority | Risk | Path | Notes |
+| --- | --- | --- | --- |
+| P1 | AppKit parity gap | `NeuroBrowser/`, `src-tauri/src/hostAdapters.js` | AppKit still returns host-lane placeholder responses for agent parity. |
+| P1 | Live desktop smoke gap | `src-tauri/` | Browser-shell layout can be smoke-tested in Vite/Playwright, but real browser behavior needs native Tauri runtime checks. |
+| P2 | Frontend test gap | `src-tauri/src/` | Add targeted browser smoke coverage for shell load, provider/policy controls, tab actions, and fail-closed host status. |
+| P2 | Provider retry/timeout behavior | `src/providers/` | Keep provider failures explicit and add bounded retries only where the provider contract supports them. |
+| P2 | AppKit page identity | `NeuroBrowser/` | Page ids must survive tab close/reorder before AppKit can move past spike status. |
+
+## Dependency Notes
+
+Core dependencies remain small and conventional:
+
+- Rust: `tokio`, `reqwest`, `serde`, `thiserror`, `tracing`, `scraper`, `url`,
+  `uuid`, `schemars`, `futures`, `async-trait`
+- Frontend: React 19, Vite 6, Tauri API/CLI v2
+
+Run security/dependency checks as part of cleanup work:
+
+```bash
+cd src-tauri
+npm audit --audit-level=moderate
 ```
-neurobrowser/src/
-├── lib.rs           # Public API exports
-├── agent/mod.rs     # ReAct agent with async execution
-├── browser/mod.rs   # HTML parsing, DOM queries, tools
-├── providers/
-│   ├── mod.rs      # AiProvider trait, error types, config
-│   ├── openai.rs   # OpenAI API client
-│   ├── anthropic.rs # Anthropic Claude client
-│   └── ollama.rs   # Local Ollama client
-├── session/mod.rs   # Session/page management
-└── tools/mod.rs    # Tool traits, registry, data types
-```
 
-### Dependencies
-| Crate | Version | Purpose |
-|-------|---------|---------|
-| tokio | 1.x | Async runtime |
-| reqwest | 0.12 | HTTP client |
-| scraper | 0.22 | HTML parsing |
-| async-trait | 0.1 | async trait support |
-| uuid | 1.0 | Session IDs |
-| regex-lite | 0.1 | Price extraction |
+## Recommended Next Steps
 
----
-
-## 2. Fixed Issues (10 total)
-
-| # | Issue | Severity | Status |
-|---|-------|----------|--------|
-| 1 | navigate() silently ignored errors | Critical | ✅ Fixed |
-| 2 | Index bounds panic on empty choices | Critical | ✅ Fixed |
-| 3 | Weak UUID (timestamp+hash) | High | ✅ Fixed |
-| 4 | No URL validation (SSRF risk) | High | ✅ Fixed |
-| 5 | Blocking call in async context | High | ✅ Fixed |
-| 6 | Regex recompiled per iteration | Medium | ✅ Fixed |
-| 7 | Broken tool argument parsing | Medium | ✅ Fixed |
-| 8 | No connection pooling | Medium | ✅ Fixed |
-| 9 | Missing error logging | Medium | ✅ Fixed |
-| 10 | Await while holding mutex | High | ✅ Fixed |
-
----
-
-## 3. Remaining Issues
-
-### 3.1 Code Quality (4 warnings)
-
-| Warning | Location | Fix |
-|---------|----------|-----|
-| Unused `base_url` | `ollama.rs:13` | Prefix with `_` |
-| Unused `browser` param | `browser/mod.rs:448` | Prefix with `_` |
-| Dead `config` field | `browser/mod.rs:47` | Remove or use |
-| Dead `active_page` field | `session/mod.rs:18` | Remove or implement |
-
-### 3.2 Logic Bugs
-
-| Issue | Location | Description |
-|-------|----------|-------------|
-| **Anthropic message building** | `anthropic.rs:21-31` | Logic appears backwards - builds different format when tool_results IS empty vs NOT empty |
-| **Ollama unused variable** | `ollama.rs:13` | `base_url` created but not used in constructor |
-| **Ollama duplicate parsing** | `ollama.rs:120-148` | Duplicates `parse_tool_calls` from mod.rs - should reuse |
-
-### 3.3 Missing Features
-
-| Feature | Location | Priority |
-|---------|----------|----------|
-| **JavaScript support** | `browser/mod.rs` | High - many sites need JS |
-| **Table extraction** | `browser/mod.rs:416-426` | Stub only |
-| **Form input extraction** | `browser/mod.rs:251-263` | Doesn't populate inputs |
-| **Rate limit retry** | All providers | No exponential backoff |
-| **Timeout on requests** | `anthropic.rs`, `ollama.rs` | No timeout configured |
-| **Graceful shutdown** | `session/mod.rs` | No cleanup on drop |
-
-### 3.4 Security Considerations
-
-| Concern | Location | Mitigation |
-|--------|----------|------------|
-| API keys in memory | All providers | Consider secret management |
-| No request size limits | `browser/mod.rs` | Could OOM on large pages |
-| Selector unwrap panic | `browser/mod.rs:80,103` | Invalid selectors cause panic |
-
-### 3.5 Architectural Gaps
-
-| Gap | Description |
-|-----|-------------|
-| **No tests** | Zero test coverage |
-| **No retry logic** | Failed API calls don't retry |
-| **Hardcoded URLs** | API endpoints not configurable per-provider |
-| **No metrics** | No observability beyond tracing |
-| **Memory unbounded** | Full HTML stored, could grow large |
-
----
-
-## 4. Provider Comparison
-
-| Feature | OpenAI | Anthropic | Ollama |
-|---------|--------|-----------|--------|
-| API key validation | ✅ | ✅ | N/A |
-| Connection pooling | ✅ (fixed) | ❌ | ❌ |
-| Timeout | ❌ | ❌ | ❌ |
-| Rate limit handling | 429 only | 429 only | N/A |
-| Tool call parsing | shared | shared | **duplicated** |
-| Reasoning support | ❌ | ❌ | ❌ |
-
----
-
-## 5. Recommended Next Steps
-
-### Priority 1: Critical Fixes
-1. Fix Anthropic message building logic (line 21-31)
-2. Remove duplicate `parse_tool_calls` in ollama.rs
-3. Add timeouts to all HTTP requests
-
-### Priority 2: Important Features
-4. Implement JavaScript support (or document limitation)
-5. Implement table extraction
-6. Add rate limit retry with exponential backoff
-
-### Priority 3: Polish
-7. Add test coverage
-8. Remove dead code warnings
-9. Add metrics/observability
-10. Implement graceful shutdown
-
----
-
-## 6. Code Metrics
-
-| Metric | Value |
-|--------|-------|
-| Total Rust files | 9 |
-| Total lines (approx) | 1,100 |
-| Dependencies | 10 |
-| Warnings (clippy) | 4 |
-| Test coverage | 0% |
-
----
-
-## 7. Dependencies Audit
-
-| Crate | License | Status |
-|-------|---------|--------|
-| tokio | MIT | ✅ |
-| reqwest | MIT/Apache | ✅ |
-| scraper | MIT | ✅ |
-| async-trait | MIT/Apache | ✅ |
-| uuid | MIT/Apache | ✅ |
-| regex-lite | BSD-3 | ✅ |
-| serde | MIT/Apache | ✅ |
-| thiserror | MIT/Apache | ✅ |
-| tracing | MIT | ✅ |
-| url | MIT/Apache | ✅ |
-
-**All dependencies are permissive license - no copyleft concerns.**
-
----
-
-*Report generated from codebase analysis. Issues 1-10 from previous review have been fixed.*
+1. Add a small frontend smoke test or script that loads `/` and `/appkit.html`
+   outside desktop hosts and asserts nonblank fail-closed states.
+2. Add native Tauri smoke notes for live navigation and snapshot behavior.
+3. Reduce AppKit placeholders by bridging provider selection and snapshots to
+   Rust before adding more AppKit UI.
+4. Keep `README.md`, `PROJECT.md`, and the ADR in sync whenever the primary lane
+   changes.

@@ -1,37 +1,55 @@
-# neurobrowser
+# NeuroBrowser
 
-AI-native browser with a custom Rust rendering engine and Tauri desktop runtime.
+AI-native desktop browser with a Rust browser/agent core and Tauri-native page
+runtime.
 
-## Tech Stack
+## Current Status
 
-- **Rust** (single crate + Tauri v2 wrapper)
-- **Tokio** full async runtime
-- **thiserror v2** for error handling (AgentError + ProviderError)
-- **reqwest** for HTTP, **scraper** for HTML parsing, **serde** for serialization
-- **async-trait** for async trait methods
+NeuroBrowser is in an active React + Tauri implementation lane. This is intended
+to run as its own desktop browser app, not as a Chrome-hosted web app. The Rust
+crate owns browser/session/agent/provider behavior, while the Tauri shell exposes
+a React control surface for tabs, navigation, provider selection, policy mode,
+page snapshots, and approval-gated agent runs.
+
+Rendered pages belong to the native desktop host. The React shell can be opened
+in Chrome/Playwright only as a layout smoke test; that does not validate the real
+Tauri child-webview browser runtime.
+
+The accepted frontend direction is documented in
+[docs/adr/ADR-001-react-tauri-primary.md](docs/adr/ADR-001-react-tauri-primary.md).
+The AppKit lane remains a native-browser spike, not the primary implementation.
 
 ## Quick Start
 
 ```bash
-cargo build                # Dev build
-cargo test                 # Unit + integration tests
-cargo clippy --all-targets # Lint
-cargo check --manifest-path src-tauri/Cargo.toml # Tauri wrapper check
-cargo build --release      # Release (LTO + strip + abort)
-./verify.sh                # Full verification chain
+cargo build
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+./verify.sh
+```
+
+Frontend-only commands live under `src-tauri/`:
+
+```bash
+cd src-tauri
+npm ci
+npm run dev
+npm run build
+npm run build:appkit
 ```
 
 ## Architecture
 
-This repository keeps the architecture in the Rust modules and project docs, including:
-- Error architecture (ToolError struct with builder pattern, AgentError enum)
-- Async streaming via mpsc channels + StreamEvent tagged JSON
-- Tauri IPC bridge between the desktop shell and Rust backend
+Core implementation areas:
 
-See [docs/frontend-architecture-spike.md](docs/frontend-architecture-spike.md)
-for the React + Tauri and React + AppKit frontend lane comparison.
-See [docs/adr/ADR-001-react-tauri-primary.md](docs/adr/ADR-001-react-tauri-primary.md)
-for the accepted frontend path.
+- `src/browser/` - HTML fetching, parsing, DOM querying, and page extraction.
+- `src/session/` - multi-session and page tracking.
+- `src/tools/` - browser tool contracts and typed tool errors.
+- `src/agent/` - autonomous run loop, streaming events, memory, observability,
+  and action policy enforcement.
+- `src/providers/` - OpenAI, Anthropic, and Ollama provider adapters.
+- `src-tauri/src/` - React control surface and Tauri runtime bridge.
+- `NeuroBrowser/` - Swift/AppKit spike for native host comparison.
 
 ## Autonomous Agent Core
 
@@ -45,6 +63,25 @@ The primary agent path is provider-agnostic and run-oriented:
 See [docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md](docs/specs/SPEC-AUTONOMOUS-BROWSER-AGENT.md)
 and [docs/stories/STORY-001-autonomous-browser-agent-core.md](docs/stories/STORY-001-autonomous-browser-agent-core.md)
 for the committed spec and acceptance trail.
+
+## Verification
+
+`./verify.sh` is the canonical local gate. It runs:
+
+- `cargo fmt -- --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test --all-targets`
+- `npm ci && npm run build` in `src-tauri/`
+- `cargo check --manifest-path src-tauri/Cargo.toml`
+- `cargo build --release`
+
+CI mirrors the Rust and Tauri checks and includes guards for mock dependencies,
+merge conflicts, and iCloud duplicate files under `src/`.
+
+Frontend smoke tests can load `http://127.0.0.1:5173/` in Playwright to catch
+React/CSS regressions and fail-closed host-bridge states. Browser-runtime
+validation must use the native Tauri app because Chrome does not exercise Tauri
+IPC, child webviews, snapshots, keyboard routing, or native page focus.
 
 ## Documentation Workflow
 

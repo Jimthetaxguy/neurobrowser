@@ -43,26 +43,26 @@ function TabStrip({ tabs, currentPageId, onActivate, onClose }) {
   return (
     <div className="tabs" aria-label="Open tabs">
       {tabs.map((tab) => (
-        <button
+        <div
           className={`tab${tab.id === currentPageId ? " active" : ""}`}
           key={tab.id}
-          onClick={() => onActivate(tab.id)}
-          type="button"
         >
-          <span className="tab-title">{tab.title || "New Tab"}</span>
-          <span
+          <button className="tab-button" onClick={() => onActivate(tab.id)} type="button">
+            <span className="tab-title">{tab.title || "New Tab"}</span>
+          </button>
+          <button
             aria-label={`Close ${tab.title || "tab"}`}
             className="tab-close"
             onClick={(event) => {
               event.stopPropagation();
               onClose(tab.id);
             }}
-            role="button"
-            tabIndex={0}
+            title="Close tab"
+            type="button"
           >
             x
-          </span>
-        </button>
+          </button>
+        </div>
       ))}
     </div>
   );
@@ -91,17 +91,38 @@ function StatsRow({ snapshot }) {
   );
 }
 
-function BrowserToolbar({ onAction }) {
+function BrowserToolbar({ disabled, onAction }) {
   return (
-    <div className="browser-toolbar">
-      <button className="btn btn-secondary" onClick={() => onAction("browser_back")} type="button">
-        Back
+    <div className="browser-toolbar" aria-label="Browser actions">
+      <button
+        aria-label="Back"
+        className="icon-btn"
+        disabled={disabled}
+        onClick={() => onAction("browser_back")}
+        title="Back"
+        type="button"
+      >
+        &lt;
       </button>
-      <button className="btn btn-secondary" onClick={() => onAction("browser_forward")} type="button">
-        Forward
+      <button
+        aria-label="Forward"
+        className="icon-btn"
+        disabled={disabled}
+        onClick={() => onAction("browser_forward")}
+        title="Forward"
+        type="button"
+      >
+        &gt;
       </button>
-      <button className="btn btn-secondary" onClick={() => onAction("browser_reload")} type="button">
-        Reload
+      <button
+        aria-label="Reload"
+        className="icon-btn"
+        disabled={disabled}
+        onClick={() => onAction("browser_reload")}
+        title="Reload"
+        type="button"
+      >
+        R
       </button>
     </div>
   );
@@ -175,7 +196,10 @@ function ChatPanel({
 }) {
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">AI Assistant</div>
+      <div className="sidebar-header">
+        <span>Assistant</span>
+        {thinking && <span className="activity-dot" aria-label="Agent is working" />}
+      </div>
       <div className="chat-messages">
         {messages.map((item) => (
           <Message item={item} key={item.id} />
@@ -199,6 +223,7 @@ function ChatPanel({
       >
         <textarea
           className="chat-input"
+          aria-label="Assistant prompt"
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -209,7 +234,7 @@ function ChatPanel({
           placeholder="Ask about the current page..."
           value={prompt}
         />
-        <button className="btn" type="submit">
+        <button className="btn" disabled={thinking || !prompt.trim()} type="submit">
           Send
         </button>
       </form>
@@ -226,6 +251,7 @@ function Header({
   setUrl,
   onNavigate,
   onNewTab,
+  canCreateTab,
   compact,
 }) {
   return (
@@ -234,28 +260,34 @@ function Header({
         <span className="brand-dot" />
         <span>NeuroBrowser</span>
       </div>
-      <select
-        className="provider-select"
-        onChange={(event) => setProvider(event.target.value)}
-        value={provider}
-      >
-        {PROVIDERS.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-      <select
-        className="provider-select"
-        onChange={(event) => setPolicyMode(event.target.value)}
-        value={policyMode}
-      >
-        {POLICY_MODES.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
+      <label className="control-field">
+        <span>Provider</span>
+        <select
+          className="provider-select"
+          onChange={(event) => setProvider(event.target.value)}
+          value={provider}
+        >
+          {PROVIDERS.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="control-field">
+        <span>Policy</span>
+        <select
+          className="provider-select"
+          onChange={(event) => setPolicyMode(event.target.value)}
+          value={policyMode}
+        >
+          {POLICY_MODES.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <form
         className="url-bar"
         onSubmit={(event) => {
@@ -265,6 +297,7 @@ function Header({
       >
         <input
           className="url-input"
+          aria-label="URL"
           onChange={(event) => setUrl(event.target.value)}
           placeholder="Enter a URL or domain"
           value={url}
@@ -273,8 +306,15 @@ function Header({
           Go
         </button>
       </form>
-      <button className="btn btn-secondary" onClick={onNewTab} type="button">
-        New Tab
+      <button
+        aria-label="New tab"
+        className="icon-btn new-tab-btn"
+        disabled={!canCreateTab}
+        onClick={onNewTab}
+        title="New tab"
+        type="button"
+      >
+        +
       </button>
     </header>
   );
@@ -655,6 +695,7 @@ export default function App({ adapter, lane }) {
       <div className="app-shell appkit-shell">
         <Header
           compact
+          canCreateTab={Boolean(sessionId)}
           onNavigate={navigateCurrentPage}
           onNewTab={createNewTab}
           policyMode={policyMode}
@@ -665,7 +706,7 @@ export default function App({ adapter, lane }) {
           url={url}
         />
         <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} tabs={tabs} />
-        <BrowserToolbar onAction={runBrowserAction} />
+        <BrowserToolbar disabled={currentPageId == null || !sessionId} onAction={runBrowserAction} />
         <StatsRow snapshot={snapshot} />
         <ChatPanel
           actionEvents={actionEvents}
@@ -697,6 +738,7 @@ export default function App({ adapter, lane }) {
         </div>
       )}
       <Header
+        canCreateTab={Boolean(sessionId)}
         onNavigate={navigateCurrentPage}
         onNewTab={createNewTab}
         policyMode={policyMode}
@@ -709,7 +751,7 @@ export default function App({ adapter, lane }) {
       <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} tabs={tabs} />
       <main>
         <section className="browser-panel">
-          <BrowserToolbar onAction={runBrowserAction} />
+          <BrowserToolbar disabled={currentPageId == null || !sessionId} onAction={runBrowserAction} />
           <StatsRow snapshot={snapshot} />
           <div className="browser-stage" ref={browserStageRef}>
             <div className="stage-placeholder">
