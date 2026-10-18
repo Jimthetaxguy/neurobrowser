@@ -941,7 +941,7 @@ main {
   }
 }
 
-.evidence-panel { padding: 12px; border-bottom: 1px solid var(--border-color, #394047); font-size: 12px; }
+.evidence-panel { padding: 12px; border-bottom: 1px solid #394047; font-size: 12px; }
 .evidence-panel > summary { cursor: pointer; margin-bottom: 10px; font-weight: 600; }
 .evidence-panel details { margin: 8px 0; }
 .evidence-source { overflow-wrap: anywhere; }

@@ -2,6 +2,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { bindContextCopy } from "./contextCopy.js";
 import { bindDownloads } from "./downloads.js";
+import { HISTORY_SUGGESTION_LIMIT } from "./historySuggestions.js";
 import { bindMenuCommand } from "./menuCommands.js";
 import { bindPageLifecycle, bindPageNewWindow } from "./nativePageEvents.js";
 
@@ -111,7 +112,7 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
     onContextCopy(callback) {
       return bindContextCopy(listen, callback);
     },
-    async searchBrowsingHistory(query = "", limit = 8) {
+    async searchBrowsingHistory(query = "", limit = HISTORY_SUGGESTION_LIMIT) {
       return invoke("search_browsing_history", { query, limit });
     },
     async searchLocalMemory(query, limit = 8) {
