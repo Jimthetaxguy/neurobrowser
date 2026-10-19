@@ -55,7 +55,7 @@ impl PageFind {
     /// Zero-based match to ask the page for. A new query, or a page that has
     /// not been searched yet, starts at the first match.
     pub fn index_for(&self, page_id: usize, query: &str, direction: FindDirection) -> usize {
-        if query.is_empty() || direction == FindDirection::Start {
+        if query.is_empty() {
             return 0;
         }
         let cursors = self.lock();
@@ -66,9 +66,9 @@ impl PageFind {
             return 0;
         }
         match direction {
+            FindDirection::Start => 0,
             FindDirection::Next => (cursor.index + 1) % cursor.total,
             FindDirection::Previous => (cursor.index + cursor.total - 1) % cursor.total,
-            FindDirection::Start => 0,
         }
     }
 

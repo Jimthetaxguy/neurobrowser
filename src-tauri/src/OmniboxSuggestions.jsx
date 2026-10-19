@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { historyQueryFromInput, suggestionRows } from "./historySuggestions.js";
+import { historyQueryFromInput, hostOf, suggestionRows } from "./historySuggestions.js";
 import { omniboxActionHint } from "./omniboxInput.js";
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -24,14 +24,6 @@ function pageUrlOf(hit) {
   return "";
 }
 
-function hostOf(pageUrl) {
-  try {
-    return new URL(pageUrl).hostname;
-  } catch {
-    return "";
-  }
-}
-
 function headingLabel(hit) {
   if (!Array.isArray(hit?.heading_path)) return "";
   return hit.heading_path.map(plainText).filter(Boolean).join(" / ");
@@ -48,7 +40,7 @@ function hitExcerpt(hit) {
  * Letter-and-number queries pass through so Tantivy operators such as OR keep working.
  * Address-bar text with : / ? and other query syntax is reduced to words first.
  */
-export function memoryQueryFromOmnibox(input) {
+function memoryQueryFromOmnibox(input) {
   const trimmed = String(input ?? "").trim();
   if (!trimmed) return "";
   if (PLAIN_QUERY.test(trimmed)) return trimmed;
