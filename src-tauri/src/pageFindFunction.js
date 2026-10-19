@@ -18,7 +18,10 @@ function neurobrowserFind(query, index) {
     style.textContent = "::highlight(neurobrowser-find){background-color:#fff3a3;color:#111}::highlight(neurobrowser-find-current){background-color:#f5a623;color:#111}";
     (document.head || document.documentElement).appendChild(style);
   }
-  const folded = needle.toLowerCase();
+  // Search the original text: lowercasing can change its UTF-16 length (İ),
+  // so offsets in a folded copy cannot safely address a DOM Range.
+  const literal = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(literal, "giu");
   const matches = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
@@ -26,16 +29,14 @@ function neurobrowserFind(query, index) {
     const parent = node.parentElement;
     const tag = parent && parent.tagName;
     if (tag !== "SCRIPT" && tag !== "STYLE" && tag !== "NOSCRIPT") {
-      const hay = String(node.textContent || "").toLowerCase();
-      let from = 0;
-      while (from < hay.length && matches.length < 2000) {
-        const at = hay.indexOf(folded, from);
-        if (at < 0) break;
+      const hay = String(node.textContent || "");
+      pattern.lastIndex = 0;
+      let match;
+      while (matches.length < 2000 && (match = pattern.exec(hay)) !== null) {
         const range = document.createRange();
-        range.setStart(node, at);
-        range.setEnd(node, at + folded.length);
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
         matches.push(range);
-        from = at + folded.length;
       }
     }
     node = walker.nextNode();
