@@ -95,8 +95,7 @@ fn is_blocked_v4(v4: &Ipv4Addr) -> bool {
         || v4.is_unspecified()
         || v4.is_broadcast()
         || v4.is_documentation()
-        || is_shared_address_space_v4(v4)  // 100.64.0.0/10 (CGNAT)
-        || v4.octets()[0] == 127
+        || is_shared_address_space_v4(v4) // 100.64.0.0/10 (CGNAT)
 }
 
 /// 100.64.0.0/10 — carrier-grade NAT space, routable to internal infrastructure.
@@ -146,9 +145,6 @@ pub fn blocked_reason(url: &str) -> Option<BlockReason> {
     };
 
     let scheme = parsed.scheme().to_ascii_lowercase();
-    if DISALLOWED_SCHEMES.contains(&scheme.as_str()) {
-        return Some(BlockReason::DisallowedScheme(scheme));
-    }
     if scheme != "http" && scheme != "https" {
         return Some(BlockReason::DisallowedScheme(scheme));
     }
