@@ -756,6 +756,33 @@ const RUNTIME_INIT_SCRIPT: &str = r#"
 })();
 "#;
 
+/// Wry 0.54 unwraps WKWebView.URL, which is nil before its first load.
+/// Read that optional native value directly; never substitute page-reported URLs.
+#[cfg(target_os = "macos")]
+pub fn native_page_url<R: Runtime>(webview: &Webview<R>) -> Result<tauri::Url, String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    webview
+        .with_webview(move |platform| {
+            use objc2_web_kit::WKWebView;
+            let view = unsafe { &*(platform.inner() as *const WKWebView) };
+            let result = unsafe { view.URL() }
+                .and_then(|url| url.absoluteString())
+                .map(|url| url.to_string())
+                .ok_or_else(|| "Native document has no URL yet".to_string())
+                .and_then(|url| tauri::Url::parse(&url).map_err(|error| error.to_string()));
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| "Native URL read timed out".to_string())?
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn native_page_url<R: Runtime>(webview: &Webview<R>) -> Result<tauri::Url, String> {
+    webview.url().map_err(|error| error.to_string())
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
 pub struct BrowserViewport {
     pub x: f64,
@@ -1157,7 +1184,9 @@ impl TauriBrowserRuntime {
         webview
             .eval("window.stop()")
             .map_err(|error| error.to_string())?;
-        let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+        let url = native_page_url(&webview)
+            .map(|url| url.to_string())
+            .unwrap_or_default();
         emit_page_lifecycle(
             &webview,
             stopped_page_payload(&self.registry, self.page_id, &url),
@@ -1166,8 +1195,7 @@ impl TauriBrowserRuntime {
     }
 
     pub fn page_url(&self) -> Result<String, String> {
-        self.webview()?
-            .url()
+        native_page_url(&self.webview()?)
             .map(|url| url.to_string())
             .map_err(|error| error.to_string())
     }
@@ -1574,9 +1602,7 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn observe(&self, limits: ObservationLimits) -> Result<PageObservation, String> {
-        let before_url = self
-            .webview()?
-            .url()
+        let before_url = native_page_url(&self.webview()?)
             .map_err(|error| error.to_string())?
             .to_string();
         let limits = limits.bounded();
@@ -1589,9 +1615,7 @@ impl BrowserInterface for TauriBrowserRuntime {
                 false,
             )
             .await?;
-        let native_url = self
-            .webview()?
-            .url()
+        let native_url = native_page_url(&self.webview()?)
             .map_err(|error| error.to_string())?
             .to_string();
         if before_url != native_url {
@@ -1715,15 +1739,11 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn snapshot(&self) -> Result<PageSnapshot, String> {
-        let before_url = self
-            .webview()?
-            .url()
+        let before_url = native_page_url(&self.webview()?)
             .map_err(|error| error.to_string())?
             .to_string();
         let mut snapshot: PageSnapshot = self.request_json("runtime.snapshot()", false).await?;
-        snapshot.url = self
-            .webview()?
-            .url()
+        snapshot.url = native_page_url(&self.webview()?)
             .map_err(|error| error.to_string())?
             .to_string();
         if snapshot.url != before_url {
@@ -1822,7 +1842,9 @@ pub fn create_runtime_page(
             }
         })
         .on_document_title_changed(move |webview, title| {
-            let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+            let url = native_page_url(&webview)
+                .map(|url| url.to_string())
+                .unwrap_or_default();
             note_browsing_visit(&webview, &url, &title);
             emit_page_lifecycle(
                 &webview,
@@ -1857,6 +1879,43 @@ pub fn close_runtime_page(
     Ok(())
 }
 
+/// Wry positions child views relative to the decorated frame on macOS.
+/// DOM rectangles are relative to the content area, below the title bar.
+fn child_position<R: Runtime>(
+    webview: &Webview<R>,
+    viewport: BrowserViewport,
+) -> LogicalPosition<f64> {
+    #[cfg(target_os = "macos")]
+    let titlebar = {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let queued = webview.with_webview(move |platform| {
+            use objc2_web_kit::WKWebView;
+            let view = unsafe { &*(platform.inner() as *const WKWebView) };
+            let inset = view
+                .window()
+                .map(|window| {
+                    // contentRect/inner_position can include the title bar for
+                    // full-size-content windows. The layout rect excludes it.
+                    let frame = window.frame();
+                    let layout = window.contentLayoutRect();
+                    (frame.size.height - layout.size.height).max(0.0)
+                })
+                .unwrap_or(0.0);
+            let _ = sender.send(inset);
+        });
+        if queued.is_ok() {
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let titlebar = 0.0;
+    LogicalPosition::new(viewport.x, viewport.y + titlebar)
+}
+
 pub fn set_active_runtime_page(
     app: &AppHandle,
     registry: &BrowserRuntimeRegistry,
@@ -1870,7 +1929,7 @@ pub fn set_active_runtime_page(
         if known_page_id == page_id {
             let viewport = registry.viewport(known_page_id)?;
             webview
-                .set_position(LogicalPosition::new(viewport.x, viewport.y))
+                .set_position(child_position(&webview, viewport))
                 .map_err(|e| e.to_string())?;
             webview
                 .set_size(LogicalSize::new(
@@ -1878,10 +1937,9 @@ pub fn set_active_runtime_page(
                     viewport.height.max(1.0),
                 ))
                 .map_err(|e| e.to_string())?;
-            let show = webview
-                .url()
+            let show = native_page_url(&webview)
                 .map(|url| is_browsed_document(url.as_str()))
-                .unwrap_or(true);
+                .unwrap_or(false);
             if show {
                 webview.show().map_err(|e| e.to_string())?;
             } else {
@@ -1924,8 +1982,7 @@ pub fn hide_unbrowsed_runtime_page(
     let webview = app
         .get_webview(&runtime_id)
         .ok_or_else(|| format!("Webview '{runtime_id}' not found"))?;
-    let browsed = webview
-        .url()
+    let browsed = native_page_url(&webview)
         .map(|url| is_browsed_document(url.as_str()))
         .unwrap_or(true);
     if browsed {
@@ -1947,7 +2004,7 @@ pub fn sync_runtime_viewport(
             .get_webview(&runtime_id)
             .ok_or_else(|| format!("Webview '{}' not found", runtime_id))?;
         webview
-            .set_position(LogicalPosition::new(viewport.x, viewport.y))
+            .set_position(child_position(&webview, viewport))
             .map_err(|e| e.to_string())?;
         webview
             .set_size(LogicalSize::new(

@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "desktop": "tauri dev --no-watch",
+    "desktop:build": "tauri build --features custom-protocol --bundles app",
     "build": "vite build",
     "build:appkit": "BUILD_APPKIT=1 vite build --outDir ../NeuroBrowser/ControlSurface --emptyOutDir",
     "preview": "vite preview",

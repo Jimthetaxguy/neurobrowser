@@ -416,12 +416,17 @@ function ChatPanel({
   prompt,
   setPrompt,
   onAsk,
+  onStop,
+  ready,
+  includePage,
+  setIncludePage,
+  onClose,
 }) {
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">AI Assistant</div>
+      <div className="sidebar-header"><div><strong>Assistant</strong><span className="sidebar-subtitle">A little help, when you need it</span></div><button className="icon-button" aria-label="Close assistant" onClick={onClose} type="button">×</button></div>
       <div className="sidebar-evidence">{evidencePanel}</div>
-      <div className="chat-messages">
+      <div className="chat-messages" aria-live="polite">
         {messages.map((item) => (
           <Message item={item} key={item.id} />
         ))}
@@ -434,7 +439,7 @@ function ChatPanel({
         />
       )}
       <ActionHistory events={actionEvents} />
-      <div className={`loading${thinking ? " active" : ""}`}>Thinking...</div>
+      <div className={`loading${thinking ? " active" : ""}`} role="status">Waiting for the provider… <span>No browser actions are executed.</span></div>
       <form
         className="chat-input-area"
         onSubmit={(event) => {
@@ -443,20 +448,22 @@ function ChatPanel({
         }}
       >
         <textarea
+          aria-label="Message assistant"
+          disabled={!ready || thinking}
           className="chat-input"
-          onChange={(event) => setPrompt(event.target.value)}
+          onInput={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               onAsk();
             }
           }}
-          placeholder="Ask about the current page..."
+          placeholder={ready ? "Ask a question…" : "Connect the native browser first"}
           value={prompt}
         />
-        <button className="btn" type="submit">
-          Send
-        </button>
+        <label className="context-choice"><input type="checkbox" checked={includePage} disabled={thinking || !ready} onChange={event => setIncludePage(event.target.checked)} /> Include current page text</label>
+        <p className="context-note">{includePage ? "Bounded page text will be sent to your selected provider." : "Only your question is sent. No page, history or memory is shared."}</p>
+        {thinking ? <button className="btn btn-secondary" type="button" onClick={onStop}>Cancel request</button> : <button className="btn" type="submit" disabled={!ready || !prompt.trim()}>Send</button>}
       </form>
     </aside>
   );
@@ -477,6 +484,8 @@ function Header({
   setProvider,
   setUrl,
   url,
+  onBrowserAction, onStop, loading, zoomPercent,
+  onToggleAssistant, onToggleSettings, assistantOpen, settingsOpen,
 }) {
   return (
     <header className={compact ? "header compact" : "header"}>
@@ -484,32 +493,7 @@ function Header({
         <span className="brand-dot" />
         <span>NeuroBrowser</span>
       </div>
-      {!compact && (
-        <>
-          <select
-            className="provider-select"
-            onChange={(event) => setProvider(event.target.value)}
-            value={provider}
-          >
-            {PROVIDERS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="provider-select"
-            onChange={(event) => setPolicyMode(event.target.value)}
-            value={policyMode}
-          >
-            {POLICY_MODES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </>
-      )}
+      {!compact && <BrowserToolbar loading={loading} onAction={onBrowserAction} onStop={onStop} zoomPercent={zoomPercent} />}
       <div className="location">
         <SecurityIndicator url={url} />
         <Omnibox
@@ -524,6 +508,10 @@ function Header({
       <button className="btn btn-secondary" onClick={onNewTab} type="button">
         New Tab
       </button>
+      {!compact && <div className="header-tools">
+        <button className="icon-button" type="button" aria-label="Toggle assistant" aria-expanded={assistantOpen} onClick={onToggleAssistant}>Assistant</button>
+        <button className="icon-button" type="button" aria-label="Browser settings" aria-expanded={settingsOpen} onClick={onToggleSettings}>Settings</button>
+      </div>}
     </header>
   );
 }
@@ -559,7 +547,13 @@ export default function App({ adapter, lane }) {
   const [actionEvents, setActionEvents] = useState([]);
   const [pendingApproval, setPendingApproval] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
-  const [status, setStatus] = useState("Starting session...");
+  const [status, setStatus] = useState("Connecting to the native browser…");
+  const [runtimeState, setRuntimeState] = useState("connecting");
+  const [assistantOpen, setAssistantOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [providerStatus, setProviderStatus] = useState(null);
+  const [includePage, setIncludePage] = useState(false);
+  const assistantRequest = useRef(null);
   const [loading, setLoading] = useState(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [blockedPopups, setBlockedPopups] = useState({});
@@ -584,7 +578,7 @@ export default function App({ adapter, lane }) {
     {
       id: -1,
       role: "assistant",
-      text: "Live browser runtime initialized. Navigate to a page, then ask about what you are actually seeing.",
+      text: "Ask a question. Page sharing is off by default.",
     },
   ]);
   const nativeNavigationRef = useRef(createNativeNavigationState());
@@ -866,23 +860,47 @@ export default function App({ adapter, lane }) {
 
   const askAssistant = useCallback(async () => {
     const trimmed = prompt.trim();
-    if (!trimmed || currentPageId == null || !sessionId) return;
+    if (!trimmed || currentPageId == null || !sessionId || thinking) return;
     setPrompt("");
     appendMessage("user", trimmed);
     setThinking(true);
-    setStatus("Agent is working...");
+    setStatus("Waiting for the provider…");
+    const requestId = globalThis.crypto?.randomUUID?.() ?? null;
+    assistantRequest.current = requestId;
     try {
+      if (typeof adapter.askAssistant === "function") {
+        if (!requestId) throw new Error("Secure request IDs are unavailable");
+        const reply = await adapter.askAssistant(sessionId, currentPageId, trimmed, requestId, includePage);
+        if (assistantRequest.current !== requestId) return;
+        appendMessage("assistant", reply);
+        setStatus("Reply received");
+        return;
+      }
       const result = await adapter.startAgentRun(sessionId, currentPageId, trimmed);
       const events = result.events || [];
       setActionEvents((items) => [...items, ...events]);
       await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
     } catch (error) {
+      if (assistantRequest.current !== requestId) return;
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
-      setStatus("Agent request failed");
+      setStatus("Assistant request failed");
     } finally {
-      setThinking(false);
+      if (assistantRequest.current === requestId) { assistantRequest.current = null; setThinking(false); }
     }
-  }, [adapter, appendMessage, currentPageId, prompt, refreshSnapshot, sessionId]);
+  }, [adapter, appendMessage, currentPageId, prompt, refreshSnapshot, sessionId, thinking, includePage]);
+
+  const stopAssistant = useCallback(async () => {
+    const id = assistantRequest.current;
+    if (!id || typeof adapter.cancelAssistantRequest !== "function") return;
+    try {
+      await adapter.cancelAssistantRequest(id);
+      if (assistantRequest.current !== id) return;
+      assistantRequest.current = null;
+      setThinking(false);
+      appendMessage("assistant", "Request cancelled. A reply may have been generated by the provider, but no browser actions were executed.");
+      setStatus("Request cancelled");
+    } catch (error) { setStatus(`Cancel failed: ${messageText(error)}`); }
+  }, [adapter, appendMessage]);
 
   const resolveApproval = useCallback(
     async (approved) => {
@@ -932,7 +950,8 @@ export default function App({ adapter, lane }) {
       setProviderValue(nextProvider);
       try {
         const result = await adapter.setProvider(nextProvider);
-        const configuredText = result.configured ? "configured" : "missing credentials";
+        setProviderStatus(result);
+        const configuredText = result.configured ? "native configuration present" : "setup needed";
         setStatus(`Provider: ${result.provider} (${result.model}, ${configuredText})`);
       } catch (error) {
         setStatus(`Provider change failed: ${messageText(error)}`);
@@ -989,9 +1008,17 @@ export default function App({ adapter, lane }) {
             console.warn("policy load failed", messageText(error));
           }
         }
-        setStatus("Session ready");
+        if (typeof adapter.getProviderStatus === "function") {
+          try { const selected = await adapter.getProviderStatus(); if (!disposed) { setProviderStatus(selected); setProviderValue(selected.provider); } }
+          catch { /* Browser remains usable if provider metadata cannot load. */ }
+        }
+        if (disposed) return;
+        setRuntimeState("ready");
+        setStatus("Ready");
       } catch (error) {
-        setStatus(`Startup failed: ${messageText(error)}`);
+        if (disposed) return;
+        setRuntimeState("unavailable");
+        setStatus(compact ? `Startup failed: ${messageText(error)}` : "Native browser unavailable. Open NeuroBrowser.app.");
       }
     }
     init();
@@ -1466,7 +1493,10 @@ export default function App({ adapter, lane }) {
   return (
     <div className="app-shell">
       <LoadProgress active={loading != null || pageLoading} />
+      <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
       <Header
+        onBrowserAction={runBrowserAction} onStop={stopPageLoad} loading={loading != null || pageLoading} zoomPercent={zoomPercent}
+        onToggleAssistant={() => setAssistantOpen(open => !open)} onToggleSettings={() => setSettingsOpen(open => !open)} assistantOpen={assistantOpen} settingsOpen={settingsOpen}
         adapter={adapter}
         blockedCount={blockedCount}
         onDismissBlocked={dismissBlockedPopup}
@@ -1481,10 +1511,15 @@ export default function App({ adapter, lane }) {
         setUrl={setUrlFromUser}
         url={url}
       />
-      <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
-      <main>
+      <section className="settings-panel" hidden={!settingsOpen} aria-label="Browser settings">
+        <div><h2>Browser settings</h2><p>Provider credentials stay in the native process.</p></div>
+        <label>Provider<select className="provider-select" value={provider} onChange={event => selectProvider(event.target.value)} disabled={thinking || runtimeState !== "ready"}>{PROVIDERS.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
+        <label>Browser action policy<select className="provider-select" value={policyMode} onChange={event => selectPolicyMode(event.target.value)} disabled={runtimeState !== "ready"}>{POLICY_MODES.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
+        <p className="provider-status">{providerStatus ? `${providerStatus.model} · ${providerStatus.configured ? "Native configuration present; availability is checked on request." : "Setup needed."}` : "Provider status unavailable until the native browser connects."}<br />{!providerStatus?.configured && "Launch the app with OPENAI_API_KEY or ANTHROPIC_API_KEY in its native environment, or select an already-running Ollama model. Never enter keys in this page."}</p>
+        <details className="page-details"><summary>Page details</summary><StatsRow snapshot={snapshot} /></details>
+      </section>
+      <main className={assistantOpen ? "assistant-open" : "assistant-closed"}>
         <section className="browser-panel">
-          <BrowserToolbar loading={loading != null || pageLoading} onAction={runBrowserAction} onStop={stopPageLoad} zoomPercent={zoomPercent} />
           {findOpen ? (
             <FindBar
               current={findHit.current}
@@ -1497,10 +1532,11 @@ export default function App({ adapter, lane }) {
               total={findHit.total}
             />
           ) : null}
-          <StatsRow snapshot={snapshot} />
           <Downloads items={downloads} onOpen={openDownload} onShow={showDownload} />
           <div className="browser-stage" ref={browserStageRef}>
-            {showStartPage ? (
+            {runtimeState !== "ready" ? (
+              <div className="runtime-notice" role="status"><span className="native-mark">N</span><h1>{runtimeState === "connecting" ? "Connecting to NeuroBrowser" : "Open the native app"}</h1><p>{runtimeState === "connecting" ? "Preparing your browser window…" : "This web preview cannot browse or call a model. Launch NeuroBrowser.app to use its native page engine and assistant."}</p>{runtimeState === "unavailable" && <code>npm run desktop</code>}</div>
+            ) : showStartPage ? (
               <NewTabPage adapter={adapter} onNavigate={navigateCurrentPage} />
             ) : (
               <div className="stage-placeholder">
@@ -1510,7 +1546,10 @@ export default function App({ adapter, lane }) {
             )}
           </div>
         </section>
-        <ChatPanel
+        {assistantOpen && <ChatPanel
+          ready={runtimeState === "ready"}
+          includePage={includePage} setIncludePage={setIncludePage}
+          onClose={() => setAssistantOpen(false)} onStop={stopAssistant}
           evidencePanel={<EvidencePanel adapter={adapter} sessionId={sessionId} pageId={currentPageId} pageUrl={snapshot?.url} onRun={presentProposal} />}
           actionEvents={actionEvents}
           messages={messages}
@@ -1521,11 +1560,11 @@ export default function App({ adapter, lane }) {
           prompt={prompt}
           setPrompt={setPrompt}
           thinking={thinking}
-        />
+        />}
       </main>
       <div className="status-bar">
         <span className="status-line">{status}</span>
-        <span>Tabs: {tabs.length}</span>
+        <span className="runtime-badge">{runtimeState === "ready" ? "Native browser" : "Native connection unavailable"} · Tabs: {tabs.length}</span>
       </div>
     </div>
   );

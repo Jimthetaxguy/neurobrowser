@@ -29,6 +29,7 @@ export function NewTabPage({ adapter, onNavigate }) {
 
   return (
     <div className="start-page">
+      <div className="start-heading"><span className="native-mark" aria-hidden="true">N</span><h1>A little more room to explore.</h1><p>Search the web, open a page, or ask your assistant.</p></div>
       <form
         className="start-search-form"
         onSubmit={(event) => {

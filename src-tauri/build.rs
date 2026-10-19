@@ -1,6 +1,9 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "ask_assistant",
+            "cancel_assistant_request",
+            "get_provider_status",
             "adjust_page_zoom",
             "browser_back",
             "browser_forward",

@@ -1,3 +1,4 @@
+mod assistant;
 mod context_menu;
 mod downloads;
 mod find_page;
@@ -54,6 +55,8 @@ struct AppState {
     /// The page hit under the context menu that is currently showing.
     context_menu: context_menu::ContextMenuSession,
     pending_approvals: Mutex<HashMap<String, PendingApproval>>,
+    assistant_config: Mutex<ProviderConfig>,
+    assistant_requests: assistant::Requests,
 }
 
 struct PendingApproval {
@@ -359,6 +362,9 @@ async fn create_page(
         tracing::warn!("could not arm the page context menu: {error}");
     }
 
+    if std::env::var_os("NEUROBROWSER_SMOKE_TEST").is_some() {
+        tracing::info!("native smoke: page created");
+    }
     Ok(page.id)
 }
 
@@ -832,7 +838,9 @@ fn present_context_menu(
     if state.runtimes.page_runtime_id(page_id).ok().as_deref() != Some(webview.label()) {
         return Err("Runtime report caller does not own this page".into());
     }
-    let page_url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+    let page_url = runtime::native_page_url(&webview)
+        .map(|url| url.to_string())
+        .unwrap_or_default();
     let mut hit = context_menu::context_hit_from_report(&page_url, body.as_ref());
     hit.page_id = page_id;
     let window = webview.window();
@@ -1084,35 +1092,33 @@ fn record_browsing_visit(store: &HistoryStore, url: &str, title: &str) {
     }
 }
 
+fn data_root(app: &tauri::App) -> Result<std::path::PathBuf, String> {
+    if let Some(path) = std::env::var_os("NEUROBROWSER_DATA_DIR") {
+        let path = std::path::PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err("NEUROBROWSER_DATA_DIR must be an absolute path".into());
+        }
+        return Ok(path);
+    }
+    app.path().app_data_dir().map_err(|error| error.to_string())
+}
+
 fn open_zoom(app: &tauri::App) -> Result<Arc<zoom::SiteZoomMemory>, String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| err.to_string())?
-        .join("site-zoom.json");
-    Ok(Arc::new(zoom::SiteZoomMemory::open(path)))
+    Ok(Arc::new(zoom::SiteZoomMemory::open(
+        data_root(app)?.join("site-zoom.json"),
+    )))
 }
 
 fn open_history(app: &tauri::App) -> Result<Arc<HistoryStore>, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| err.to_string())?
-        .join("history");
-    HistoryStore::open(dir)
+    HistoryStore::open(data_root(app)?.join("history"))
         .map(Arc::new)
-        .map_err(|err| err.to_string())
+        .map_err(|error| error.to_string())
 }
 
 fn open_memory(app: &tauri::App) -> Result<Arc<MemoryService>, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| err.to_string())?
-        .join("memory");
-    MemoryService::open(&data_dir)
+    MemoryService::open(data_root(app)?.join("memory"))
         .map(Arc::new)
-        .map_err(|err| err.to_string())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1183,8 +1189,11 @@ fn set_provider(
 ) -> Result<ProviderSelectionResult, String> {
     let provider_type = provider_type_from_slug(&provider)?;
     let provider_config = provider_config_for(provider_type);
-    let configured = matches!(provider_config.provider_type, ProviderType::Ollama)
-        || provider_config.api_key.is_some();
+    let configured = assistant::configured(&provider_config);
+    *state
+        .assistant_config
+        .lock()
+        .map_err(|_| "Provider state unavailable")? = provider_config.clone();
 
     state
         .session_manager
@@ -1195,6 +1204,59 @@ fn set_provider(
         model: provider_config.model,
         configured,
     })
+}
+
+/// Metadata only: never returns keys or endpoint credentials to JavaScript.
+#[tauri::command]
+fn get_provider_status(state: State<'_, AppState>) -> Result<ProviderSelectionResult, String> {
+    let config = state
+        .assistant_config
+        .lock()
+        .map_err(|_| "Provider state unavailable")?;
+    Ok(ProviderSelectionResult {
+        provider: provider_slug(&config.provider_type).into(),
+        model: config.model.clone(),
+        configured: assistant::configured(&config),
+    })
+}
+
+#[tauri::command]
+fn cancel_assistant_request(state: State<'_, AppState>, request_id: String) -> Result<(), String> {
+    state.assistant_requests.cancel(&request_id)
+}
+
+#[tauri::command]
+async fn ask_assistant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request_id: String,
+    session_id: String,
+    page_id: usize,
+    prompt: String,
+    include_page: bool,
+) -> Result<String, String> {
+    assistant::validate_prompt(&prompt)?;
+    state.session_manager.get_page(&session_id, page_id)?;
+    let config = state
+        .assistant_config
+        .lock()
+        .map_err(|_| "Provider state unavailable")?
+        .clone();
+    state.assistant_requests.run(&request_id, async {
+        let context = if include_page {
+            let _operation = state.session_manager.lock_page_operation(&session_id, page_id).await?;
+            let (_, browser) = browser_for_page(app, state.inner(), &session_id, page_id)?;
+            let observation = browser.observe(ObservationLimits::default()).await?;
+            observation.validate()?;
+            // The native observation excludes form values and bounds page text.
+            // Strip URL credentials/query/fragment and share no history or memory.
+            let mut url = tauri::Url::parse(&observation.url).map_err(|_| "Page URL is unavailable")?;
+            let _ = url.set_username(""); let _ = url.set_password(None);
+            url.set_query(None); url.set_fragment(None);
+            Some(serde_json::json!({"url":url.as_str(), "title":observation.title, "text":observation.text}).to_string())
+        } else { None };
+        assistant::complete(config, &prompt, context.as_deref()).await
+    }).await
 }
 
 /// Emitted to the main control webview when a browser menu item is chosen.
@@ -1610,9 +1672,19 @@ fn main() {
         )
         .init();
 
+    let initial_provider = match provider_type_from_slug(
+        &std::env::var("NEUROBROWSER_PROVIDER").unwrap_or_else(|_| "openai".into()),
+    ) {
+        Ok(provider) => provider,
+        Err(error) => {
+            eprintln!("Native provider setup: {error}");
+            std::process::exit(2);
+        }
+    };
+    let assistant_config = provider_config_for(initial_provider);
     let agent_config = AgentConfig {
         max_iterations: 5,
-        provider_config: provider_config_for(ProviderType::Openai),
+        provider_config: assistant_config.clone(),
     };
 
     let session_manager = SessionManager::new(agent_config);
@@ -1647,10 +1719,15 @@ fn main() {
                 find: Arc::new(find_page::PageFind::default()),
                 context_menu: context_menu::ContextMenuSession::default(),
                 pending_approvals: Mutex::new(HashMap::new()),
+                assistant_config: Mutex::new(assistant_config),
+                assistant_requests: assistant::Requests::default(),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ask_assistant,
+            cancel_assistant_request,
+            get_provider_status,
             browser_back,
             browser_forward,
             browser_reload,

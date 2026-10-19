@@ -22,6 +22,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --features headless --locked --b
 echo "→ Webview capability regression tests..."
 cargo test --manifest-path src-tauri/Cargo.toml --locked --test runtime_capabilities
 if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "→ Standalone native application launch..."
+  bash tests/run_native_app_smoke.sh
   echo "→ AppKit navigation regression..."
   ./tests/run_appkit_navigation.sh
   echo "→ Real WebKit capability workload..."

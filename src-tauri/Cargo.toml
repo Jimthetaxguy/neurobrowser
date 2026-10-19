@@ -11,6 +11,8 @@ default-run = "neurobrowser-tauri"
 
 [features]
 default = []
+# Standalone bundles embed the frontend; dev mode alone uses the Vite URL.
+custom-protocol = ["tauri/custom-protocol"]
 # Gates the neurobrowser-headless bin only. The bin is a Tokio Unix-socket
 # listener and does not use the Tauri runtime.
 headless = []

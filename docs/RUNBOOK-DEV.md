@@ -34,11 +34,56 @@ CI pins Node 22 on the `tauri` job. Local `verify.sh` uses the `node` and `npm` 
 
 ```bash
 cd src-tauri
-npx tauri dev --no-watch
+npm run desktop
 ```
 
 Runs the Vite dev server, compiles the Tauri binary, and launches the
 window. Drop `--no-watch` to rebuild on save.
+
+### Standalone application (no Vite server)
+
+```bash
+cd src-tauri
+npm ci
+npm run desktop:build
+open target/release/bundle/macos/NeuroBrowser.app
+```
+
+`desktop:build` enables `custom-protocol`, embeds `dist`, and produces a Mac `.app`.
+`npm run dev` serves only a web preview; it cannot browse or call a model.
+The preview reports a missing native connection and disables assistant requests.
+Use `bash tests/run_native_app_smoke.sh` for the automated isolated-profile launch regression.
+If `CARGO_TARGET_DIR` is set, the bundle lives under that target directory instead.
+
+Set `NEUROBROWSER_PROVIDER` to `openai` (default), `anthropic`, `ollama` or `custom`
+in the native launch environment to choose the initial provider; Settings can change
+it for the current session.
+
+The assistant reuses the native OpenAI, Anthropic, custom OpenAI-compatible and
+Ollama adapters. Credentials are read only by Rust from the app process environment.
+Set `OPENAI_API_KEY` (optional `OPENAI_MODEL`), or `ANTHROPIC_API_KEY` (optional
+`ANTHROPIC_MODEL`) in your existing trusted launch environment, then launch the app
+from that environment and select the matching provider in Settings. Do not put keys
+in Vite variables, JavaScript, source files or terminal command history. Finder and
+Dock launches generally do not inherit a terminal's environment. For an existing
+Ollama installation, use `OLLAMA_BASE_URL` and `OLLAMA_MODEL`; no model is downloaded
+by the app. Custom providers use `CUSTOM_PROVIDER_API_KEY`,
+`CUSTOM_PROVIDER_BASE_URL` and `CUSTOM_PROVIDER_MODEL`.
+
+Replies are independent requests with responsive progress and cancellation. They
+cannot execute browser tools. Page sharing is off by default. If explicitly enabled,
+Rust obtains validated, bounded page evidence without field values and removes URL
+credentials, query and fragment. No browsing history or persistent memory is sent.
+Separate page-evidence controls still use the existing governed action route.
+Provider failures are sanitized before reaching JavaScript; no fake fallback reply
+is generated. Cancellation drops the local provider future; it cannot promise the
+remote provider stopped generating or charging for an already received request.
+
+For isolated native QA, `NEUROBROWSER_DATA_DIR` selects an absolute profile directory.
+The default remains the operating system app-data directory. Do not point synthetic
+QA at a real browsing profile. Live provider smoke tests remain opt-in and require
+an existing authorized runtime configuration; a successful transport fixture test
+is not proof of a live LLM response.
 
 ## Headless policy protocol stub (shipped in v0.1.1)
 
