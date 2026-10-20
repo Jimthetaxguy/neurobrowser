@@ -1274,6 +1274,8 @@ enum MenuSection {
 struct MenuShortcut {
     section: MenuSection,
     id: &'static str,
+    /// Emitted command when it differs from `id`.
+    command: Option<&'static str>,
     label: &'static str,
     accelerator: &'static str,
     enabled: bool,
@@ -1284,6 +1286,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::File,
         id: "new-tab",
+        command: None,
         label: "New Tab",
         accelerator: "CmdOrCtrl+T",
         enabled: true,
@@ -1291,6 +1294,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::File,
         id: "close-tab",
+        command: None,
         label: "Close Tab",
         accelerator: "CmdOrCtrl+W",
         enabled: true,
@@ -1298,6 +1302,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::File,
         id: "focus-address",
+        command: None,
         label: "Focus Address Bar",
         accelerator: "CmdOrCtrl+L",
         enabled: true,
@@ -1305,6 +1310,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::Edit,
         id: "find",
+        command: None,
         label: "Find in Page",
         accelerator: "CmdOrCtrl+F",
         enabled: true,
@@ -1312,6 +1318,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::Edit,
         id: "find-next",
+        command: None,
         label: "Find Next",
         accelerator: "CmdOrCtrl+G",
         enabled: true,
@@ -1319,6 +1326,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::Edit,
         id: "find-previous",
+        command: None,
         label: "Find Previous",
         accelerator: "CmdOrCtrl+Shift+G",
         enabled: true,
@@ -1326,6 +1334,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "reload",
+        command: None,
         label: "Reload",
         accelerator: "CmdOrCtrl+R",
         enabled: true,
@@ -1333,6 +1342,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "stop",
+        command: None,
         label: "Stop",
         accelerator: "Escape",
         enabled: false,
@@ -1340,6 +1350,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "zoom-in",
+        command: None,
         label: "Zoom In",
         accelerator: "CmdOrCtrl+=",
         enabled: true,
@@ -1347,6 +1358,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "zoom-in-plus",
+        command: Some("zoom-in"),
         label: "Zoom In",
         accelerator: "CmdOrCtrl+Shift+=",
         enabled: true,
@@ -1354,6 +1366,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "zoom-out",
+        command: None,
         label: "Zoom Out",
         accelerator: "CmdOrCtrl+-",
         enabled: true,
@@ -1361,6 +1374,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "zoom-reset",
+        command: None,
         label: "Actual Size",
         accelerator: "CmdOrCtrl+0",
         enabled: true,
@@ -1368,6 +1382,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "next-tab",
+        command: None,
         label: "Next Tab",
         accelerator: "Ctrl+Tab",
         enabled: true,
@@ -1375,6 +1390,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "previous-tab",
+        command: None,
         label: "Previous Tab",
         accelerator: "Ctrl+Shift+Tab",
         enabled: true,
@@ -1382,6 +1398,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-1",
+        command: None,
         label: "Tab 1",
         accelerator: "CmdOrCtrl+1",
         enabled: true,
@@ -1389,6 +1406,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-2",
+        command: None,
         label: "Tab 2",
         accelerator: "CmdOrCtrl+2",
         enabled: true,
@@ -1396,6 +1414,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-3",
+        command: None,
         label: "Tab 3",
         accelerator: "CmdOrCtrl+3",
         enabled: true,
@@ -1403,6 +1422,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-4",
+        command: None,
         label: "Tab 4",
         accelerator: "CmdOrCtrl+4",
         enabled: true,
@@ -1410,6 +1430,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-5",
+        command: None,
         label: "Tab 5",
         accelerator: "CmdOrCtrl+5",
         enabled: true,
@@ -1417,6 +1438,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-6",
+        command: None,
         label: "Tab 6",
         accelerator: "CmdOrCtrl+6",
         enabled: true,
@@ -1424,6 +1446,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-7",
+        command: None,
         label: "Tab 7",
         accelerator: "CmdOrCtrl+7",
         enabled: true,
@@ -1431,6 +1454,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-8",
+        command: None,
         label: "Tab 8",
         accelerator: "CmdOrCtrl+8",
         enabled: true,
@@ -1438,6 +1462,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::View,
         id: "select-tab-9",
+        command: None,
         label: "Last Tab",
         accelerator: "CmdOrCtrl+9",
         enabled: true,
@@ -1445,6 +1470,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::History,
         id: "back",
+        command: None,
         label: "Back",
         accelerator: "CmdOrCtrl+[",
         enabled: true,
@@ -1452,6 +1478,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::History,
         id: "forward",
+        command: None,
         label: "Forward",
         accelerator: "CmdOrCtrl+]",
         enabled: true,
@@ -1459,6 +1486,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::History,
         id: "back-alt",
+        command: Some("back"),
         label: "Back",
         accelerator: "Alt+Left",
         enabled: true,
@@ -1466,6 +1494,7 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
     MenuShortcut {
         section: MenuSection::History,
         id: "forward-alt",
+        command: Some("forward"),
         label: "Forward",
         accelerator: "Alt+Right",
         enabled: true,
@@ -1473,33 +1502,10 @@ const BROWSER_MENU_ITEMS: &[MenuShortcut] = &[
 ];
 
 fn menu_command(id: &str) -> Option<&'static str> {
-    match id {
-        "new-tab" => Some("new-tab"),
-        "close-tab" => Some("close-tab"),
-        "focus-address" => Some("focus-address"),
-        "reload" => Some("reload"),
-        "stop" => Some("stop"),
-        "back" | "back-alt" => Some("back"),
-        "forward" | "forward-alt" => Some("forward"),
-        "find" => Some("find"),
-        "find-next" => Some("find-next"),
-        "find-previous" => Some("find-previous"),
-        "zoom-in" | "zoom-in-plus" => Some("zoom-in"),
-        "zoom-out" => Some("zoom-out"),
-        "zoom-reset" => Some("zoom-reset"),
-        "next-tab" => Some("next-tab"),
-        "previous-tab" => Some("previous-tab"),
-        "select-tab-1" => Some("select-tab-1"),
-        "select-tab-2" => Some("select-tab-2"),
-        "select-tab-3" => Some("select-tab-3"),
-        "select-tab-4" => Some("select-tab-4"),
-        "select-tab-5" => Some("select-tab-5"),
-        "select-tab-6" => Some("select-tab-6"),
-        "select-tab-7" => Some("select-tab-7"),
-        "select-tab-8" => Some("select-tab-8"),
-        "select-tab-9" => Some("select-tab-9"),
-        _ => None,
-    }
+    let shortcut = BROWSER_MENU_ITEMS
+        .iter()
+        .find(|shortcut| shortcut.id == id)?;
+    Some(shortcut.command.unwrap_or(shortcut.id))
 }
 
 fn emit_menu_command(app: &AppHandle, command: &str) {
@@ -1667,8 +1673,9 @@ fn install_app_menu(app: &tauri::App, runtimes: &BrowserRuntimeRegistry) -> taur
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("neurobrowser=info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("neurobrowser=info,neurobrowser_tauri=info")
+            }),
         )
         .init();
 
@@ -1789,13 +1796,7 @@ mod tests {
             let command = menu_command(shortcut.id).unwrap_or_else(|| {
                 panic!("{} is not forwarded to the control webview", shortcut.id)
             });
-            let expected = match shortcut.id {
-                "back-alt" => "back",
-                "forward-alt" => "forward",
-                "zoom-in-plus" => "zoom-in",
-                id => id,
-            };
-            assert_eq!(command, expected);
+            assert_eq!(command, shortcut.command.unwrap_or(shortcut.id));
         }
         assert!(
             !accelerators
