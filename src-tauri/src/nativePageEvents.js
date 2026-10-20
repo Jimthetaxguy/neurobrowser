@@ -1,3 +1,5 @@
+import { bindHostListen } from "./hostListen.js";
+
 // A background tab title update must not replace an in-progress URL edit.
 export function nativePageUpdates(event, activePageId) {
   if (event.type === "tabs") {
@@ -146,60 +148,20 @@ export function moveTab(tabs, fromIndex, toIndex) {
  * and resolves to an unlisten function. `callback` receives `{pageId, phase, url, title}`.
  */
 export function bindPageLifecycle(listen, callback) {
-  let stop = () => {};
-  let cancelled = false;
-  Promise.resolve()
-    .then(() => listen(PAGE_LIFECYCLE_EVENT, (event) => {
-      const payload = event && typeof event === "object" && event.payload && typeof event.payload === "object"
-        ? event.payload
-        : event;
-      try {
-        callback(payload);
-      } catch (error) {
-        console.error("page lifecycle handler failed", error);
-      }
-    }))
-    .then((unsubscribe) => {
-      if (typeof unsubscribe !== "function") return;
-      if (cancelled) unsubscribe();
-      else stop = unsubscribe;
-    })
-    .catch((error) => {
-      console.error("page lifecycle listen failed", error);
-    });
-  return () => {
-    cancelled = true;
-    stop();
-    stop = () => {};
-  };
+  return bindHostListen(listen, PAGE_LIFECYCLE_EVENT, (event) => {
+    const payload = event && typeof event === "object" && event.payload && typeof event.payload === "object"
+      ? event.payload
+      : event;
+    callback(payload);
+  }, "page lifecycle handler failed", "page lifecycle listen failed");
 }
 
 /** Same listen shape as {@link bindPageLifecycle}, for `page-new-window`. */
 export function bindPageNewWindow(listen, callback) {
-  let stop = () => {};
-  let cancelled = false;
-  Promise.resolve()
-    .then(() => listen(PAGE_NEW_WINDOW_EVENT, (event) => {
-      const payload = event && typeof event === "object" && event.payload && typeof event.payload === "object"
-        ? event.payload
-        : event;
-      try {
-        callback(payload);
-      } catch (error) {
-        console.error("page new window handler failed", error);
-      }
-    }))
-    .then((unsubscribe) => {
-      if (typeof unsubscribe !== "function") return;
-      if (cancelled) unsubscribe();
-      else stop = unsubscribe;
-    })
-    .catch((error) => {
-      console.error("page new window listen failed", error);
-    });
-  return () => {
-    cancelled = true;
-    stop();
-    stop = () => {};
-  };
+  return bindHostListen(listen, PAGE_NEW_WINDOW_EVENT, (event) => {
+    const payload = event && typeof event === "object" && event.payload && typeof event.payload === "object"
+      ? event.payload
+      : event;
+    callback(payload);
+  }, "page new window handler failed", "page new window listen failed");
 }
