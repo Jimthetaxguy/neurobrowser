@@ -1207,6 +1207,9 @@ mod tests {
         async fn get_text(&self, _selector: &str) -> Result<String, String> {
             Ok(String::new())
         }
+        async fn get_attributes(&self, _selector: &str) -> Result<HashMap<String, String>, String> {
+            Ok(HashMap::new())
+        }
         async fn click(&self, _selector: &str) -> Result<(), String> {
             Ok(())
         }
