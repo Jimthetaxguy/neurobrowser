@@ -1,3 +1,5 @@
+import { bindHostListen } from "./hostListen.js";
+
 /** Main-webview event. Payload is `{ text }` from the shell, never a file path. */
 export const CONTEXT_COPY_EVENT = "context-copy";
 
@@ -39,29 +41,9 @@ export async function writeClipboardText(text, doc = document) {
  * `callback` receives the text to copy.
  */
 export function bindContextCopy(listen, callback) {
-  let stop = () => {};
-  let cancelled = false;
-  Promise.resolve()
-    .then(() => listen(CONTEXT_COPY_EVENT, (event) => {
-      const text = contextCopyText(event);
-      if (!text) return;
-      try {
-        callback(text);
-      } catch (error) {
-        console.error("context copy handler failed", error);
-      }
-    }))
-    .then((unsubscribe) => {
-      if (typeof unsubscribe !== "function") return;
-      if (cancelled) unsubscribe();
-      else stop = unsubscribe;
-    })
-    .catch((error) => {
-      console.error("context copy listen failed", error);
-    });
-  return () => {
-    cancelled = true;
-    stop();
-    stop = () => {};
-  };
+  return bindHostListen(listen, CONTEXT_COPY_EVENT, (event) => {
+    const text = contextCopyText(event);
+    if (!text) return;
+    callback(text);
+  }, "context copy handler failed", "context copy listen failed");
 }

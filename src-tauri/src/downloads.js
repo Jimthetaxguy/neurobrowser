@@ -1,3 +1,5 @@
+import { bindHostListen } from "./hostListen.js";
+
 /** Main-webview event for one download row. */
 export const DOWNLOAD_EVENT = "download-update";
 
@@ -52,30 +54,10 @@ export function downloadProgressText(item) {
  * `callback` receives one download row.
  */
 export function bindDownloads(listen, callback) {
-  let stop = () => {};
-  let cancelled = false;
-  Promise.resolve()
-    .then(() => listen(DOWNLOAD_EVENT, (event) => {
-      const payload = event && typeof event === "object" && event.payload && typeof event.payload === "object"
-        ? event.payload
-        : event;
-      try {
-        callback(payload);
-      } catch (error) {
-        console.error("download handler failed", error);
-      }
-    }))
-    .then((unsubscribe) => {
-      if (typeof unsubscribe !== "function") return;
-      if (cancelled) unsubscribe();
-      else stop = unsubscribe;
-    })
-    .catch((error) => {
-      console.error("download listen failed", error);
-    });
-  return () => {
-    cancelled = true;
-    stop();
-    stop = () => {};
-  };
+  return bindHostListen(listen, DOWNLOAD_EVENT, (event) => {
+    const payload = event && typeof event === "object" && event.payload && typeof event.payload === "object"
+      ? event.payload
+      : event;
+    callback(payload);
+  }, "download handler failed", "download listen failed");
 }
