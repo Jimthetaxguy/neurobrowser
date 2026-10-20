@@ -3,6 +3,9 @@
   "description": "Host commands for the main control webview only",
   "webviews": ["main"],
   "permissions": [
+    "allow-ask-assistant",
+    "allow-cancel-assistant-request",
+    "allow-get-provider-status",
     "allow-adjust-page-zoom",
     "allow-browser-back",
     "allow-browser-forward",

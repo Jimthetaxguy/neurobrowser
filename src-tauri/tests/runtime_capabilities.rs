@@ -54,6 +54,9 @@ fn page_webviews_never_inherit_control_commands() {
     commands.retain(|command| *command != "browser_runtime_report");
     assert!(commands.contains(&"submit_approval"));
     assert!(commands.contains(&"set_provider"));
+    assert!(commands.contains(&"ask_assistant"));
+    assert!(commands.contains(&"cancel_assistant_request"));
+    assert!(commands.contains(&"get_provider_status"));
     assert!(commands.contains(&"find_in_page"));
     assert!(commands.contains(&"adjust_page_zoom"));
     for command in commands {

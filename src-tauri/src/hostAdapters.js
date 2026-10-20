@@ -29,6 +29,11 @@ export function createTauriHostAdapter({ listen = tauriListen } = {}) {
 
   return {
     rendersPageInHost: true,
+    async getProviderStatus() { return invoke("get_provider_status"); },
+    async askAssistant(sessionId, pageId, prompt, requestId, includePage) {
+      return invoke("ask_assistant", { sessionId, pageId, prompt, requestId, includePage });
+    },
+    async cancelAssistantRequest(requestId) { return invoke("cancel_assistant_request", { requestId }); },
     async createSession() {
       return invoke("create_session");
     },

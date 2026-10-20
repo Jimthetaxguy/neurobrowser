@@ -183,6 +183,12 @@
           "markdownDescription": "Enables the adjust_page_zoom command without any pre-configured scope."
         },
         {
+          "description": "Enables the ask_assistant command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ask-assistant",
+          "markdownDescription": "Enables the ask_assistant command without any pre-configured scope."
+        },
+        {
           "description": "Enables the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "allow-browser-back",
@@ -211,6 +217,12 @@
           "type": "string",
           "const": "allow-cancel-agent-run",
           "markdownDescription": "Enables the cancel_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_assistant_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-assistant-request",
+          "markdownDescription": "Enables the cancel_assistant_request command without any pre-configured scope."
         },
         {
           "description": "Enables the close_page command without any pre-configured scope.",
@@ -271,6 +283,12 @@
           "type": "string",
           "const": "allow-get-page-snapshot",
           "markdownDescription": "Enables the get_page_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_provider_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-provider-status",
+          "markdownDescription": "Enables the get_provider_status command without any pre-configured scope."
         },
         {
           "description": "Enables the navigate command without any pre-configured scope.",
@@ -351,6 +369,12 @@
           "markdownDescription": "Denies the adjust_page_zoom command without any pre-configured scope."
         },
         {
+          "description": "Denies the ask_assistant command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ask-assistant",
+          "markdownDescription": "Denies the ask_assistant command without any pre-configured scope."
+        },
+        {
           "description": "Denies the browser_back command without any pre-configured scope.",
           "type": "string",
           "const": "deny-browser-back",
@@ -379,6 +403,12 @@
           "type": "string",
           "const": "deny-cancel-agent-run",
           "markdownDescription": "Denies the cancel_agent_run command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_assistant_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-assistant-request",
+          "markdownDescription": "Denies the cancel_assistant_request command without any pre-configured scope."
         },
         {
           "description": "Denies the close_page command without any pre-configured scope.",
@@ -439,6 +469,12 @@
           "type": "string",
           "const": "deny-get-page-snapshot",
           "markdownDescription": "Denies the get_page_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_provider_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-provider-status",
+          "markdownDescription": "Denies the get_provider_status command without any pre-configured scope."
         },
         {
           "description": "Denies the navigate command without any pre-configured scope.",

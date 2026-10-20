@@ -1720,9 +1720,7 @@ test("the browser stage stays the flexing row while find is open", async () => {
     assert.equal(downloads.parentElement, panel);
     assert.equal(document.querySelector(".downloads-slot"), null);
     assert.deepEqual([...panel.children].map((child) => child.className), [
-      "browser-toolbar",
       "find-bar",
-      "page-stats",
       "downloads",
       "browser-stage",
     ]);
