@@ -132,7 +132,6 @@ function memoryPresentation(hit) {
     host,
     pageUrl,
     title,
-    titleIsExcerpt: !heading && Boolean(excerpt),
   };
 }
 
@@ -503,7 +502,7 @@ function MemorySuggestion({
   selected,
   setPendingForgetId,
 }) {
-  const { hit, host, pageUrl, title, detail, titleIsExcerpt } = entry;
+  const { hit, host, pageUrl, title, detail } = entry;
   const confirmingForget = pendingForgetId === hit.block_id;
 
   return (
@@ -516,7 +515,7 @@ function MemorySuggestion({
       <div className="omnibox-suggestion-row">
         <button
           aria-selected={selected}
-          className={`omnibox-suggestion-main${titleIsExcerpt ? " wrap-title" : ""}`}
+          className="omnibox-suggestion-main"
           id={optionDomId(listId, entry.index)}
           onClick={() => onSelect(entry)}
           onMouseDown={(event) => event.preventDefault()}

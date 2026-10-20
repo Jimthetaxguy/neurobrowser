@@ -1,7 +1,7 @@
 import { bindHostListen } from "./hostListen.js";
 
 /** Main-webview event for one download row. */
-export const DOWNLOAD_EVENT = "download-update";
+const DOWNLOAD_EVENT = "download-update";
 
 const DOWNLOAD_PHASES = new Set(["progress", "done", "failed"]);
 const DOWNLOAD_LIMIT = 20;

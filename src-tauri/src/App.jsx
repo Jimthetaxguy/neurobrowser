@@ -478,10 +478,6 @@ function Header({
   onNewTab,
   onOpenBlocked,
   onStatus,
-  policyMode,
-  provider,
-  setPolicyMode,
-  setProvider,
   setUrl,
   url,
   onBrowserAction, onStop, loading, zoomPercent,
@@ -489,10 +485,6 @@ function Header({
 }) {
   return (
     <header className={compact ? "header compact" : "header"}>
-      <div className="brand">
-        <span className="brand-dot" />
-        <span>NeuroBrowser</span>
-      </div>
       {!compact && <BrowserToolbar loading={loading} onAction={onBrowserAction} onStop={onStop} zoomPercent={zoomPercent} />}
       <div className="location">
         <SecurityIndicator url={url} />
@@ -868,18 +860,11 @@ export default function App({ adapter, lane }) {
     const requestId = globalThis.crypto?.randomUUID?.() ?? null;
     assistantRequest.current = requestId;
     try {
-      if (typeof adapter.askAssistant === "function") {
-        if (!requestId) throw new Error("Secure request IDs are unavailable");
-        const reply = await adapter.askAssistant(sessionId, currentPageId, trimmed, requestId, includePage);
-        if (assistantRequest.current !== requestId) return;
-        appendMessage("assistant", reply);
-        setStatus("Reply received");
-        return;
-      }
-      const result = await adapter.startAgentRun(sessionId, currentPageId, trimmed);
-      const events = result.events || [];
-      setActionEvents((items) => [...items, ...events]);
-      await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
+      if (!requestId) throw new Error("Secure request IDs are unavailable");
+      const reply = await adapter.askAssistant(sessionId, currentPageId, trimmed, requestId, includePage);
+      if (assistantRequest.current !== requestId) return;
+      appendMessage("assistant", reply);
+      setStatus("Reply received");
     } catch (error) {
       if (assistantRequest.current !== requestId) return;
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
@@ -887,7 +872,7 @@ export default function App({ adapter, lane }) {
     } finally {
       if (assistantRequest.current === requestId) { assistantRequest.current = null; setThinking(false); }
     }
-  }, [adapter, appendMessage, currentPageId, prompt, refreshSnapshot, sessionId, thinking, includePage]);
+  }, [adapter, appendMessage, currentPageId, prompt, sessionId, thinking, includePage]);
 
   const stopAssistant = useCallback(async () => {
     const id = assistantRequest.current;
@@ -1460,9 +1445,6 @@ export default function App({ adapter, lane }) {
 
   const blockedCount = Array.isArray(blockedPopups[currentPageId]) ? blockedPopups[currentPageId].length : 0;
 
-  const stageText =
-    "Live page webview attaches here. This React surface controls layout, browser commands, and AI actions while the actual page renders in a real child webview.";
-
   if (compact) {
     return (
       <div className="app-shell appkit-shell">
@@ -1504,10 +1486,6 @@ export default function App({ adapter, lane }) {
         onNewTab={createNewTab}
         onOpenBlocked={openBlockedPopup}
         onStatus={setStatus}
-        policyMode={policyMode}
-        provider={provider}
-        setPolicyMode={selectPolicyMode}
-        setProvider={selectProvider}
         setUrl={setUrlFromUser}
         url={url}
       />
@@ -1538,12 +1516,7 @@ export default function App({ adapter, lane }) {
               <div className="runtime-notice" role="status"><span className="native-mark">N</span><h1>{runtimeState === "connecting" ? "Connecting to NeuroBrowser" : "Open the native app"}</h1><p>{runtimeState === "connecting" ? "Preparing your browser window…" : "This web preview cannot browse or call a model. Launch NeuroBrowser.app to use its native page engine and assistant."}</p>{runtimeState === "unavailable" && <code>npm run desktop</code>}</div>
             ) : showStartPage ? (
               <NewTabPage adapter={adapter} onNavigate={navigateCurrentPage} />
-            ) : (
-              <div className="stage-placeholder">
-                <h2>{snapshot?.title || "Native page rendering"}</h2>
-                <p>{stageText}</p>
-              </div>
-            )}
+            ) : null}
           </div>
         </section>
         {assistantOpen && <ChatPanel

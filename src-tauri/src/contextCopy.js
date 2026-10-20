@@ -1,7 +1,7 @@
 import { bindHostListen } from "./hostListen.js";
 
 /** Main-webview event. Payload is `{ text }` from the shell, never a file path. */
-export const CONTEXT_COPY_EVENT = "context-copy";
+const CONTEXT_COPY_EVENT = "context-copy";
 
 /**
  * The text the shell asked the chrome to copy, or null.
