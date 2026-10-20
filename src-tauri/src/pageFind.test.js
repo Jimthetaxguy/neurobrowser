@@ -11,7 +11,7 @@ import { FindBar, chromeShortcut, findMatchLabel } from "./pageFind.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const findFunction = readFileSync(path.join(here, "pageFindFunction.js"), "utf8");
 
-function findIn(html, query, index) {
+function findIn(html, query, index, withSelection = false) {
   const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
     url: "https://example.test/page",
     runScripts: "outside-only",
@@ -19,7 +19,8 @@ function findIn(html, query, index) {
   try {
     dom.window.eval(`${findFunction}\nwindow.__find = neurobrowserFind;`);
     const result = dom.window.__find(query, index);
-    return { total: Number(result.total), current: Number(result.current) };
+    return { total: Number(result.total), current: Number(result.current),
+      ...(withSelection ? { selection: dom.window.getSelection().toString() } : {}) };
   } finally {
     dom.window.close();
   }
@@ -112,4 +113,23 @@ test("the find bar shows the count and moves with the buttons", async () => {
     }
     dom.window.close();
   }
+});
+
+test("find uses original DOM offsets after case-expanding Unicode text", () => {
+  for (const [index, selection] of [[0, "cats"], [1, "CATS"]]) {
+    assert.deepEqual(findIn("<p>İ cats CATS</p>", "cats", index, true),
+      { total: 2, current: index + 1, selection });
+  }
+  assert.deepEqual(findIn("<p>İx</p>", "İ", 0, true),
+    { total: 1, current: 1, selection: "İ" });
+});
+
+test("find treats regex syntax literally and preserves astral text offsets", () => {
+  assert.deepEqual(findIn("<p>😀 [a+b].* 😀 [A+B].*</p>", "[a+b].*", 1, true),
+    { total: 2, current: 2, selection: "[A+B].*" });
+});
+
+test("find matches Greek sigma case variants at their original offsets", () => {
+  assert.deepEqual(findIn("<p>ΟΣ ος οσ</p>", "οσ", 1, true),
+    { total: 3, current: 2, selection: "ος" });
 });

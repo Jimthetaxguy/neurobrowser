@@ -147,6 +147,9 @@ private struct CapabilityWebKitWorkloads {
             harness = test
             try test.loadFixture(URL(string: arguments[2])!)
             try workloads(test)
+            let findURL = URL(fileURLWithPath: arguments[1]).deletingLastPathComponent()
+                .appendingPathComponent("pageFindFunction.js")
+            try findWorkloads(test, source: String(contentsOf: findURL, encoding: .utf8))
         } catch { failureMessage = String(describing: error) }
         let receipt: [String: Any] = [
             "schema_version": 1, "engine": "WKWebView", "runtime_source": arguments[1],
@@ -160,6 +163,33 @@ private struct CapabilityWebKitWorkloads {
         } catch { fputs("Could not write WebKit receipt: \(error)\n", stderr); exit(1) }
         if let failureMessage { fputs("WebKit capability workload failed: \(failureMessage)\n", stderr); exit(1) }
         print("Real WebKit capability workloads: \(harness?.assertions ?? 0) assertions passed")
+    }
+
+    // Execute the exact shipped finder in a real, nonpersistent WKWebView.
+    // Lowercase expansion must never shift a Range into the wrong DOM text.
+    private static func findWorkloads(_ test: WorkloadHarness, source: String) throws {
+        let cases: [(String, String, Int, Int, String)] = [
+            ("İ cats CATS", "cats", 0, 2, "cats"),
+            ("İ cats CATS", "cats", 1, 2, "CATS"),
+            ("İx", "İ", 0, 1, "İ"),
+            ("😀 [a+b].* 😀 [A+B].*", "[a+b].*", 1, 2, "[A+B].*"),
+            ("ΟΣ ος οσ", "οσ", 1, 3, "ος")
+        ]
+        for (text, query, index, total, selected) in cases {
+            let arguments = try json(["text": text, "query": query, "index": index])
+            let hit = try test.payload("""
+            (() => {
+              \(source)
+              const args = \(arguments);
+              document.body.textContent = args.text;
+              const hit = neurobrowserFind(args.query, args.index);
+              return {...hit, selected: window.getSelection().toString()};
+            })()
+            """)
+            try test.check(hit["total"] as? Int == total, "Find count incorrect for \(query)")
+            try test.check(hit["current"] as? Int == index + 1, "Find cursor incorrect for \(query)")
+            try test.check(hit["selected"] as? String == selected, "Find selected incorrect DOM text for \(query)")
+        }
     }
 
     private static func workloads(_ test: WorkloadHarness) throws {
