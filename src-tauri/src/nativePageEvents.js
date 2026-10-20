@@ -13,10 +13,10 @@ export function nativePageUpdates(event, activePageId) {
 }
 
 /** Main-webview event from the page webview. Payload is `{pageId, phase, url, title}`. */
-export const PAGE_LIFECYCLE_EVENT = "page-lifecycle";
+const PAGE_LIFECYCLE_EVENT = "page-lifecycle";
 
 /** Main-webview event for a popup or new browsing context. Payload is `{pageId, url, disposition}`. */
-export const PAGE_NEW_WINDOW_EVENT = "page-new-window";
+const PAGE_NEW_WINDOW_EVENT = "page-new-window";
 
 const NEW_WINDOW_DISPOSITIONS = new Set(["foreground", "background", "blocked"]);
 
