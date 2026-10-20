@@ -24,7 +24,7 @@ From repo root:
 
 Commands and order are in `verify.sh`. CI jobs are in `.github/workflows/ci.yml`. `verify.sh` ends with `=== All checks passed ===`.
 
-Darwin only, after the webview capability tests: `./tests/run_appkit_navigation.sh`, then `bash tests/run_capability_webkit.sh`.
+Darwin only, after the webview capability tests: the native app smoke test (`bash tests/run_native_app_smoke.sh`), then AppKit navigation (`./tests/run_appkit_navigation.sh`), then the WebKit workload (`bash tests/run_capability_webkit.sh`).
 
 CI also runs a `guards` job that `verify.sh` does not. That job rejects mock crates, conflict markers, and iCloud duplicate names.
 
@@ -177,7 +177,7 @@ The failing command is the one `verify.sh` printed. Fix that step and re-run `./
 | `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | `https://api.openai.com` (via `resolve_endpoint`) |
 | `CUSTOM_PROVIDER_MODEL` | `set_provider("custom")` | `gpt-4o` |
 | `NEUROBROWSER_SOCKET` | headless daemon | temp dir `neurobrowser-<pid>.sock` |
-| `RUST_LOG` | desktop (`src-tauri/src/main.rs`) and headless (`src-tauri/src/headless_bin/main.rs`). `neurobrowser` is the library crate; shell events are `neurobrowser_tauri`. The headless bin's crate root is `neurobrowser_headless` (no `headless` module). | `neurobrowser=info` (desktop); `neurobrowser=info,headless=info` (headless) |
+| `RUST_LOG` | desktop (`src-tauri/src/main.rs`) and headless (`src-tauri/src/headless_bin/main.rs`). `neurobrowser` is the library crate; shell events are `neurobrowser_tauri`. The headless bin's crate root is `neurobrowser_headless` (no `headless` module). | `neurobrowser=info,neurobrowser_tauri=info` (desktop); `neurobrowser=info,neurobrowser_headless=info` (headless) |
 
 ## Where things live
 
