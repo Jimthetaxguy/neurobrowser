@@ -51,6 +51,7 @@ it delegates modern page execution and rendering to an OS webview.
 - `src/netguard/`: HTTP connection resolver/redirect checks and desktop navigation preflight.
 - `src-tauri/src/runtime.rs`: OS-webview adapter, bounded DOM observation, target dispatch and request correlation.
 - `src-tauri/src/main.rs`: trusted control IPC, policy leases, pending human approvals and memory capture.
+- `src-tauri/src/assistant.rs`: reply-only provider requests with local cancellation. No tools execute, and no page is shared by default.
 - `src-tauri/src/EvidencePanel.jsx`: human evidence and explicit tool proposals; no browser authority in React.
 - `crates/neuro-memory/`: persistent page memory, distinct from transient run events and grants.
 
@@ -77,5 +78,6 @@ The [October assessment checkpoint](docs/research/neurobrowser-capability-202610
 is a frozen record from before #111 merged (baseline d0271f7 / f50f5ae). Chrome that
 shipped after the freeze is the new-tab page and history suggestions, popups as tabs,
 downloads, find and per-site zoom, the page right-click menu, and navigation status.
+Also shipped after the freeze are the standalone launch and the cancellable provider assistant.
 The architectural slices still absent are the session service, profiles, MCP transport,
 and screenshots.

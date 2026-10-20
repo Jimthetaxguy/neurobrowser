@@ -21,6 +21,10 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - Find in page and per-site zoom are available from the main window (#135).
 - A page right-click menu can open or copy a link, save or copy an image, copy
   or search selected text, and go back, forward, or reload (#136).
+- A standalone macOS app builds with `npm run desktop:build` in `src-tauri`.
+  The chat can call `ask_assistant` and cancel that wait with
+  `cancel_assistant_request`. Page sharing is off by default, and a model
+  tool request is not executed (#155).
 
 ### Changed
 
@@ -51,6 +55,11 @@ versions remain 0.1.0 until an actual version bump and release tag.
   home-directory path (#131).
 - macOS navigation and WebKit tests share one test-server bind and one wait
   that notices a crashed server (#139).
+- The five Tauri shell listeners share `bindHostListen` in
+  `src-tauri/src/hostListen.js` (#151).
+- Shell trims share the history suggestion helper and drop unused chrome
+  paths. Suggestion counts, find indexes, and painted colors are unchanged
+  (#153).
 
 ### Fixed
 
@@ -82,6 +91,9 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - The page area stays open when the find bar is showing (#138).
 - A finished download is matched by its destination path, then by the same-URL
   queue (#140).
+- Find in page uses Unicode case-insensitive matching on the original text
+  in `src-tauri/src/pageFindFunction.js`, so a case fold that changes UTF-16
+  length no longer throws a DOM Range exception (#154).
 
 ### Removed
 
@@ -105,6 +117,9 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - Obsolete status dumps and misleading architectural claims. README, the agent
   surface, ADR-001, and the skill describe the maintained boundaries.
 - Redundant status glossary, project summary, and the implemented GitSpec pair.
+- Dead atomic-rename retries and redundant netguard branches. Rename still
+  replaces an existing file, and loopback and disallowed schemes stay blocked
+  (#152).
 
 ## [0.1.1] — 2026-07-08
 

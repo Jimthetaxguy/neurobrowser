@@ -23,7 +23,15 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 
 Run `./verify.sh`. Darwin-only steps and the CI-only notes are in [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md).
 
-Desktop (`npx tauri dev` in `src-tauri/`) is macOS.
+The desktop is macOS. From `src-tauri/`, where these scripts are defined in `package.json`:
+
+```bash
+npm run desktop
+npm run desktop:build
+```
+
+`npm run desktop` runs `tauri dev --no-watch`. `npm run desktop:build` runs
+`tauri build --features custom-protocol --bundles app`.
 
 Start the headless policy stub on Unix:
 
@@ -69,6 +77,10 @@ Shipped run/policy surface:
 
 - `start_agent_run` evaluates model tool calls against `ActionPolicy`
   (`ReadOnly` / `Assisted` / `HighAutonomy`)
+- The chat calls `ask_assistant` from `askAssistant` in
+  `src-tauri/src/App.jsx`. `cancel_assistant_request` cancels that wait.
+  The same handler calls `start_agent_run` when the host adapter has no
+  `askAssistant`.
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned
   as a structured run event
