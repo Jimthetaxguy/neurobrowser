@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { startPageSites } from "./historySuggestions.js";
+import { HISTORY_SUGGESTION_LIMIT, startPageSites } from "./historySuggestions.js";
 import { omniboxActionHint } from "./omniboxInput.js";
 
 /**
@@ -15,7 +15,7 @@ export function NewTabPage({ adapter, onNavigate }) {
     if (typeof adapter?.searchBrowsingHistory !== "function") return undefined;
     let cancelled = false;
     Promise.resolve()
-      .then(() => adapter.searchBrowsingHistory("", 8))
+      .then(() => adapter.searchBrowsingHistory("", HISTORY_SUGGESTION_LIMIT))
       .then((hits) => {
         if (!cancelled) setSites(startPageSites(hits));
       })

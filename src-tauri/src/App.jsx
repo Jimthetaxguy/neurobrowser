@@ -186,7 +186,7 @@ function Downloads({ items, onOpen, onShow }) {
                   aria-valuemax={percent == null ? undefined : 100}
                   aria-valuemin={percent == null ? undefined : 0}
                   aria-valuenow={percent == null ? undefined : percent}
-                  className={`download-progress${percent == null ? " indeterminate" : ""}`}
+                  className="download-progress"
                   role="progressbar"
                 >
                   {progress}
