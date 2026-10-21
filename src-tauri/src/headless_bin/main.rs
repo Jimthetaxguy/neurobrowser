@@ -1,15 +1,20 @@
-//! NeuroBrowser — headless daemon (Phase D4).
+//! NeuroBrowser — headless daemon: policy JSON-RPC + stub snapshot.
 //!
-//! A small cross-process binary that exposes the agent-facing tool surface
-//! over a Unix Domain Socket (local TCP on non-Unix). External agents (ROSA,
-//! Claude Code, custom workers) connect, send JSON-RPC-shaped requests, and
-//! receive the tool results.
+//! External agents connect over a Unix domain socket and send newline-delimited
+//! JSON-RPC-shaped requests. Dispatch never constructs a `BrowserEngine` or a
+//! webview. The `snapshot` method returns a hardcoded `about:blank` stub.
 //!
-//! For v0.1 the daemon uses the in-process `BrowserEngine` over reqwest +
-//! scraper rather than a Tauri child webview. That keeps the daemon
-//! platform-portable and dependency-light at the cost of full JS execution.
-//! v0.1.1 will add a `--tauri` flag that boots a real Tauri child webview
-//! and routes through the IPC bridge.
+//! Methods: `auth`, `ping`, `policy.get`, `policy.set`, `policy.evaluate`,
+//! `tools.list`, `snapshot` (stub).
+//!
+//! Socket path, first match: `--socket PATH`, else `$NEUROBROWSER_SOCKET`,
+//! else a per-pid file in the temp directory. `--help` prints usage. Unknown
+//! arguments are rejected (they are not ignored).
+//!
+//! The listener is Unix-only. Non-Unix targets compile (`--help` works) but
+//! refuse to listen. If the Unix socket cannot be bound, the process falls
+//! back to `127.0.0.1:0` and prints `NEUROBROWSER_LISTENING=tcp://…`. That
+//! fallback is not a non-Unix transport.
 //!
 //! ## Authorization (SG2 → full authz)
 //!
@@ -39,15 +44,16 @@
 //! ```json
 //! // (TCP only) authenticate first
 //! { "id": "uuid", "method": "auth", "params": { "token": "..." } }
-//! // request
-//! { "id": "uuid", "method": "snapshot", "params": { "url": "https://example.com" } }
+//! // request — `snapshot` ignores `params` and returns a hardcoded stub
+//! { "id": "uuid", "method": "snapshot", "params": {} }
 //! // response (on the next newline)
 //! { "id": "uuid", "ok": true, "result": { ... } }
 //! // or
-//! { "id": "uuid", "ok": false, "error": { "code": "TIMEOUT", "message": "..." } }
+//! { "id": "uuid", "ok": false, "error": { "code": "UNKNOWN_METHOD", "message": "..." } }
 //! ```
 //!
-//! See `docs/AGENT-SURFACE.md` for the full schema.
+//! Error codes: `BAD_REQUEST`, `INTERNAL`, `VALIDATION`, `UNKNOWN_METHOD`,
+//! `OUT_OF_PROFILE`, `UNAUTHENTICATED`.
 
 #![cfg(feature = "headless")]
 
@@ -55,17 +61,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use neurobrowser::agent::policy::{ActionPolicy, AutonomyLevel, RiskFlag};
+use neurobrowser::agent::policy::{ActionPolicy, AutonomyLevel};
 use neurobrowser::browser::default_tool_registry;
-use neurobrowser::providers::{
-    create_provider, AiContext, AiProvider, ProviderConfig, ProviderType,
-};
-use neurobrowser::tools::{PageSnapshot, RiskLevel, ToolAction, ToolRegistry, ToolRisk};
-use neurobrowser::{AgentConfig, PageConfig, ReActAgent};
+use neurobrowser::tools::{PageSnapshot, ToolAction, ToolRegistry, ToolRisk};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, UnixListener};
+use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::Mutex;
 
 /// Environment variable holding the shared secret required by the TCP fallback.
@@ -147,10 +151,6 @@ impl Daemon {
 struct SessionState {
     /// Per-connection policy. Defaults to `Assisted` + no allow/deny lists.
     policy: Arc<Mutex<ActionPolicy>>,
-    /// Optional provider for the `ask` method. Not used in v0.1 of the
-    /// daemon beyond echo-style validation.
-    #[allow(dead_code)]
-    agent: Arc<Mutex<Option<Arc<ReActAgent>>>>,
     /// The real browser tool registry (shared, read-only) used to resolve each
     /// tool's actual `ToolRisk` and its tool-profile eligibility.
     tool_registry: Arc<ToolRegistry>,
@@ -170,7 +170,6 @@ impl SessionState {
     fn with_registry(tool_registry: Arc<ToolRegistry>) -> Self {
         Self {
             policy: Arc::new(Mutex::new(ActionPolicy::default())),
-            agent: Arc::new(Mutex::new(None)),
             tool_registry,
         }
     }
@@ -208,7 +207,6 @@ impl SessionState {
                     "name": def.name,
                     "description": def.description,
                     "action": format!("{:?}", def.risk.action),
-                    "level": format!("{:?}", def.risk.level),
                 })
             })
             .collect();
@@ -225,39 +223,15 @@ impl SessionState {
         name: &str,
         args: &HashMap<String, String>,
     ) -> Response {
-        // Construct a minimal PageSnapshot for the policy's prompt-injection
-        // check. Headless mode has no live page; we hand-build the safest
-        // shape (empty URL, empty text) so the eval doesn't false-positive.
-        let snapshot = PageSnapshot {
-            url: String::new(),
-            title: String::new(),
-            html: None,
-            text: None,
-            links: Vec::new(),
-            images: Vec::new(),
-            forms: Vec::new(),
-            prices: Vec::new(),
-            tables: Vec::new(),
-            viewport_width: 0,
-            viewport_height: 0,
-            scroll_x: 0.0,
-            scroll_y: 0.0,
-            interactive_ready: true,
-        };
+        let snapshot = PageSnapshot::default();
 
-        // Resolve the tool's *real* risk from the browser tool registry
-        // (type/submit_form/purchase are High/Critical + often sensitive)
-        // instead of hardcoding Read/Low, which made `policy.evaluate`
-        // treat every tool as a harmless read and silently Allow it under
-        // Assisted/HighAutonomy autonomy. Genuinely unknown tool names
-        // (not registered) fall back to a conservative, high-risk default
-        // so they always require approval (Assisted) or are blocked
-        // (ReadOnly) rather than defaulting to an auto-allowed Read.
+        // Registered tools use their real `ToolRisk`. Unknown names fall
+        // back to Destructive so they are not treated as reads.
         let tool_risk = self
             .tool_registry
             .get(name)
             .map(|tool| tool.definition().risk)
-            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive, RiskLevel::Critical));
+            .unwrap_or_else(|| ToolRisk::new(ToolAction::Destructive));
 
         let policy = self.policy.lock().await;
         let decision = policy.evaluate(name, &tool_risk, args, &snapshot);
@@ -290,7 +264,7 @@ fn tier_allows_tool(level: AutonomyLevel, action: ToolAction) -> bool {
     match level {
         AutonomyLevel::ReadOnly => matches!(
             action,
-            ToolAction::Read | ToolAction::Wait | ToolAction::Scroll | ToolAction::Navigate
+            ToolAction::Read | ToolAction::Wait | ToolAction::Scroll
         ),
         AutonomyLevel::Assisted | AutonomyLevel::HighAutonomy => true,
     }
@@ -378,6 +352,7 @@ fn tokens_match(provided: &str, expected: &str) -> bool {
 ///
 /// SAFETY: `getuid(2)` is always safe to call; it takes no arguments, never
 /// fails, and has no preconditions. `libc::uid_t` is `u32` on supported targets.
+#[cfg(unix)]
 fn current_uid() -> u32 {
     unsafe { libc::getuid() }
 }
@@ -416,39 +391,129 @@ fn resolve_tcp_token() -> Arc<String> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter("neurobrowser=info,headless=info")
-        .init();
+#[derive(Debug)]
+struct Cli {
+    socket: Option<PathBuf>,
+}
 
-    let socket_path = std::env::var("NEUROBROWSER_SOCKET")
+#[derive(Debug)]
+enum CliError {
+    Help,
+    Message(String),
+}
+
+fn print_help() {
+    println!(
+        "neurobrowser-headless — policy JSON-RPC + stub snapshot\n\
+         \n\
+         Usage: neurobrowser-headless [--socket PATH]\n\
+         \n\
+         --socket PATH   Unix socket path (overrides NEUROBROWSER_SOCKET)\n\
+         --help          Print this help and exit\n\
+         \n\
+         If --socket is omitted, the path is $NEUROBROWSER_SOCKET or a per-pid\n\
+         file in the temp directory. This process does not construct a\n\
+         BrowserEngine and does not drive a webview."
+    );
+}
+
+fn parse_args<I>(args: I) -> Result<Cli, CliError>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut socket = None;
+    let mut iter = args.into_iter();
+    let _exe = iter.next();
+    while let Some(arg) = iter.next() {
+        if arg == "-h" || arg == "--help" {
+            return Err(CliError::Help);
+        }
+        if arg == "--socket" {
+            let path = iter
+                .next()
+                .ok_or_else(|| CliError::Message("--socket requires a path".into()))?;
+            if path.is_empty() || path.starts_with('-') {
+                return Err(CliError::Message(
+                    "--socket requires a path; use --socket=PATH for a dash-prefixed path".into(),
+                ));
+            }
+            socket = Some(PathBuf::from(path));
+            continue;
+        }
+        if let Some(path) = arg.strip_prefix("--socket=") {
+            if path.is_empty() {
+                return Err(CliError::Message("--socket requires a path".into()));
+            }
+            socket = Some(PathBuf::from(path));
+            continue;
+        }
+        return Err(CliError::Message(format!("unknown argument: {arg}")));
+    }
+    Ok(Cli { socket })
+}
+
+fn resolve_socket_path(cli: &Cli) -> PathBuf {
+    if let Some(path) = &cli.socket {
+        return path.clone();
+    }
+    std::env::var("NEUROBROWSER_SOCKET")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let mut p = std::env::temp_dir();
             p.push(format!("neurobrowser-{}.sock", std::process::id()));
             p
-        });
+        })
+}
 
-    // Ensure parent dir exists.
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("neurobrowser=info,neurobrowser_headless=info")
+            }),
+        )
+        .init();
+
+    let cli = match parse_args(std::env::args()) {
+        Ok(cli) => cli,
+        Err(CliError::Help) => {
+            print_help();
+            return Ok(());
+        }
+        Err(CliError::Message(message)) => {
+            eprintln!("neurobrowser-headless: {message}");
+            eprintln!("Try --help for usage.");
+            std::process::exit(2);
+        }
+    };
+
+    let socket_path = resolve_socket_path(&cli);
+
+    #[cfg(unix)]
+    return listen_unix(socket_path).await;
+
+    #[cfg(not(unix))]
+    {
+        let _ = socket_path;
+        eprintln!(
+            "neurobrowser-headless listens on a Unix domain socket and is not supported on this target."
+        );
+        std::process::exit(1);
+    }
+}
+
+#[cfg(unix)]
+async fn listen_unix(socket_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = socket_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    // Remove a stale socket file.
     let _ = std::fs::remove_file(&socket_path);
 
     let daemon = Daemon::new();
 
-    match UnixListener::bind(&socket_path) {
-        Ok(listener) => {
-            println!("NEUROBROWSER_LISTENING=unix://{}", socket_path.display());
-            // Defense-in-depth: restrict the socket file to the owning user.
-            // The authoritative gate is the per-connection SO_PEERCRED check in
-            // `serve_unix` (macOS ignores socket-file perms on connect).
-            restrict_socket_permissions(&socket_path);
-            serve_unix(listener, daemon).await?;
-            Ok(())
-        }
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
         Err(error) => {
             tracing::warn!(?error, path = %socket_path.display(),
                 "Unix socket bind failed; falling back to local TCP");
@@ -458,11 +523,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let token = resolve_tcp_token();
             tokio::spawn(async move { serve_tcp(tcp, daemon, token).await });
             wait_for_signal().await;
-            Ok(())
+            return Ok(());
         }
-    }
+    };
+    println!("NEUROBROWSER_LISTENING=unix://{}", socket_path.display());
+    // Defense-in-depth: restrict the socket file to the owning user.
+    // The authoritative gate is the per-connection SO_PEERCRED check in
+    // `serve_unix` (macOS ignores socket-file perms on connect).
+    restrict_socket_permissions(&socket_path);
+    serve_unix(listener, daemon).await?;
+    Ok(())
 }
 
+#[cfg(unix)]
 async fn wait_for_signal() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
@@ -476,6 +549,7 @@ async fn wait_for_signal() {
 /// Accept loop for the Unix control socket. Every connection is authorized by
 /// `SO_PEERCRED` (same-uid) **before** a handler is spawned, and each handler
 /// gets its own [`SessionState`].
+#[cfg(unix)]
 async fn serve_unix(listener: UnixListener, daemon: Daemon) -> std::io::Result<()> {
     serve_unix_authorized(listener, daemon, current_uid()).await
 }
@@ -483,6 +557,7 @@ async fn serve_unix(listener: UnixListener, daemon: Daemon) -> std::io::Result<(
 /// Accept loop that authorizes peers against an explicit `authorized_uid`.
 /// Production callers pass [`current_uid`]; tests inject a foreign uid to drive
 /// the rejection path deterministically without a second OS user.
+#[cfg(unix)]
 async fn serve_unix_authorized(
     listener: UnixListener,
     daemon: Daemon,
@@ -610,6 +685,28 @@ where
     Ok(())
 }
 
+/// `arguments` must be a JSON object whose values are strings.
+///
+/// A missing key is an empty map. Null, a non-object, or a non-string value is
+/// rejected. Substituting `{}` would drop `navigate`'s `url` and skip the
+/// scheme and domain gates.
+fn string_arguments(value: Option<&Value>) -> Result<HashMap<String, String>, &'static str> {
+    let Some(value) = value else {
+        return Ok(HashMap::new());
+    };
+    let Value::Object(map) = value else {
+        return Err("arguments must be a JSON object whose values are strings");
+    };
+    let mut arguments = HashMap::with_capacity(map.len());
+    for (key, value) in map {
+        let Value::String(text) = value else {
+            return Err("arguments must be a JSON object whose values are strings");
+        };
+        arguments.insert(key.clone(), text.clone());
+    }
+    Ok(arguments)
+}
+
 async fn dispatch(request: &Request, state: &SessionState) -> Response {
     match request.method.as_str() {
         "ping" => Response::ok(request.id.clone(), serde_json::json!({ "pong": true })),
@@ -646,9 +743,12 @@ async fn dispatch(request: &Request, state: &SessionState) -> Response {
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
                 .to_string();
-            let arguments_value = params.get("arguments").cloned().unwrap_or(Value::Null);
-            let arguments: HashMap<String, String> =
-                serde_json::from_value(arguments_value).unwrap_or_default();
+            let arguments = match string_arguments(params.get("arguments")) {
+                Ok(arguments) => arguments,
+                Err(message) => {
+                    return Response::err(request.id.clone(), "VALIDATION", message);
+                }
+            };
 
             // NB-12: reject out-of-profile tools before they reach the policy
             // engine — a lower-trust tier literally cannot exercise write tools.
@@ -665,25 +765,13 @@ async fn dispatch(request: &Request, state: &SessionState) -> Response {
             }
         }
         "snapshot" => {
-            // v0.1: returns the live `lastRefMap` placeholder for the
-            // accepting socket connection; v0.1.1 wires this through
-            // a real BrowserEngine.
             let result = serde_json::json!({
                 "url": "about:blank",
                 "title": "",
                 "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 },
-                "ref_map": {},
                 "tree": ""
             });
             Response::ok(request.id.clone(), result)
-        }
-        "policy.snapshot" => {
-            // For Phase F's audit log: capture the current policy + the
-            // last 5 policy decisions into a structured payload.
-            let policy = state.policy.lock().await;
-            serde_json::to_value(&*policy)
-                .map(|v| Response::ok(request.id.clone(), v))
-                .unwrap_or_else(|e| Response::err(request.id.clone(), "INTERNAL", e.to_string()))
         }
         other => Response::err(
             request.id.clone(),
@@ -693,40 +781,13 @@ async fn dispatch(request: &Request, state: &SessionState) -> Response {
     }
 }
 
-#[allow(dead_code)]
-fn _touch_types_to_keep_them_in_scope() {
-    // Reference some types so the headless crate compiles even if the
-    // dispatch table doesn't yet exercise them.
-    let _provider: ProviderConfig = ProviderConfig {
-        provider_type: ProviderType::Custom,
-        api_key: None,
-        base_url: None,
-        model: "stub".to_string(),
-        max_tokens: Some(64),
-        temperature: Some(0.0),
-    };
-    let _: ActionPolicy = ActionPolicy::default();
-    let _risk = RiskFlag::ActionDenied;
-    let _: AutonomyLevel = AutonomyLevel::Assisted;
-    let _: PageConfig = PageConfig::default();
-    let _: AgentConfig = AgentConfig::default();
-    let _ctx: AiContext = AiContext {
-        current_url: String::new(),
-        page_title: String::new(),
-        dom_snapshot: String::new(),
-        accessibility_tree: None,
-        scroll_position: neurobrowser::providers::ScrollPosition { x: 0.0, y: 0.0 },
-        tool_results: Vec::new(),
-        conversation_history: Vec::new(),
-    };
-    let _provider_fn: fn(&ProviderConfig) -> std::sync::Arc<dyn AiProvider> = create_provider;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::io::{AsyncBufRead, Lines};
-    use tokio::net::{TcpStream, UnixStream};
+    use tokio::net::TcpStream;
+    #[cfg(unix)]
+    use tokio::net::UnixStream;
 
     // ---- pure predicates -------------------------------------------------
 
@@ -746,10 +807,104 @@ mod tests {
         assert!(tokens_match("", ""));
     }
 
+    fn args(argv: &[&str]) -> Vec<String> {
+        std::iter::once("neurobrowser-headless")
+            .chain(argv.iter().copied())
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn parse_args_accepts_socket() {
+        let cli = parse_args(args(&["--socket", "/tmp/nb.sock"])).unwrap();
+        assert_eq!(
+            cli.socket.as_deref(),
+            Some(std::path::Path::new("/tmp/nb.sock"))
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_socket_equals() {
+        let cli = parse_args(args(&["--socket=/tmp/nb.sock"])).unwrap();
+        assert_eq!(
+            cli.socket.as_deref(),
+            Some(std::path::Path::new("/tmp/nb.sock"))
+        );
+    }
+
+    #[test]
+    fn parse_args_help() {
+        assert!(matches!(parse_args(args(&["--help"])), Err(CliError::Help)));
+        assert!(matches!(parse_args(args(&["-h"])), Err(CliError::Help)));
+    }
+
+    #[test]
+    fn parse_args_rejects_unknown() {
+        match parse_args(args(&["--tauri"])) {
+            Err(CliError::Message(message)) => {
+                assert!(message.contains("unknown argument: --tauri"), "{message}");
+            }
+            other => panic!("expected unknown-argument error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_args_socket_requires_path() {
+        match parse_args(args(&["--socket"])) {
+            Err(CliError::Message(message)) => {
+                assert!(message.contains("--socket requires a path"), "{message}");
+            }
+            other => panic!("expected missing-path error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_args_rejects_options_in_place_of_socket_path() {
+        for option in [
+            "--help",
+            "-h",
+            "--tauri",
+            "--socket",
+            "--socket=/tmp/other.sock",
+        ] {
+            match parse_args(args(&["--socket", option])) {
+                Err(CliError::Message(message)) => {
+                    assert!(
+                        message.contains("--socket requires a path"),
+                        "{option}: {message}"
+                    );
+                }
+                other => panic!("expected missing-path error for {option}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_args_accepts_explicit_dash_prefixed_socket_path() {
+        let cli = parse_args(args(&["--socket=--help"])).unwrap();
+        assert_eq!(cli.socket.as_deref(), Some(std::path::Path::new("--help")));
+    }
+
+    #[test]
+    fn resolve_socket_path_prefers_flag_over_env() {
+        let cli = Cli {
+            socket: Some(PathBuf::from("/tmp/from-flag.sock")),
+        };
+        assert_eq!(
+            resolve_socket_path(&cli),
+            PathBuf::from("/tmp/from-flag.sock")
+        );
+    }
+
     #[test]
     fn read_only_tier_hides_write_tools() {
         assert!(tier_allows_tool(AutonomyLevel::ReadOnly, ToolAction::Read));
+        assert!(tier_allows_tool(AutonomyLevel::ReadOnly, ToolAction::Wait));
         assert!(tier_allows_tool(
+            AutonomyLevel::ReadOnly,
+            ToolAction::Scroll
+        ));
+        assert!(!tier_allows_tool(
             AutonomyLevel::ReadOnly,
             ToolAction::Navigate
         ));
@@ -767,6 +922,7 @@ mod tests {
 
     // ---- test helpers ----------------------------------------------------
 
+    #[cfg(unix)]
     fn unique_socket_path() -> PathBuf {
         std::env::temp_dir().join(format!("nb-authtest-{}.sock", uuid::Uuid::new_v4()))
     }
@@ -879,6 +1035,7 @@ mod tests {
 
     // ---- per-connection isolation: policy.set is connection-scoped -------
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn policy_set_on_one_connection_does_not_affect_another() {
         let daemon = Daemon::new();
@@ -931,6 +1088,7 @@ mod tests {
 
     // ---- auth: Unix SO_PEERCRED same-uid ---------------------------------
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn unix_rejects_mismatched_uid_before_dispatch() {
         // Drive the real accept -> peer_cred -> reject path end-to-end by
@@ -958,10 +1116,23 @@ mod tests {
             .write_all(br#"{"id":"1","method":"ping","params":{}}"#)
             .await;
         let _ = write_half.write_all(b"\n").await;
-        assert!(
-            next_json(&mut lines).await.is_none(),
-            "mismatched-uid connection was not rejected before dispatch"
-        );
+        // Dropping the socket with unread bytes is a reset, not a clean EOF.
+        // Either outcome means the peer was rejected before a response.
+        match lines.next_line().await {
+            Ok(None) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::UnexpectedEof
+                ) => {}
+            Ok(Some(line)) => {
+                panic!("mismatched-uid connection was not rejected before dispatch: {line}")
+            }
+            Err(error) => panic!("unexpected read error while expecting rejection: {error}"),
+        }
 
         let _ = std::fs::remove_file(&path);
     }
@@ -1123,5 +1294,86 @@ mod tests {
             .expect("outcome field present");
 
         assert_eq!(outcome, "Allow");
+    }
+
+    fn evaluate_request(id: &str, params: Value) -> Request {
+        Request {
+            id: id.to_string(),
+            method: "policy.evaluate".to_string(),
+            params,
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_evaluate_rejects_arguments_that_are_not_a_string_map() {
+        let state = SessionState::new();
+        let cases = [
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": 1 } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": ["https://evil.example"] } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": { "href": "javascript:alert(1)" } } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": true } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": null } }),
+            serde_json::json!({ "tool": "navigate", "arguments": { "url": "https://example.com", "n": 2 } }),
+            serde_json::json!({ "tool": "navigate", "arguments": 1 }),
+            serde_json::json!({ "tool": "navigate", "arguments": ["https://evil.example"] }),
+            serde_json::json!({ "tool": "navigate", "arguments": "https://evil.example" }),
+            serde_json::json!({ "tool": "navigate", "arguments": null }),
+        ];
+
+        for params in cases {
+            let response = dispatch(&evaluate_request("bad", params.clone()), &state).await;
+            assert!(!response.ok, "{params}");
+            assert!(response.result.is_none(), "{params}");
+            let error = response.error.expect("validation error");
+            assert_eq!(error.code, "VALIDATION", "{params}: {error:?}");
+            assert!(
+                error
+                    .message
+                    .contains("JSON object whose values are strings"),
+                "{params}: {}",
+                error.message
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_evaluate_keeps_string_argument_values() {
+        let state = SessionState::new();
+
+        let blocked = dispatch(
+            &evaluate_request(
+                "js",
+                serde_json::json!({
+                    "tool": "navigate",
+                    "arguments": { "url": "javascript:alert(1)" }
+                }),
+            ),
+            &state,
+        )
+        .await;
+        assert!(blocked.ok, "{blocked:?}");
+        assert_eq!(blocked.result.unwrap()["outcome"], "Block");
+
+        let allowed = dispatch(
+            &evaluate_request(
+                "read",
+                serde_json::json!({
+                    "tool": "get_text",
+                    "arguments": { "selector": "h1" }
+                }),
+            ),
+            &state,
+        )
+        .await;
+        assert!(allowed.ok, "{allowed:?}");
+        assert_eq!(allowed.result.unwrap()["outcome"], "Allow");
+
+        let omitted = dispatch(
+            &evaluate_request("omit", serde_json::json!({ "tool": "get_text" })),
+            &state,
+        )
+        .await;
+        assert!(omitted.ok, "{omitted:?}");
+        assert_eq!(omitted.result.unwrap()["outcome"], "Allow");
     }
 }
