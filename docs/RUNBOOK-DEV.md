@@ -93,11 +93,18 @@ NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
 ```
 
 Prints `NEUROBROWSER_LISTENING=unix://…` or falls back to
-`NEUROBROWSER_LISTENING=tcp://127.0.0.1:…`. Methods: `ping`,
-`policy.get` / `policy.set` / `policy.evaluate`,
-`snapshot`. Speak newline-delimited JSON-RPC on the socket. There is no
-CLI wrapper. `snapshot` is a hardcoded `about:blank` payload. The daemon
-does not construct `BrowserEngine`, navigate, or execute registry tools.
+`NEUROBROWSER_LISTENING=tcp://127.0.0.1:…`. The Unix socket is mode 0600 and
+checks same-uid peer credentials. On TCP, `auth` must present
+`NEUROBROWSER_TOKEN` before other methods. Methods: `ping`, `auth` (TCP only),
+`tools.list`, `policy.get` / `policy.set` (connection-scoped) /
+`policy.evaluate`, `snapshot`. `tools.list` on ReadOnly advertises only Read,
+Wait, and Scroll tools. Errors include `UNAUTHENTICATED` and `OUT_OF_PROFILE`
+in addition to `BAD_REQUEST`, `INTERNAL`, `VALIDATION`, and `UNKNOWN_METHOD`.
+`arguments` must be an object with string values; omission is an empty map,
+while other shapes return `VALIDATION`. Speak newline-delimited JSON-RPC on
+the socket. There is no CLI wrapper. `snapshot` is a hardcoded `about:blank`
+payload (`url`, `title`, `viewport`, `tree`). The daemon does not construct
+`BrowserEngine`, navigate, or execute registry tools.
 
 ## Tests
 
@@ -177,6 +184,7 @@ The failing command is the one `verify.sh` printed. Fix that step and re-run `./
 | `CUSTOM_PROVIDER_BASE_URL` | `set_provider("custom")` | `https://api.openai.com` (via `resolve_endpoint`) |
 | `CUSTOM_PROVIDER_MODEL` | `set_provider("custom")` | `gpt-4o` |
 | `NEUROBROWSER_SOCKET` | headless daemon | temp dir `neurobrowser-<pid>.sock` |
+| `NEUROBROWSER_TOKEN` | headless TCP `auth` | generated and printed on TCP fallback when unset or empty |
 | `RUST_LOG` | desktop (`src-tauri/src/main.rs`) and headless (`src-tauri/src/headless_bin/main.rs`). `neurobrowser` is the library crate; shell events are `neurobrowser_tauri`. The headless bin's crate root is `neurobrowser_headless` (no `headless` module). | `neurobrowser=info,neurobrowser_tauri=info` (desktop); `neurobrowser=info,neurobrowser_headless=info` (headless) |
 
 ## Where things live
