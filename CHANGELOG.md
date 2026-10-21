@@ -25,6 +25,13 @@ versions remain 0.1.0 until an actual version bump and release tag.
   The chat can call `ask_assistant` and cancel that wait with
   `cancel_assistant_request`. Page sharing is off by default, and a model
   tool request is not executed (#155).
+- #161: the headless Unix socket checks same-uid peer credentials and is mode
+  0600. TCP clients call `auth` with `NEUROBROWSER_TOKEN` before other methods.
+  `tools.list` advertises the connection's in-profile tools, and `policy.set`
+  applies only to that connection. A follow-up repair restored `VALIDATION`
+  for non-string-map `arguments`, the `--socket` / `--socket=PATH` / `--help`
+  parser, and the headless log default
+  `neurobrowser=info,neurobrowser_headless=info` read from `RUST_LOG`.
 
 ### Changed
 

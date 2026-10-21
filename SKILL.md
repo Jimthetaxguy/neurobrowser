@@ -1,6 +1,6 @@
 ---
 name: neurobrowser
-description: Drive NeuroBrowser from a Rust agent via the crate's 22 tools, or 24 with memory attached (search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping / policy.* / snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
+description: Drive NeuroBrowser from a Rust agent via the crate's 22 tools, or 24 with memory attached (search_personal_memory and inspect_active_page), or talk to the headless daemon's JSON-RPC (ping, auth, tools.list, policy.get, policy.set, policy.evaluate, snapshot stub). Desktop is macOS WKWebView; the separate BrowserEngine library implementation is reqwest+scraper. The headless daemon has no browser backend.
 ---
 
 # NeuroBrowser — Agent Skill
@@ -11,12 +11,16 @@ drive it in two ways:
 1. **In-process** — call the `neurobrowser` crate (`ToolRegistry` in
    `src/browser/mod.rs`).
 2. **Headless daemon** — newline-delimited JSON-RPC over a Unix socket (TCP
-   fallback). Methods are `ping`, `policy.get`, `policy.set`,
-   `policy.evaluate`, and `snapshot`. `policy.set` replaces the policy from
-   `params` as an `ActionPolicy` object. `policy.evaluate` reads `params.tool`
-   and `params.arguments`. `snapshot` ignores `params` and returns a hardcoded
-   stub (`url`, `title`, `viewport`, `tree: ""`), not a crate `PageSnapshot`.
-   The daemon does not execute browser tools.
+   fallback). The Unix socket is mode 0600 and checks same-uid peer
+   credentials. On TCP, `auth` must present `NEUROBROWSER_TOKEN` before any
+   other method. Methods are `ping`, `auth` (TCP only), `tools.list`,
+   `policy.get`, `policy.set`, `policy.evaluate`, and `snapshot`. `policy.set`
+   replaces that connection's policy from `params` as an `ActionPolicy`
+   object. `tools.list` returns the tools in the connection's current profile.
+   ReadOnly advertises only Read, Wait, and Scroll tools. `policy.evaluate`
+   reads `params.tool` and `params.arguments`. `snapshot` ignores `params` and
+   returns a hardcoded stub (`url`, `title`, `viewport`, `tree: ""`), not a
+   crate `PageSnapshot`. The daemon does not execute browser tools.
 
 The shipped agent surface is **24 tools**. Twenty-two are browser
 tools from `default_tool_registry()`. `search_personal_memory` and
@@ -49,8 +53,8 @@ headless policy daemon is unchanged and cannot browse.
 ## When to use
 
 - A Rust agent calling `BrowserInterface` / `default_tool_registry()`.
-- A client speaking the daemon's JSON-RPC (`ping` / `policy.*` / stub
-  `snapshot`).
+- A client speaking the daemon's JSON-RPC (`ping`, `auth`, `tools.list`,
+  `policy.get`, `policy.set`, `policy.evaluate`, stub `snapshot`).
 
 Do not treat this as a Playwright ref-map driver. Interactive tools on
 `BrowserEngine` (reqwest+scraper) return honest errors; they do not click a
@@ -115,18 +119,26 @@ async fn summarize_page(
 
 ```json
 {"id":"1","method":"ping","params":{}}
-{"id":"2","method":"policy.get","params":{}}
-{"id":"3","method":"policy.evaluate","params":{"tool":"get_text","arguments":{"selector":"h1"}}}
-{"id":"4","method":"snapshot","params":{}}
-{"id":"5","method":"policy.set","params":{"autonomy_level":"read_only","allowed_domains":["example.com"],"denied_domains":[],"denied_tools":[],"approval_required_tools":[],"block_prompt_injection":true}}
+{"id":"2","method":"auth","params":{"token":"<NEUROBROWSER_TOKEN>"}}
+{"id":"3","method":"tools.list","params":{}}
+{"id":"4","method":"policy.get","params":{}}
+{"id":"5","method":"policy.evaluate","params":{"tool":"get_text","arguments":{"selector":"h1"}}}
+{"id":"6","method":"snapshot","params":{}}
+{"id":"7","method":"policy.set","params":{"autonomy_level":"read_only","allowed_domains":["example.com"],"denied_domains":[],"denied_tools":[],"approval_required_tools":[],"block_prompt_injection":true}}
 ```
 
-`policy.set` sends `params` as the `ActionPolicy` object itself.
+`auth` is TCP only. `params.token` is `NEUROBROWSER_TOKEN`. A TCP request
+before `auth`, or a token that does not match, returns `UNAUTHENTICATED`.
+`tools.list` returns the tools in that connection's profile. ReadOnly
+advertises only Read, Wait, and Scroll tools.
+`policy.set` sends `params` as the `ActionPolicy` object itself and applies
+only to the calling connection.
 `autonomy_level` is snake_case: `read_only` | `assisted` | `high_autonomy`.
 `ActionPolicy` fields have no serde defaults (`allowed_domains`,
 `denied_domains`, `denied_tools`, `approval_required_tools`,
 `block_prompt_injection`).
 `policy.evaluate` reads `params.tool` and `params.arguments`. `arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`.
+A tool outside the connection's profile returns `OUT_OF_PROFILE`.
 Daemon `policy.evaluate` outcomes are `Allow`, `RequireApproval`, and `Block`
 (Rust serde uses snake_case; this dispatcher formats enum names).
 `snapshot` ignores `params` and returns
