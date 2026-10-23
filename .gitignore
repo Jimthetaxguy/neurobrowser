@@ -27,10 +27,8 @@ NeuroBrowser/ControlSurface/
 * 3.*
 * 4.*
 
-# Claude Code
+# Local agent state. Root AGENTS.md and CLAUDE.md are tracked.
 .claude/
-AGENTS.md
-CLAUDE.md
 .opencode/
 ralph-plan-*.md
 
