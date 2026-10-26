@@ -4,7 +4,9 @@ AI-native desktop browser: Rust library + Tauri/React shell.
 The desktop drives a real OS webview through `ActionPolicy`-gated tools.
 The Rust library also supplies an HTTP scraper. The headless daemon is a
 policy JSON-RPC protocol stub: its `about:blank` snapshot is hardcoded and
-it cannot navigate or execute browser tools. There is no custom rendering
+it cannot navigate or execute browser tools. The Unix socket is mode 0600 and
+checks same-uid peer credentials. TCP requires `auth` with `NEUROBROWSER_TOKEN`
+before other methods. There is no custom rendering
 engine; FastRender was never integrated.
 
 See [SKILL.md](SKILL.md) and [docs/AGENT-SURFACE.md](docs/AGENT-SURFACE.md)
@@ -17,7 +19,7 @@ for the agent surface. Build and run: [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md)
 - **Library:** Tokio, reqwest, `scraper` HTML parsing, serde, thiserror v2
 - **Headless protocol stub:** Tokio policy evaluation and a hardcoded snapshot
 - **Desktop IPC:** Tauri commands
-- **Policy socket:** JSON-RPC (`ping`, `policy.*`, stub `snapshot`)
+- **Policy socket:** JSON-RPC (`ping`, `auth`, `tools.list`, `policy.get`, `policy.set`, `policy.evaluate`, stub `snapshot`)
 
 ## Quick Start
 
@@ -46,8 +48,11 @@ Linux). A display is not required. The root library crate does not need that
 toolchain.
 
 The daemon prints its Unix socket address (or a loopback TCP fallback if Unix
-bind fails). Send newline-delimited JSON such as
-`{"id":"1","method":"ping","params":{}}`. This daemon does not browse.
+bind fails). The Unix socket is mode 0600 and checks same-uid peer credentials.
+On TCP, send `auth` with `NEUROBROWSER_TOKEN` before other methods. Send
+newline-delimited JSON such as
+`{"id":"1","method":"ping","params":{}}`. `policy.set` applies only to that
+connection. `tools.list` advertises the connection's profile. This daemon does not browse.
 See [docs/RUNBOOK-DEV.md](docs/RUNBOOK-DEV.md) for more build details.
 
 ## Shared capability for humans and agents
@@ -88,9 +93,12 @@ Shipped run/policy surface:
   cross-domain can run; a hostless current page (`about:blank`, empty URL) is
   not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
-- headless methods: `ping`, `policy.get` / `policy.set` (`params` is the
+- headless methods: `ping`, `auth` (TCP only, `NEUROBROWSER_TOKEN`),
+  `tools.list`, `policy.get` / `policy.set` (connection-scoped; `params` is the
   `ActionPolicy` object) / `policy.evaluate` (`params.tool` and
-  `params.arguments`) / `snapshot`
+  `params.arguments`) / `snapshot`. An unauthenticated TCP request returns
+  `UNAUTHENTICATED`. A tool outside the connection profile returns
+  `OUT_OF_PROFILE`.
 
 React + Tauri is the primary frontend path
 ([ADR-001](docs/adr/ADR-001-react-tauri-primary.md)).
