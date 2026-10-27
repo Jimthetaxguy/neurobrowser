@@ -91,7 +91,8 @@ Shipped run/policy surface:
   cross-domain can run; a hostless current page (`about:blank`, empty URL) is
   not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
-- headless methods: `ping`, `auth` (TCP only, `NEUROBROWSER_TOKEN`),
+- headless methods: `ping`, `auth` (required on TCP with `NEUROBROWSER_TOKEN`;
+  a no-op success on Unix),
   `tools.list`, `policy.get` / `policy.set` (connection-scoped; `params` is the
   `ActionPolicy` object) / `policy.evaluate` (`params.tool` and
   `params.arguments`) / `snapshot`. An unauthenticated TCP request returns

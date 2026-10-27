@@ -95,7 +95,8 @@ NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \
 Prints `NEUROBROWSER_LISTENING=unix://…` or falls back to
 `NEUROBROWSER_LISTENING=tcp://127.0.0.1:…`. The Unix socket is mode 0600 and
 checks same-uid peer credentials. On TCP, `auth` must present
-`NEUROBROWSER_TOKEN` before other methods. Methods: `ping`, `auth` (TCP only),
+`NEUROBROWSER_TOKEN` before other methods. Methods: `ping`, `auth` (token checked on TCP;
+no-op success on Unix),
 `tools.list`, `policy.get` / `policy.set` (connection-scoped) /
 `policy.evaluate`, `snapshot`. `tools.list` on ReadOnly advertises only Read,
 Wait, and Scroll tools. Errors include `UNAUTHENTICATED` and `OUT_OF_PROFILE`
