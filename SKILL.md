@@ -13,7 +13,7 @@ drive it in two ways:
 2. **Headless daemon** — newline-delimited JSON-RPC over a Unix socket (TCP
    fallback). The Unix socket is mode 0600 and checks same-uid peer
    credentials. On TCP, `auth` must present `NEUROBROWSER_TOKEN` before any
-   other method. Methods are `ping`, `auth` (TCP only), `tools.list`,
+   other method. Methods are `ping`, `auth`, `tools.list`,
    `policy.get`, `policy.set`, `policy.evaluate`, and `snapshot`. `policy.set`
    replaces that connection's policy from `params` as an `ActionPolicy`
    object. `tools.list` returns the tools in the connection's current profile.
@@ -118,8 +118,8 @@ async fn summarize_page(
 ### Headless daemon
 
 ```json
-{"id":"1","method":"ping","params":{}}
-{"id":"2","method":"auth","params":{"token":"<NEUROBROWSER_TOKEN>"}}
+{"id":"1","method":"auth","params":{"token":"<NEUROBROWSER_TOKEN>"}}
+{"id":"2","method":"ping","params":{}}
 {"id":"3","method":"tools.list","params":{}}
 {"id":"4","method":"policy.get","params":{}}
 {"id":"5","method":"policy.evaluate","params":{"tool":"get_text","arguments":{"selector":"h1"}}}
@@ -127,8 +127,10 @@ async fn summarize_page(
 {"id":"7","method":"policy.set","params":{"autonomy_level":"read_only","allowed_domains":["example.com"],"denied_domains":[],"denied_tools":[],"approval_required_tools":[],"block_prompt_injection":true}}
 ```
 
-`auth` is TCP only. `params.token` is `NEUROBROWSER_TOKEN`. A TCP request
-before `auth`, or a token that does not match, returns `UNAUTHENTICATED`.
+The first line is the TCP handshake. `params.token` is `NEUROBROWSER_TOKEN`.
+A missing `auth`, or a token that does not match, returns `UNAUTHENTICATED`
+and closes the connection. On a Unix connection `auth` succeeds without a
+token check.
 `tools.list` returns the tools in that connection's profile. ReadOnly
 advertises only Read, Wait, and Scroll tools.
 `policy.set` sends `params` as the `ActionPolicy` object itself and applies

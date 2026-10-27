@@ -20,11 +20,9 @@ a `[workspace]`. A root `cargo` command builds only `neurobrowser`.
 | `tests/` | Integration tests for the root crate, plus the macOS scripts below. |
 | `.github/workflows/ci.yml` | Jobs `check` (Ubuntu), `tauri` (macOS), and `guards` (Ubuntu). |
 
-`CONTEXT.md` has an older table row, "Agent surface", that lists 12 tools
-(`snapshot`, `click`, `type_text`, and the rest of that row). The shipped
-registry is `default_tool_registry()` in `src/browser/mod.rs`: 22 tools.
-`default_tool_registry_with_memory()` adds `search_personal_memory` and
-`inspect_active_page`. Tool use belongs in [SKILL.md](SKILL.md) and
+The shipped registry is `default_tool_registry()` in `src/browser/mod.rs`:
+22 tools. `default_tool_registry_with_memory()` adds `search_personal_memory`
+and `inspect_active_page`. Tool use belongs in [SKILL.md](SKILL.md) and
 [docs/AGENT-SURFACE.md](docs/AGENT-SURFACE.md).
 
 ## Toolchain
@@ -136,8 +134,11 @@ npm run desktop:build
 `desktop` is `tauri dev --no-watch`. `desktop:build` is
 `tauri build --features custom-protocol --bundles app`.
 
-Headless policy stub (JSON-RPC `ping`, `policy.*`, and a hardcoded
-`snapshot`; it does not browse):
+Headless policy stub. The Unix socket is mode 0600 and checks same-uid
+peer credentials (`SO_PEERCRED`). TCP requires `auth` with
+`NEUROBROWSER_TOKEN` before other methods. `policy.set` is
+connection-scoped. `tools.list` advertises the tools in that connection's
+profile. It does not browse:
 
 ```bash
 NEUROBROWSER_SOCKET="$HOME/.neurobrowser/daemon.sock" \

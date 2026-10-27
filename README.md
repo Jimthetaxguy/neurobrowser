@@ -84,8 +84,6 @@ Shipped run/policy surface:
   (`ReadOnly` / `Assisted` / `HighAutonomy`)
 - The chat calls `ask_assistant` from `askAssistant` in
   `src-tauri/src/App.jsx`. `cancel_assistant_request` cancels that wait.
-  The same handler calls `start_agent_run` when the host adapter has no
-  `askAssistant`.
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned
   as a structured run event
