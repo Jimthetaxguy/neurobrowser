@@ -84,8 +84,6 @@ Shipped run/policy surface:
   (`ReadOnly` / `Assisted` / `HighAutonomy`)
 - The chat calls `ask_assistant` from `askAssistant` in
   `src-tauri/src/App.jsx`. `cancel_assistant_request` cancels that wait.
-  The same handler calls `start_agent_run` when the host adapter has no
-  `askAssistant`.
 - `submit_approval` and `cancel_agent_run` resolve approval-gated actions
 - every proposed, blocked, approved, rejected, and executed action is returned
   as a structured run event
@@ -93,7 +91,8 @@ Shipped run/policy surface:
   cross-domain can run; a hostless current page (`about:blank`, empty URL) is
   not cross-domain. Typing, form submission, high-impact actions, denylisted
   domains, and suspicious page content stop for approval or blocking
-- headless methods: `ping`, `auth` (TCP only, `NEUROBROWSER_TOKEN`),
+- headless methods: `ping`, `auth` (required on TCP with `NEUROBROWSER_TOKEN`;
+  a no-op success on Unix),
   `tools.list`, `policy.get` / `policy.set` (connection-scoped; `params` is the
   `ActionPolicy` object) / `policy.evaluate` (`params.tool` and
   `params.arguments`) / `snapshot`. An unauthenticated TCP request returns

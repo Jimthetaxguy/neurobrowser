@@ -12,9 +12,9 @@ with this file.
   consume `PageObservation.document` and a runtime-issued `target_id`. `PageSnapshot`
   keeps its compatibility shape and has no `ref_map`.
 - Autonomy: `ReadOnly` / `Assisted` / `HighAutonomy` via `ActionPolicy`.
-- Headless JSON-RPC is `ping` / `policy.*` / `snapshot`. `snapshot` returns a
-  hardcoded stub (`url`, `title`, `viewport`, `tree: ""`), not a crate
-  `PageSnapshot` and not a live WKWebView session.
+- Headless JSON-RPC is `ping` / `auth` / `tools.list` / `policy.*` / `snapshot`.
+  `snapshot` returns a hardcoded stub (`url`, `title`, `viewport`, `tree: ""`),
+  not a crate `PageSnapshot` and not a live WKWebView session.
 
 Desktop is macOS WKWebView. The separate library `BrowserEngine` uses
 reqwest+scraper. The headless daemon does not construct either browser.
@@ -220,11 +220,11 @@ Action: `Read`. Same registration as `search_personal_memory`.
 | Method | What it does |
 |---|---|
 | `ping` | `{ "pong": true }` |
-| `auth` | TCP only. `params.token` must match `NEUROBROWSER_TOKEN`, and the call is required before any other method on that TCP connection. A Unix connection is authorized by same-uid peer credentials (`SO_PEERCRED`) on the mode 0600 socket. |
-| `tools.list` | Tools in this connection's profile at its current autonomy tier. Denied tools are omitted. ReadOnly advertises only Read, Wait, and Scroll tools. |
+| `auth` | Required on TCP before any other method. `params.token` must match `NEUROBROWSER_TOKEN`. A failed or missing TCP `auth` returns `UNAUTHENTICATED` and closes the connection. On a Unix connection `auth` succeeds without a token check; the connection is already authorized by same-uid peer credentials (`SO_PEERCRED`) on the mode 0600 socket. |
+| `tools.list` | Tools in this connection's profile at its current autonomy tier. Denied tools are omitted. ReadOnly advertises only Read, Wait, and Scroll tools. Result shape: `{ "tier": "<Debug name, e.g. Assisted>", "tools": [{ "name", "description", "action": "<Debug name, e.g. Read>" }] }`. `tier` and `action` are Rust `Debug` names, unlike `policy.get`, which serializes `autonomy_level` as snake_case. |
 | `policy.get` | This connection's `ActionPolicy` |
 | `policy.set` | Replace this connection's policy by deserializing `params` as an `ActionPolicy` object. Other connections keep their own policy. |
-| `policy.evaluate` | Reads `params.tool` and `params.arguments`, then gates that call (no execution). A tool outside the connection's profile returns `OUT_OF_PROFILE` before evaluation. At Assisted and HighAutonomy, unknown names, including memory tools absent from the 22-tool `default_tool_registry()`, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
+| `policy.evaluate` | Reads `params.tool` and `params.arguments`, then gates that call (no execution). A missing or non-string `params.tool` is treated as the tool name `"unknown"`. A tool outside the connection's profile returns `OUT_OF_PROFILE` before evaluation. At Assisted and HighAutonomy, unknown names, including memory tools absent from the 22-tool `default_tool_registry()`, fall back to `Destructive`. Headless evaluate builds an empty `PageSnapshot` (no URL, HTML, or text) before calling `ActionPolicy::evaluate`, so prompt-injection cannot fire, `is_cross_domain` is false with no host, and non-navigate tools never get a domain; allow/deny lists still apply to `navigate` via the argument URL |
 | `snapshot` | Ignores `params`. Hardcoded stub `{ "url": "about:blank", "title": "", "viewport": { "width": 0, "height": 0, "scroll_x": 0, "scroll_y": 0 }, "tree": "" }` — not a crate `PageSnapshot` |
 
 Unknown methods return `UNKNOWN_METHOD`. This is not a WKWebView session.
@@ -298,7 +298,13 @@ Daemon errors:
 ```
 
 Codes the daemon emits include `BAD_REQUEST`, `INTERNAL`, `VALIDATION`, `UNKNOWN_METHOD`, `UNAUTHENTICATED`, and `OUT_OF_PROFILE`.
-`UNAUTHENTICATED` is a TCP request sent before a successful `auth`, or an `auth` token that does not match `NEUROBROWSER_TOKEN`. `OUT_OF_PROFILE` is a `policy.evaluate` call whose tool is outside the connection's profile.
+`auth` is required on TCP before any other method. A failed or missing TCP
+`auth` returns `UNAUTHENTICATED` and closes the connection. On a Unix
+connection `auth` succeeds without a token check. `OUT_OF_PROFILE` is a
+`policy.evaluate` call whose tool is outside the connection's profile.
+`tools.list` returns `{ "tier": "<Debug name, e.g. Assisted>", "tools": [{ "name", "description", "action": "<Debug name, e.g. Read>" }] }`.
+`tier` and `action` are Rust `Debug` names, unlike `policy.get`, which
+serializes `autonomy_level` as snake_case.
 A successful `policy.evaluate` request returns `ok: true` with its policy decision
 in `result`; approval and blocking are decision outcomes, not transport errors:
 
@@ -308,7 +314,7 @@ in `result`; approval and blocking are decision outcomes, not transport errors:
 
 The daemon outcomes are `Allow`, `RequireApproval`, and `Block` (the Rust
 serde representation uses snake_case, but this dispatcher formats enum names).
-This method only evaluates a proposed call; it does not execute it. `params.arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`.
+This method only evaluates a proposed call; it does not execute it. `params.arguments` must be an object with string values; omission is an empty map, while other shapes return `VALIDATION`. A missing or non-string `params.tool` is treated as the tool name `"unknown"`.
 
 `policy.set` deserializes `params` as an `ActionPolicy` and applies only to the calling connection. `autonomy_level` is
 snake_case: `read_only` | `assisted` | `high_autonomy`. `ActionPolicy` fields
