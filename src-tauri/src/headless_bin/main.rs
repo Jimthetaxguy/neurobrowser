@@ -16,8 +16,6 @@
 //! back to `127.0.0.1:0` and prints `NEUROBROWSER_LISTENING=tcp://…`. That
 //! fallback is not a non-Unix transport.
 //!
-//! ## Authorization (SG2 → full authz)
-//!
 //! The control socket is local but still an authorization boundary:
 //!
 //! * **Unix socket** — the file is `chmod 0600` (defense-in-depth) *and* every
@@ -35,7 +33,7 @@
 //! The read-only tool registry is the only thing shared across connections.
 //!
 //! Per connection the negotiated policy tier is mapped to an allowed tool-name
-//! set (NB-12): `tools.list` advertises only the in-profile tools and
+//! set: `tools.list` advertises only the in-profile tools and
 //! `policy.evaluate` rejects out-of-profile calls before they reach the policy
 //! engine.
 //!
@@ -145,9 +143,7 @@ impl Daemon {
 
 /// Per-**connection** state. A new one is constructed for every accepted
 /// connection, so `policy.set` on one connection can never be observed by
-/// another. (Previously a single process-wide instance was cloned into every
-/// handler, and the `Arc<Mutex<ActionPolicy>>` clone shared one policy across
-/// all clients — the authorization gap this module now closes.)
+/// another.
 struct SessionState {
     /// Per-connection policy. Defaults to `Assisted` + no allow/deny lists.
     policy: Arc<Mutex<ActionPolicy>>,
@@ -174,7 +170,7 @@ impl SessionState {
         }
     }
 
-    /// NB-12: is `name` visible/callable at this connection's current policy
+    /// Is `name` visible/callable at this connection's current policy
     /// tier? A known tool is in-profile when its action is permitted by the
     /// tier; an unknown tool is allowed through (to the conservative-risk
     /// evaluation) at every tier except `ReadOnly`, where the surface is
@@ -187,7 +183,7 @@ impl SessionState {
         }
     }
 
-    /// NB-12: the advertised tool manifest, filtered to the tools in-profile at
+    /// The advertised tool manifest, filtered to the tools in-profile at
     /// this connection's current policy tier (denied tools omitted too).
     async fn tool_manifest(&self) -> Value {
         let (level, denied) = {
@@ -257,7 +253,7 @@ impl SessionState {
     }
 }
 
-/// NB-12: which tool actions a policy tier exposes. Mirrors the `ReadOnly`
+/// Which tool actions a policy tier exposes. Mirrors the `ReadOnly`
 /// allow-list in `ActionPolicy::evaluate` so the advertised surface and the
 /// runtime decision agree.
 fn tier_allows_tool(level: AutonomyLevel, action: ToolAction) -> bool {
@@ -731,7 +727,7 @@ async fn dispatch(request: &Request, state: &SessionState) -> Response {
             }
         }
         "tools.list" => {
-            // NB-12: advertise only the tools in-profile at this connection's
+            // Advertise only the tools in-profile at this connection's
             // current policy tier.
             let manifest = state.tool_manifest().await;
             Response::ok(request.id.clone(), manifest)
@@ -750,7 +746,7 @@ async fn dispatch(request: &Request, state: &SessionState) -> Response {
                 }
             };
 
-            // NB-12: reject out-of-profile tools before they reach the policy
+            // Reject out-of-profile tools before they reach the policy
             // engine — a lower-trust tier literally cannot exercise write tools.
             if !state.tool_in_profile(&name).await {
                 Response::err(
@@ -1137,7 +1133,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    // ---- NB-12: tool-profile scoping -------------------------------------
+    // ---- tool-profile scoping --------------------------------------------
 
     #[tokio::test]
     async fn tool_profile_tracks_the_policy_tier() {
@@ -1188,14 +1184,8 @@ mod tests {
         assert_eq!(response.error.unwrap().code, "OUT_OF_PROFILE");
     }
 
-    // ---- existing behaviour (unchanged) ----------------------------------
-
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_high_risk_tool() {
-        // `type` is High risk + sensitive in the real registry. Under the
-        // old `ToolRisk::new(ToolAction::Read, RiskLevel::Low)` bug this
-        // would have been silently `Allow`ed in Assisted mode (the default
-        // policy autonomy level) because Read is in the Assisted allow-list.
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#input".to_string());
@@ -1221,7 +1211,6 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_requires_approval_for_submit_form() {
-        // Same check for `submit_form` (High risk, externally visible).
         let state = SessionState::new();
         let mut args = HashMap::new();
         args.insert("selector".to_string(), "#checkout-form".to_string());
@@ -1247,10 +1236,6 @@ mod tests {
 
     #[tokio::test]
     async fn evaluate_tool_call_falls_back_to_conservative_risk_for_unknown_tools() {
-        // A genuinely-unknown tool name (not in `default_tool_registry`)
-        // must not fall back to Read/Low either — it should get the same
-        // conservative high-risk default so it can't slip through as an
-        // auto-allowed read.
         let state = SessionState::new();
         let args = HashMap::new();
 
