@@ -139,5 +139,5 @@ main.assistant-closed { grid-template-columns:minmax(0,1fr); }
 .header.compact { display:block; padding:8px; }
 .appkit-shell .tabs { padding:4px 8px 0; }
 @media (max-width:860px) { main.assistant-open { grid-template-columns:minmax(0,1fr) 280px; } .header { gap:5px; padding:7px 8px; } .header-tools button { padding:6px; } .zoom-level,.security-indicator { display:none; } }
-@media (max-width:680px) { main.assistant-open { grid-template-columns:minmax(0,1fr); } main.assistant-open .browser-panel { display:none; } .sidebar { border-left:0; } .settings-panel { flex-wrap:wrap; } .header > .btn { font-size:0; width:30px; padding:0; } .header > .btn::before { content:"+"; font-size:20px; } }
+@media (max-width:680px) { .settings-panel { flex-wrap:wrap; } .header > .btn { font-size:0; width:30px; padding:0; } .header > .btn::before { content:"+"; font-size:20px; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
