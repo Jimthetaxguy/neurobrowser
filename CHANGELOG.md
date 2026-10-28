@@ -101,6 +101,7 @@ versions remain 0.1.0 until an actual version bump and release tag.
 - Find in page uses Unicode case-insensitive matching on the original text
   in `src-tauri/src/pageFindFunction.js`, so a case fold that changes UTF-16
   length no longer throws a DOM Range exception (#154).
+- The browser page stays visible beside the assistant below 680px wide (#168).
 
 ### Removed
 
