@@ -166,9 +166,7 @@ fn provider_config_for(provider_type: ProviderType) -> ProviderConfig {
             // Current Claude models (including the default above) reject an
             // explicit `temperature` with a 400 ("temperature is deprecated
             // for this model"). Leave unset by default; `build_request_body`
-            // only sends the field when it is `Some`, so a caller who points
-            // ANTHROPIC_MODEL at an older model that still accepts it can
-            // opt back in without a code change here.
+            // only sends the field when it is `Some`.
             temperature: None,
         },
         ProviderType::Ollama => ProviderConfig {
