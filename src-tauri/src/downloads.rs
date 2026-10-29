@@ -177,12 +177,6 @@ impl DownloadBook {
         apply_finish_id(&mut inner, &id, report.success)
     }
 
-    /// Mark an in-progress download failed and delete any partial file.
-    pub fn cancel(&self, id: &str, error: String) -> DownloadUpdate {
-        let mut inner = self.lock();
-        cancel_in(&mut inner, id, error)
-    }
-
     /// Byte count while the row is still in progress. A late tick after the
     /// download finishes returns nothing.
     pub fn note_received(&self, id: &str, received: u64) -> Option<DownloadUpdate> {
@@ -486,8 +480,7 @@ fn name_from_url(url: &str) -> Option<String> {
     let parsed = url.parse::<tauri::Url>().ok()?;
     let segment = parsed
         .path_segments()?
-        .filter(|segment| !segment.is_empty())
-        .next_back()?;
+        .rfind(|segment| !segment.is_empty())?;
     let decoded = percent_decode_segment(segment);
     if decoded.is_empty() {
         None
@@ -592,6 +585,7 @@ fn detaches_after_spawn(program: &str) -> bool {
 const QUARANTINE_ATTRIBUTE: &str = "com.apple.quarantine";
 
 /// `0083` is the quarantine flag browsers set on a downloaded file.
+#[cfg(any(target_os = "macos", test))]
 pub fn quarantine_attribute_value(timestamp_secs: u64, agent: &str, id: &str) -> String {
     format!("0083;{timestamp_secs:x};{agent};{id}")
 }
