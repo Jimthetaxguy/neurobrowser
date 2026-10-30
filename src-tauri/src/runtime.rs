@@ -1912,7 +1912,10 @@ fn child_position<R: Runtime>(
         }
     };
     #[cfg(not(target_os = "macos"))]
-    let titlebar = 0.0;
+    let titlebar = {
+        let _ = webview;
+        0.0
+    };
     LogicalPosition::new(viewport.x, viewport.y + titlebar)
 }
 

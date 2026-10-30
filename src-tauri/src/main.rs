@@ -836,7 +836,7 @@ fn present_context_menu(
     if state.runtimes.page_runtime_id(page_id).ok().as_deref() != Some(webview.label()) {
         return Err("Runtime report caller does not own this page".into());
     }
-    let page_url = runtime::native_page_url(&webview)
+    let page_url = runtime::native_page_url(webview)
         .map(|url| url.to_string())
         .unwrap_or_default();
     let mut hit = context_menu::context_hit_from_report(&page_url, body.as_ref());
