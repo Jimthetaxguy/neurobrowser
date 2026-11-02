@@ -270,6 +270,7 @@ fn read_native_snapshot(
     target_os = "netbsd",
     target_os = "openbsd"
 ))]
+#[allow(deprecated)]
 fn read_native_snapshot(
     platform: tauri::webview::PlatformWebview,
     callback: impl Fn(String) + 'static,

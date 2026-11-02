@@ -74,24 +74,13 @@ struct ShownMenu {
     page_id: usize,
 }
 
+#[derive(Default)]
 struct MenuBook {
     clicks: HashMap<usize, Instant>,
     last_shown: HashMap<usize, Instant>,
     shown: Option<ShownMenu>,
     bound: Vec<(u64, ContextHit)>,
     next_id: u64,
-}
-
-impl Default for MenuBook {
-    fn default() -> Self {
-        Self {
-            clicks: HashMap::new(),
-            last_shown: HashMap::new(),
-            shown: None,
-            bound: Vec::new(),
-            next_id: 0,
-        }
-    }
 }
 
 pub struct ContextMenuSession {
