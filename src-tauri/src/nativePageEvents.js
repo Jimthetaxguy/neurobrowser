@@ -100,7 +100,7 @@ const PAGE_LIFECYCLE_PHASES = new Set(["started", "finished", "title"]);
  * Chrome updates for one page-lifecycle payload.
  * The address bar follows the active page unless that text is an unsent edit.
  * A non-empty title updates that page's tab, including a background tab.
- * `loading` is reported only for the active page.
+ * Load phase is not derived here: `pageLoadState.js` tracks it for every page.
  */
 export function pageLifecycleUpdates(event, activePageId, options = {}) {
   if (!event || typeof event !== "object") return {};
@@ -110,8 +110,6 @@ export function pageLifecycleUpdates(event, activePageId, options = {}) {
 
   const updates = { pageId, phase };
   const active = pageId === activePageId;
-  if (active && phase === "started") updates.loading = true;
-  if (active && phase === "finished") updates.loading = false;
 
   const addressEditing = options.addressEditing === true;
   if (active && !addressEditing && typeof event.url === "string" && event.url) {
