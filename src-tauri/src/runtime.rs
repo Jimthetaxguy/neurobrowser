@@ -797,16 +797,62 @@ enum NavigationPoll {
     Cancelled(String),
 }
 
+/// Where one page's navigation stands.
+///
+/// Replaces three independent fields (`loading`, a cancel reason and a
+/// suppress-Finished flag) whose eight combinations held four real states.
+/// A refusal now ends when a new command or a new load begins, so a load
+/// that never passes through `on_navigation` cannot inherit its suppression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NavPhase {
+    /// No load in flight; the last load finished or was stopped.
+    Idle,
+    /// A load is in flight.
+    Loading,
+    /// Netguard refused a hop. Not loading, so the page is not stuck, and a
+    /// Finished event in this phase is not reported as success. `reason` is
+    /// `Some` until one waiter takes it; the suppression outlives the take.
+    Refused { reason: Option<String> },
+}
+
+impl NavPhase {
+    fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    /// A Finished event leaves a refusal in place and otherwise goes idle.
+    fn finished(&mut self) {
+        if !matches!(self, Self::Refused { .. }) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// A new command owns the page. An earlier refusal belongs to the earlier
+    /// hop; a load already in flight is left to its own callbacks.
+    fn clear_refusal(&mut self) {
+        if matches!(self, Self::Refused { .. }) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// One read, cancellation first. A refusal clears loading but must not
+    /// look like [`NavigationPoll::Ready`] to the waiter that takes it.
+    fn poll(&mut self) -> NavigationPoll {
+        match self {
+            Self::Refused { reason } => match reason.take() {
+                Some(reason) => NavigationPoll::Cancelled(reason),
+                None => NavigationPoll::Ready,
+            },
+            Self::Loading => NavigationPoll::Pending,
+            Self::Idle => NavigationPoll::Ready,
+        }
+    }
+}
+
 struct RuntimePage {
     runtime_id: String,
     viewport: BrowserViewport,
-    loading: bool,
-    /// Netguard refused a hop. Distinct from `loading == false`, which also
-    /// means a load finished, so a waiter can tell cancel from success.
-    navigation_cancel: Option<String>,
-    /// The refused hop must not be emitted as a finished success. Kept apart
-    /// from `navigation_cancel` so a waiter can still take the reason.
-    suppress_finished_event: bool,
+    nav: NavPhase,
 }
 
 struct PendingRuntimeRequest {
@@ -835,9 +881,7 @@ impl BrowserRuntimeRegistry {
             RuntimePage {
                 runtime_id,
                 viewport: BrowserViewport::default(),
-                loading: false,
-                navigation_cancel: None,
-                suppress_finished_event: false,
+                nav: NavPhase::Idle,
             },
         );
     }
@@ -934,77 +978,59 @@ impl BrowserRuntimeRegistry {
         Ok(())
     }
 
-    pub fn set_loading(&self, page_id: usize, loading: bool) {
+    fn update_nav(&self, page_id: usize, update: impl FnOnce(&mut NavPhase)) {
         if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.loading = loading;
+            update(&mut page.nav);
         }
         self.notify_active_loading();
     }
 
-    /// A finished load clears `loading` and leaves any cancellation recorded.
+    /// A load started, whether or not `on_navigation` saw it (a reload or a
+    /// history entry may skip that hook). Any earlier refusal is over.
+    pub fn start_loading(&self, page_id: usize) {
+        self.update_nav(page_id, |nav| *nav = NavPhase::Loading);
+    }
+
+    /// A finished load clears loading and leaves any refusal recorded.
     pub fn finish_loading(&self, page_id: usize) {
-        self.set_loading(page_id, false);
+        self.update_nav(page_id, NavPhase::finished);
     }
 
-    /// A refused hop is not a finished load. `loading` is cleared so the page
-    /// is not stuck, and the reason stays until a waiter or a new command reads it.
+    /// A refused hop is not a finished load. Loading ends so the page is not
+    /// stuck, and the reason stays until a waiter or a new command reads it.
     pub fn cancel_navigation(&self, page_id: usize, reason: impl Into<String>) {
-        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.loading = false;
-            page.navigation_cancel = Some(reason.into());
-            page.suppress_finished_event = true;
-        }
-        self.notify_active_loading();
+        let reason = Some(reason.into());
+        self.update_nav(page_id, |nav| *nav = NavPhase::Refused { reason });
     }
 
     /// Netguard allowed a new hop. A refusal recorded for an earlier hop
-    /// belongs to that navigation, so it is cleared here instead of being
-    /// reported by the next wait after this load finishes.
+    /// belongs to that navigation, so it is neither reported by the next wait
+    /// nor allowed to suppress this hop's Finished event.
     pub fn begin_allowed_navigation(&self, page_id: usize) {
-        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.navigation_cancel = None;
-            page.loading = true;
-        }
-        self.notify_active_loading();
+        self.start_loading(page_id);
     }
 
+    /// A new command begins. Clears a recorded refusal, including its
+    /// Finished suppression, without inventing a load.
     pub fn clear_navigation_cancel(&self, page_id: usize) {
-        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.navigation_cancel = None;
-        }
+        self.update_nav(page_id, NavPhase::clear_refusal);
     }
 
-    /// Peek. Does not take `navigation_cancel`.
+    /// Whether a Finished event now would report a refused hop. Peek only.
     pub fn suppress_finished_event(&self, page_id: usize) -> bool {
         self.pages
             .lock()
             .unwrap()
             .get(&page_id)
-            .is_some_and(|page| page.suppress_finished_event)
+            .is_some_and(|page| matches!(page.nav, NavPhase::Refused { .. }))
     }
 
-    /// An allowed hop may report Finished. Does not clear a recorded refusal.
-    pub fn note_navigation_allowed(&self, page_id: usize) {
-        if let Some(page) = self.pages.lock().unwrap().get_mut(&page_id) {
-            page.suppress_finished_event = false;
-        }
-    }
-
-    /// One lock, cancellation first. A cancel that also clears `loading` must
-    /// not look like [`NavigationPoll::Ready`].
     fn poll_navigation(&self, page_id: usize) -> Result<NavigationPoll, String> {
         let mut pages = self.pages.lock().unwrap();
         let page = pages
             .get_mut(&page_id)
             .ok_or_else(|| "Runtime page not found".to_string())?;
-        if let Some(reason) = page.navigation_cancel.take() {
-            return Ok(NavigationPoll::Cancelled(reason));
-        }
-        if page.loading {
-            Ok(NavigationPoll::Pending)
-        } else {
-            Ok(NavigationPoll::Ready)
-        }
+        Ok(page.nav.poll())
     }
 
     pub fn set_viewport(&self, page_id: usize, viewport: BrowserViewport) -> Result<(), String> {
@@ -1043,7 +1069,7 @@ impl BrowserRuntimeRegistry {
             .lock()
             .unwrap()
             .get(&page_id)
-            .is_some_and(|page| page.loading)
+            .is_some_and(|page| page.nav.is_loading())
     }
 
     /// Called when the active page starts or stops loading, including a tab
@@ -1660,8 +1686,7 @@ impl BrowserInterface for TauriBrowserRuntime {
             return Err(reason.to_string());
         }
         let parsed = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
-        self.registry.clear_navigation_cancel(self.page_id);
-        self.registry.set_loading(self.page_id, true);
+        self.registry.start_loading(self.page_id);
         self.webview()?
             .navigate(parsed)
             .map_err(|e| e.to_string())?;
@@ -1733,8 +1758,7 @@ impl BrowserInterface for TauriBrowserRuntime {
     }
 
     async fn browser_reload(&self) -> Result<(), String> {
-        self.registry.clear_navigation_cancel(self.page_id);
-        self.registry.set_loading(self.page_id, true);
+        self.registry.start_loading(self.page_id);
         self.webview()?.reload().map_err(|e| e.to_string())
     }
 
@@ -1791,7 +1815,6 @@ pub fn create_runtime_page(
                 registry_for_nav.cancel_navigation(page_id, reason.to_string());
                 return false;
             }
-            registry_for_nav.note_navigation_allowed(page_id);
             registry_for_nav.begin_allowed_navigation(page_id);
             true
         })
@@ -1800,7 +1823,7 @@ pub fn create_runtime_page(
             let url = payload.url().to_string();
             match payload.event() {
                 PageLoadEvent::Started => {
-                    registry_for_load.set_loading(page_id, true);
+                    registry_for_load.start_loading(page_id);
                     apply_remembered_zoom(&webview, &url);
                     show_if_browsed(
                         &webview,
@@ -2049,7 +2072,7 @@ mod response_tests {
         }));
         assert_eq!(seen.lock().unwrap().as_slice(), &[false]);
 
-        registry.set_loading(2, true);
+        registry.start_loading(2);
         assert_eq!(
             seen.lock().unwrap().as_slice(),
             &[false],
@@ -2057,7 +2080,7 @@ mod response_tests {
         );
 
         registry.set_active_page(Some(2));
-        registry.set_loading(2, true);
+        registry.start_loading(2);
         assert_eq!(seen.lock().unwrap().as_slice(), &[false, true]);
 
         registry.set_active_page(Some(1));
@@ -2073,14 +2096,14 @@ mod response_tests {
             &[false, true, false, true, false]
         );
 
-        registry.set_loading(1, true);
+        registry.start_loading(1);
         registry.cancel_navigation(1, "refused");
         assert_eq!(
             seen.lock().unwrap().as_slice(),
             &[false, true, false, true, false, true, false]
         );
 
-        registry.set_loading(1, true);
+        registry.start_loading(1);
         registry.unregister_page(1);
         assert_eq!(seen.lock().unwrap().last().copied(), Some(false));
         assert!(!registry.active_page_is_loading());
@@ -2192,7 +2215,7 @@ mod response_tests {
         runtime.block_on(async {
             let registry = super::BrowserRuntimeRegistry::default();
             registry.register_page(4, "page-runtime-4".into());
-            registry.set_loading(4, true);
+            registry.start_loading(4);
             let payload = super::stopped_page_payload(&registry, 4, "https://example.com/partial")
                 .expect("stop reports finish");
             assert_eq!(payload.phase, super::PageLifecyclePhase::Finished);
@@ -2226,7 +2249,7 @@ mod response_tests {
         runtime.block_on(async {
             let registry = super::BrowserRuntimeRegistry::default();
             registry.register_page(4, "page-runtime-4".into());
-            registry.set_loading(4, true);
+            registry.start_loading(4);
             registry
                 .cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
             // Finish must not erase the cancellation and make the wait succeed.
@@ -2240,7 +2263,7 @@ mod response_tests {
             );
 
             registry.clear_navigation_cancel(4);
-            registry.set_loading(4, true);
+            registry.start_loading(4);
             registry.finish_loading(4);
             super::wait_for_page_ready(&registry, 4, 500)
                 .await
@@ -2337,7 +2360,7 @@ mod response_tests {
     fn netguard_cancel_blocks_finished_event_until_a_later_hop_is_allowed() {
         let registry = super::BrowserRuntimeRegistry::default();
         registry.register_page(4, "page-runtime-4".into());
-        registry.set_loading(4, true);
+        registry.start_loading(4);
         registry.cancel_navigation(4, "Refusing to navigate to disallowed scheme 'javascript:'");
         assert!(registry.suppress_finished_event(4));
         assert!(super::page_lifecycle_payload(
@@ -2371,7 +2394,7 @@ mod response_tests {
         )
         .is_none());
 
-        registry.note_navigation_allowed(4);
+        registry.begin_allowed_navigation(4);
         assert!(!registry.suppress_finished_event(4));
         let allowed = super::page_lifecycle_payload(
             4,
@@ -2382,6 +2405,75 @@ mod response_tests {
         )
         .expect("later allowed hop");
         assert_eq!(allowed.phase, super::PageLifecyclePhase::Finished);
+    }
+
+    /// A load can start without passing through `on_navigation` (reload, a
+    /// history entry served from cache). Once a new command or a new load has
+    /// begun, the earlier refusal must not swallow that load's Finished event.
+    #[test]
+    fn load_that_skips_the_navigation_hook_still_reports_finished() {
+        let registry = super::BrowserRuntimeRegistry::default();
+        registry.register_page(6, "page-runtime-6".into());
+        registry.cancel_navigation(6, "Refusing to navigate to disallowed scheme 'file:'");
+        assert!(registry.suppress_finished_event(6));
+
+        // A new command clears the refusal; no `on_navigation` callback follows.
+        registry.clear_navigation_cancel(6);
+        assert!(
+            !registry.suppress_finished_event(6),
+            "a new command must not inherit the earlier hop's suppression"
+        );
+
+        // A load that starts without the hook also ends the refused phase.
+        registry.cancel_navigation(6, "Refusing to navigate to disallowed scheme 'file:'");
+        registry.start_loading(6);
+        registry.finish_loading(6);
+        assert!(super::page_lifecycle_payload(
+            6,
+            super::PageLifecyclePhase::Finished,
+            "https://example.com/",
+            "Example",
+            registry.suppress_finished_event(6),
+        )
+        .is_some());
+    }
+
+    /// The four phases and the transitions between them, without a webview.
+    #[test]
+    fn nav_phase_transitions_cover_every_state() {
+        use super::{NavPhase, NavigationPoll};
+
+        let mut nav = NavPhase::Idle;
+        assert!(matches!(nav.poll(), NavigationPoll::Ready));
+        nav.clear_refusal();
+        assert_eq!(nav, NavPhase::Idle);
+
+        nav = NavPhase::Loading;
+        assert!(nav.is_loading());
+        assert!(matches!(nav.poll(), NavigationPoll::Pending));
+        nav.clear_refusal();
+        assert_eq!(
+            nav,
+            NavPhase::Loading,
+            "a new command leaves a live load alone"
+        );
+        nav.finished();
+        assert_eq!(nav, NavPhase::Idle);
+
+        nav = NavPhase::Refused {
+            reason: Some("refused".into()),
+        };
+        assert!(!nav.is_loading());
+        nav.finished();
+        assert!(matches!(nav, NavPhase::Refused { reason: Some(_) }));
+        assert!(matches!(nav.poll(), NavigationPoll::Cancelled(reason) if reason == "refused"));
+        assert_eq!(nav, NavPhase::Refused { reason: None });
+        assert!(
+            matches!(nav.poll(), NavigationPoll::Ready),
+            "only one waiter takes the reason"
+        );
+        nav.clear_refusal();
+        assert_eq!(nav, NavPhase::Idle);
     }
 
     #[test]
