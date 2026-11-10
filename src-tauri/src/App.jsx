@@ -23,6 +23,14 @@ import {
   takeBlockedPopup,
 } from "./nativePageEvents.js";
 import {
+  beginCommandLoad,
+  clearPageLoad,
+  endCommandLoad,
+  isPageLoading,
+  markLifecycle,
+} from "./pageLoadState.js";
+import { AGENT_TURN_IDLE, agentTurnReducer, agentTurnView } from "./agentTurn.js";
+import {
   createNativeNavigationState,
   forgetNativePage,
   nativeStatusUpdate,
@@ -359,7 +367,7 @@ function eventSummary(event) {
   return event.type;
 }
 
-function ApprovalCard({ approval, onResolve, onCancel }) {
+function ApprovalCard({ approval, enabled, heldBy, onResolve, onCancel }) {
   const approvalEvent = latestApprovalEvent(approval);
   const reasons = approvalEvent?.decision?.reasons ?? [];
   const args = approvalEvent?.decision?.redacted_arguments ?? {};
@@ -376,14 +384,15 @@ function ApprovalCard({ approval, onResolve, onCancel }) {
       </div>}
       {reasons.length > 0 && <div className="approval-reason">{reasons.join("; ")}</div>}
       <pre className="approval-args">{JSON.stringify(args, null, 2)}</pre>
+      {heldBy && <p className="approval-held" role="status">{heldBy}</p>}
       <div className="approval-actions">
-        <button className="btn" onClick={() => onResolve(true)} type="button">
+        <button className="btn" disabled={!enabled} onClick={() => onResolve(true)} type="button">
           Approve
         </button>
-        <button className="btn btn-secondary" onClick={() => onResolve(false)} type="button">
+        <button className="btn btn-secondary" disabled={!enabled} onClick={() => onResolve(false)} type="button">
           Deny
         </button>
-        <button className="btn btn-secondary" onClick={onCancel} type="button">
+        <button className="btn btn-secondary" disabled={!enabled} onClick={onCancel} type="button">
           Cancel
         </button>
       </div>
@@ -411,8 +420,7 @@ function ChatPanel({
   messages,
   onCancelApproval,
   onResolveApproval,
-  pendingApproval,
-  thinking,
+  turnView,
   prompt,
   setPrompt,
   onAsk,
@@ -431,15 +439,17 @@ function ChatPanel({
           <Message item={item} key={item.id} />
         ))}
       </div>
-      {pendingApproval && (
+      {turnView.approval && (
         <ApprovalCard
-          approval={pendingApproval}
+          approval={turnView.approval}
+          enabled={turnView.canResolveApproval}
+          heldBy={turnView.providerBusy ? "Waiting for the provider reply before this can be resolved." : turnView.resolving ? "Submitting…" : ""}
           onCancel={onCancelApproval}
           onResolve={onResolveApproval}
         />
       )}
       <ActionHistory events={actionEvents} />
-      <div className={`loading${thinking ? " active" : ""}`} role="status">Waiting for the provider… <span>No browser actions are executed.</span></div>
+      <div className={`loading${turnView.providerBusy ? " active" : ""}`} role="status">Waiting for the provider… <span>No browser actions are executed.</span></div>
       <form
         className="chat-input-area"
         onSubmit={(event) => {
@@ -449,7 +459,7 @@ function ChatPanel({
       >
         <textarea
           aria-label="Message assistant"
-          disabled={!ready || thinking}
+          disabled={!ready || !turnView.canAsk}
           className="chat-input"
           onInput={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
@@ -461,9 +471,9 @@ function ChatPanel({
           placeholder={ready ? "Ask a question…" : "Connect the native browser first"}
           value={prompt}
         />
-        <label className="context-choice"><input type="checkbox" checked={includePage} disabled={thinking || !ready} onChange={event => setIncludePage(event.target.checked)} /> Include current page text</label>
+        <label className="context-choice"><input type="checkbox" checked={includePage} disabled={!turnView.canAsk || !ready} onChange={event => setIncludePage(event.target.checked)} /> Include current page text</label>
         <p className="context-note">{includePage ? "Bounded page text will be sent to your selected provider." : "Only your question is sent. No page, history or memory is shared."}</p>
-        {thinking ? <button className="btn btn-secondary" type="button" onClick={onStop}>Cancel request</button> : <button className="btn" type="submit" disabled={!ready || !prompt.trim()}>Send</button>}
+        {turnView.providerBusy ? <button className="btn btn-secondary" type="button" onClick={onStop}>Cancel request</button> : <button className="btn" type="submit" disabled={!ready || !prompt.trim() || !turnView.canAsk}>Send</button>}
       </form>
     </aside>
   );
@@ -537,7 +547,20 @@ export default function App({ adapter, lane }) {
   const [policyMode, setPolicyModeValue] = useState("assisted");
   const [actionPolicy, setActionPolicy] = useState(null);
   const [actionEvents, setActionEvents] = useState([]);
-  const [pendingApproval, setPendingApproval] = useState(null);
+  // One explicit assistant turn instead of `thinking` + pending approval + request ref.
+  const [agentTurn, setAgentTurn] = useState(AGENT_TURN_IDLE);
+  const agentTurnRef = useRef(agentTurn);
+  // Applies synchronously so a second click in the same frame sees the new state.
+  // Returns false when the reducer refused the transition.
+  const dispatchTurn = useCallback((action) => {
+    const previous = agentTurnRef.current;
+    const next = agentTurnReducer(previous, action);
+    if (next === previous) return false;
+    agentTurnRef.current = next;
+    setAgentTurn(next);
+    return true;
+  }, []);
+  const turnView = agentTurnView(agentTurn);
   const [snapshot, setSnapshot] = useState(null);
   const [status, setStatus] = useState("Connecting to the native browser…");
   const [runtimeState, setRuntimeState] = useState("connecting");
@@ -545,9 +568,16 @@ export default function App({ adapter, lane }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [providerStatus, setProviderStatus] = useState(null);
   const [includePage, setIncludePage] = useState(false);
-  const assistantRequest = useRef(null);
-  const [loading, setLoading] = useState(null);
-  const [pageLoading, setPageLoading] = useState(false);
+  // Load phase per page id. Events update any page; the chrome shows the active one.
+  const [pageLoads, setPageLoads] = useState({});
+  const pageLoadsRef = useRef(pageLoads);
+  const updatePageLoads = useCallback((change) => {
+    const next = change(pageLoadsRef.current);
+    if (next === pageLoadsRef.current) return;
+    pageLoadsRef.current = next;
+    setPageLoads(next);
+  }, []);
+  const activeLoading = isPageLoading(pageLoads, currentPageId);
   const [blockedPopups, setBlockedPopups] = useState({});
   const [downloads, setDownloads] = useState([]);
   const [findOpen, setFindOpen] = useState(false);
@@ -565,7 +595,6 @@ export default function App({ adapter, lane }) {
   sessionIdRef.current = sessionId;
   const popupQueue = useRef(Promise.resolve());
   const [prompt, setPrompt] = useState("");
-  const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState([
     {
       id: -1,
@@ -692,6 +721,7 @@ export default function App({ adapter, lane }) {
       try {
         await adapter.closePage(sessionId, pageId);
         forgetNativePage(nativeNavigationRef.current, pageId);
+        updatePageLoads((loads) => clearPageLoad(loads, pageId));
         const nextId = focusAfterClose(tabs, pageId, currentPageId);
         const nextTabs = tabs.filter((tab) => tab.id !== pageId);
         setTabs(nextTabs);
@@ -719,7 +749,7 @@ export default function App({ adapter, lane }) {
         setStatus(`Close tab failed: ${messageText(error)}`);
       }
     },
-    [adapter, compact, currentPageId, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, tabs, updateSnapshot]
+    [adapter, compact, currentPageId, sessionId, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, tabs, updateSnapshot, updatePageLoads]
   );
 
   const openFromOpener = useCallback(async (openerId, url, background) => {
@@ -733,13 +763,16 @@ export default function App({ adapter, lane }) {
       return;
     }
     setTabs((items) => insertOpenedTab(items, openerId, pageId, url));
+    let token = null;
     if (!background) {
       setActivePageId(pageId);
       setUrlFromPage(url || "");
       await syncBrowserViewportForPage(pageId);
       if (url) {
         setStatus(`Navigating to ${url}`);
-        setLoading(true);
+        token = commandLoadToken.current + 1;
+        commandLoadToken.current = token;
+        updatePageLoads((loads) => beginCommandLoad(loads, pageId, token));
       } else {
         setStatus("New tab ready");
         if (!compact) document.querySelector(".location .url-input")?.focus();
@@ -761,12 +794,9 @@ export default function App({ adapter, lane }) {
     } catch (error) {
       setStatus(`Navigation failed: ${messageText(error)}`);
     } finally {
-      if (!background) {
-        setLoading(null);
-        setPageLoading(false);
-      }
+      if (token != null) updatePageLoads((loads) => endCommandLoad(loads, pageId, token));
     }
-  }, [adapter, compact, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updateSnapshot]);
+  }, [adapter, compact, setActivePageId, setUrlFromPage, syncBrowserViewportForPage, updatePageLoads, updateSnapshot]);
 
   const enqueuePopup = useCallback((job) => {
     popupQueue.current = popupQueue.current.then(job, job);
@@ -810,21 +840,19 @@ export default function App({ adapter, lane }) {
         ? `Searching DuckDuckGo for ${destination.query}`
         : `Navigating to ${destination.url}`
     );
-    setLoading(true);
-    expectNativeNavigation(currentPageId);
+    const pageId = currentPageId;
+    updatePageLoads((loads) => beginCommandLoad(loads, pageId, token));
+    expectNativeNavigation(pageId);
 
     try {
       await performPageAction(
-        () => adapter.navigate(sessionId, currentPageId, destination.url),
+        () => adapter.navigate(sessionId, pageId, destination.url),
         "Navigation failed"
       );
     } finally {
-      if (commandLoadToken.current === token) {
-        setLoading(null);
-        setPageLoading(false);
-      }
+      updatePageLoads((loads) => endCommandLoad(loads, pageId, token));
     }
-  }, [adapter, currentPageId, expectNativeNavigation, performPageAction, sessionId, setUrlFromPage, url]);
+  }, [adapter, currentPageId, expectNativeNavigation, performPageAction, sessionId, setUrlFromPage, updatePageLoads, url]);
 
   const runBrowserAction = useCallback(
     async (command) => {
@@ -843,92 +871,106 @@ export default function App({ adapter, lane }) {
     if (currentPageId == null || !sessionId) return;
     try {
       await adapter.browserAction("stop_page_load", sessionId, currentPageId);
-      setLoading(null);
-      setPageLoading(false);
+      updatePageLoads((loads) => clearPageLoad(loads, currentPageId));
     } catch (error) {
       setStatus(`Stop failed: ${messageText(error)}`);
     }
-  }, [adapter, currentPageId, sessionId]);
+  }, [adapter, currentPageId, sessionId, updatePageLoads]);
 
   const askAssistant = useCallback(async () => {
     const trimmed = prompt.trim();
-    if (!trimmed || currentPageId == null || !sessionId || thinking) return;
+    if (!trimmed || currentPageId == null || !sessionId) return;
+    const requestId = globalThis.crypto?.randomUUID?.() ?? null;
+    if (!requestId) {
+      appendMessage("assistant", "Request failed: Secure request IDs are unavailable");
+      setStatus("Assistant request failed");
+      return;
+    }
+    if (!dispatchTurn({ type: "askStarted", id: requestId })) return;
     setPrompt("");
     appendMessage("user", trimmed);
-    setThinking(true);
     setStatus("Waiting for the provider…");
-    const requestId = globalThis.crypto?.randomUUID?.() ?? null;
-    assistantRequest.current = requestId;
+    // Cancel settles the turn first, so a late reply is not shown.
+    const current = () => agentTurnRef.current.kind === "awaitingProvider" && agentTurnRef.current.id === requestId;
     try {
-      if (!requestId) throw new Error("Secure request IDs are unavailable");
       const reply = await adapter.askAssistant(sessionId, currentPageId, trimmed, requestId, includePage);
-      if (assistantRequest.current !== requestId) return;
+      if (!current()) return;
       appendMessage("assistant", reply);
       setStatus("Reply received");
     } catch (error) {
-      if (assistantRequest.current !== requestId) return;
+      if (!current()) return;
       appendMessage("assistant", `Request failed: ${messageText(error)}`);
       setStatus("Assistant request failed");
     } finally {
-      if (assistantRequest.current === requestId) { assistantRequest.current = null; setThinking(false); }
+      dispatchTurn({ type: "askSettled", id: requestId });
     }
-  }, [adapter, appendMessage, currentPageId, prompt, sessionId, thinking, includePage]);
+  }, [adapter, appendMessage, currentPageId, dispatchTurn, prompt, sessionId, includePage]);
 
   const stopAssistant = useCallback(async () => {
-    const id = assistantRequest.current;
-    if (!id || typeof adapter.cancelAssistantRequest !== "function") return;
+    const turn = agentTurnRef.current;
+    if (turn.kind !== "awaitingProvider" || typeof adapter.cancelAssistantRequest !== "function") return;
+    const id = turn.id;
     try {
       await adapter.cancelAssistantRequest(id);
-      if (assistantRequest.current !== id) return;
-      assistantRequest.current = null;
-      setThinking(false);
+      if (!dispatchTurn({ type: "askSettled", id })) return;
       appendMessage("assistant", "Request cancelled. A reply may have been generated by the provider, but no browser actions were executed.");
       setStatus("Request cancelled");
     } catch (error) { setStatus(`Cancel failed: ${messageText(error)}`); }
-  }, [adapter, appendMessage]);
+  }, [adapter, appendMessage, dispatchTurn]);
 
+  // Approve, Deny and Cancel run only from awaitingApproval. The reducer refuses
+  // them while a provider request or another resolution is in flight.
   const resolveApproval = useCallback(
     async (approved) => {
-      if (!pendingApproval) return;
-      setThinking(true);
+      const turn = agentTurnRef.current;
+      if (turn.kind !== "awaitingApproval") return;
+      const runId = turn.run.run_id;
+      if (!dispatchTurn({ type: "resolveStarted", runId })) return;
+      let next = null;
       try {
-        const result = await adapter.submitApproval(pendingApproval.run_id, approved);
+        const result = await adapter.submitApproval(runId, approved);
         setActionEvents((items) => [...items, ...(result.events || [])]);
-        await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
+        await applyPresentedRun(result, { appendMessage, setPendingApproval: (run) => { next = run; }, setStatus, refreshSnapshot });
+        dispatchTurn({ type: "resolveSettled", runId, next });
       } catch (error) {
         appendMessage("assistant", `Approval failed: ${messageText(error)}`);
         setStatus("Approval failed");
-      } finally {
-        setThinking(false);
+        dispatchTurn({ type: "resolveSettled", runId, failed: true });
       }
     },
-    [adapter, appendMessage, pendingApproval, refreshSnapshot]
+    [adapter, appendMessage, dispatchTurn, refreshSnapshot]
   );
 
   const cancelApproval = useCallback(async () => {
-    if (!pendingApproval) return;
+    const turn = agentTurnRef.current;
+    if (turn.kind !== "awaitingApproval") return;
+    const runId = turn.run.run_id;
+    if (!dispatchTurn({ type: "resolveStarted", runId })) return;
     try {
-      const result = await adapter.cancelAgentRun(pendingApproval.run_id);
+      const result = await adapter.cancelAgentRun(runId);
       setActionEvents((items) => [...items, ...(result.events || [])]);
-      setPendingApproval(null);
+      dispatchTurn({ type: "resolveSettled", runId, next: null });
       appendMessage("assistant", result.final_response || "Run cancelled.");
       setStatus("Run cancelled");
     } catch (error) {
       setStatus(`Cancel failed: ${messageText(error)}`);
+      dispatchTurn({ type: "resolveSettled", runId, failed: true });
     }
-  }, [adapter, appendMessage, pendingApproval]);
+  }, [adapter, appendMessage, dispatchTurn]);
 
   const presentProposal = useCallback(async (result, source) => {
     setActionEvents((items) => [...items, ...(result.events || []).map(event => ({ ...event, source }))]);
     if (source && source.pageId !== currentPageIdRef.current) {
       const presentation = presentAgentRun(result);
       appendMessage("assistant", `Action on ${source.pageUrl || "previous page"}: ${presentation.message}`);
-      if (result.status === "awaiting_approval") setPendingApproval(result);
+      if (result.status === "awaiting_approval") dispatchTurn({ type: "approvalRequested", run: result });
       setStatus(presentation.status);
       return;
     }
-    await applyPresentedRun(result, { appendMessage, setPendingApproval, setStatus, refreshSnapshot });
-  }, [appendMessage, refreshSnapshot]);
+    // A proposal that needs no approval leaves any other pending approval in place.
+    const requestApproval = (run) => { if (run) dispatchTurn({ type: "approvalRequested", run }); };
+    await applyPresentedRun(result, { appendMessage, setPendingApproval: requestApproval, setStatus, refreshSnapshot });
+  }, [appendMessage, dispatchTurn, refreshSnapshot]);
 
   const selectProvider = useCallback(
     async (nextProvider) => {
@@ -1049,8 +1091,7 @@ export default function App({ adapter, lane }) {
         addressEditing: addressDirtyRef.current,
       });
       if (!updates.phase) return;
-      if (updates.loading === true) setPageLoading(true);
-      if (updates.loading === false) setPageLoading(false);
+      updatePageLoads((loads) => markLifecycle(loads, updates.pageId, updates.phase));
       if (typeof updates.url === "string") setUrlFromPage(updates.url);
       if (updates.phase === "finished" && updates.pageId === currentPageIdRef.current) {
         refreshZoomRef.current(updates.pageId);
@@ -1071,7 +1112,7 @@ export default function App({ adapter, lane }) {
         );
       }
     });
-  }, [adapter, setUrlFromPage]);
+  }, [adapter, setUrlFromPage, updatePageLoads]);
 
   useEffect(() => {
     if (typeof adapter.onPageNewWindow !== "function") return undefined;
@@ -1221,8 +1262,7 @@ export default function App({ adapter, lane }) {
     !compact &&
     activeTab != null &&
     isBlankDocument(activeTab.url) &&
-    loading == null &&
-    !pageLoading;
+    !activeLoading;
 
   useEffect(() => {
     if (!adapter.rendersPageInHost) return undefined;
@@ -1274,7 +1314,7 @@ export default function App({ adapter, lane }) {
         if (compact || event.repeat || event.altKey || event.metaKey || event.ctrlKey) return;
         menuEcho.current.mark("stop");
         if (event.defaultPrevented) return;
-        if (loading == null && !pageLoading) return;
+        if (!activeLoading) return;
         if (addressDirtyRef.current) return;
         if (currentPageId == null || sessionId == null) return;
         const addressFocused =
@@ -1395,7 +1435,7 @@ export default function App({ adapter, lane }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activatePage, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
+  }, [activatePage, closeTab, compact, createNewTab, currentPageId, activeLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
 
   useEffect(() => {
     if (typeof adapter.onMenuCommand !== "function") return undefined;
@@ -1423,7 +1463,7 @@ export default function App({ adapter, lane }) {
         return;
       }
       if (command === "stop") {
-        if (loading == null && !pageLoading) return;
+        if (!activeLoading) return;
         if (addressDirtyRef.current) return;
         if (currentPageId == null || sessionId == null) return;
         stopPageLoad();
@@ -1441,14 +1481,14 @@ export default function App({ adapter, lane }) {
       if (number == null) return;
       activateNumberedTab(tabs, currentPageId, number, activatePage);
     });
-  }, [activatePage, adapter, closeTab, compact, createNewTab, currentPageId, loading, pageLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
+  }, [activatePage, adapter, closeTab, compact, createNewTab, currentPageId, activeLoading, runBrowserAction, sessionId, stopPageLoad, tabs]);
 
   const blockedCount = Array.isArray(blockedPopups[currentPageId]) ? blockedPopups[currentPageId].length : 0;
 
   if (compact) {
     return (
       <div className="app-shell appkit-shell">
-        <LoadProgress active={loading != null || pageLoading} />
+        <LoadProgress active={activeLoading} />
         <Header
           adapter={adapter}
           blockedCount={blockedCount}
@@ -1474,10 +1514,10 @@ export default function App({ adapter, lane }) {
 
   return (
     <div className="app-shell">
-      <LoadProgress active={loading != null || pageLoading} />
+      <LoadProgress active={activeLoading} />
       <TabStrip currentPageId={currentPageId} onActivate={activatePage} onClose={closeTab} onReorder={reorderTabs} tabs={tabs} />
       <Header
-        onBrowserAction={runBrowserAction} onStop={stopPageLoad} loading={loading != null || pageLoading} zoomPercent={zoomPercent}
+        onBrowserAction={runBrowserAction} onStop={stopPageLoad} loading={activeLoading} zoomPercent={zoomPercent}
         onToggleAssistant={() => setAssistantOpen(open => !open)} onToggleSettings={() => setSettingsOpen(open => !open)} assistantOpen={assistantOpen} settingsOpen={settingsOpen}
         adapter={adapter}
         blockedCount={blockedCount}
@@ -1491,7 +1531,7 @@ export default function App({ adapter, lane }) {
       />
       <section className="settings-panel" hidden={!settingsOpen} aria-label="Browser settings">
         <div><h2>Browser settings</h2><p>Provider credentials stay in the native process.</p></div>
-        <label>Provider<select className="provider-select" value={provider} onChange={event => selectProvider(event.target.value)} disabled={thinking || runtimeState !== "ready"}>{PROVIDERS.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
+        <label>Provider<select className="provider-select" value={provider} onChange={event => selectProvider(event.target.value)} disabled={turnView.providerBusy || turnView.resolving || runtimeState !== "ready"}>{PROVIDERS.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
         <label>Browser action policy<select className="provider-select" value={policyMode} onChange={event => selectPolicyMode(event.target.value)} disabled={runtimeState !== "ready"}>{POLICY_MODES.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
         <p className="provider-status">{providerStatus ? `${providerStatus.model} · ${providerStatus.configured ? "Native configuration present; availability is checked on request." : "Setup needed."}` : "Provider status unavailable until the native browser connects."}<br />{!providerStatus?.configured && "Launch the app with OPENAI_API_KEY or ANTHROPIC_API_KEY in its native environment, or select an already-running Ollama model. Never enter keys in this page."}</p>
         <details className="page-details"><summary>Page details</summary><StatsRow snapshot={snapshot} /></details>
@@ -1529,10 +1569,9 @@ export default function App({ adapter, lane }) {
           onCancelApproval={cancelApproval}
           onAsk={askAssistant}
           onResolveApproval={resolveApproval}
-          pendingApproval={pendingApproval}
           prompt={prompt}
           setPrompt={setPrompt}
-          thinking={thinking}
+          turnView={turnView}
         />}
       </main>
       <div className="status-bar">

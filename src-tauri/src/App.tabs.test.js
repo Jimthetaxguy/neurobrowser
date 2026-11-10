@@ -1763,3 +1763,38 @@ test("AppKit selecting a loading tab clears the previous tab's statistics", asyn
     assert.deepEqual([...document.querySelectorAll(".stat-value")].map((node) => node.textContent), ["0", "0", "0", "0", "0"]);
   }, { lane: "appkit" });
 });
+
+test("a background tab's finished load clears its own indicator, and the indicator follows the active tab", async () => {
+  await withApp(async ({ click, dispatchLifecycle, document }) => {
+    await dispatchLifecycle({ pageId: 0, phase: "started", url: "https://slow.example/", title: "" });
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+
+    // Open tab 1 while tab 0 is still loading. Tab 1 is not loading.
+    await click(document.querySelector(".header > button"));
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    assert.equal(document.querySelector(".load-progress"), null);
+
+    // Back on tab 0, its load is still in progress.
+    await click(document.querySelectorAll(".tab .tab-title")[0]);
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+
+    // Tab 0 finishes while tab 1 is active. The event is not dropped.
+    await click(document.querySelectorAll(".tab .tab-title")[1]);
+    await dispatchLifecycle({ pageId: 0, phase: "finished", url: "https://slow.example/", title: "" });
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    await click(document.querySelectorAll(".tab .tab-title")[0]);
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    assert.equal(document.querySelector(".load-progress"), null);
+  });
+});
+
+test("a load started in a background tab shows once that tab is selected", async () => {
+  await withApp(async ({ click, dispatchLifecycle, document }) => {
+    await click(document.querySelector(".header > button"));
+    await dispatchLifecycle({ pageId: 0, phase: "started", url: "https://bg.example/", title: "" });
+    assert.equal(reloadOrStop(document).textContent, "Reload");
+    await click(document.querySelectorAll(".tab .tab-title")[0]);
+    assert.equal(reloadOrStop(document).textContent, "Stop");
+    assert.ok(document.querySelector(".load-progress"));
+  });
+});

@@ -42,7 +42,6 @@ test("page lifecycle follows the active page and keeps a background title off th
     url: "http://inpage.example/next",
     title: "",
   }, 2);
-  assert.equal(started.loading, true);
   assert.equal(started.url, "http://inpage.example/next");
   assert.equal(Object.hasOwn(started, "title"), false);
 
@@ -61,7 +60,6 @@ test("page lifecycle follows the active page and keeps a background title off th
     url: "https://inpage.example/landed",
     title: "",
   }, 2);
-  assert.equal(finished.loading, false);
   assert.equal(finished.url, "https://inpage.example/landed");
   assert.equal(Object.hasOwn(finished, "title"), false);
 
@@ -73,7 +71,6 @@ test("page lifecycle follows the active page and keeps a background title off th
   }, 2);
   assert.equal(background.title, "Background");
   assert.equal(Object.hasOwn(background, "url"), false);
-  assert.equal(Object.hasOwn(background, "loading"), false);
 });
 
 test("an address draft blocks lifecycle URL updates and unknown payloads are ignored", () => {
@@ -85,7 +82,6 @@ test("an address draft blocks lifecycle URL updates and unknown payloads are ign
   }, 0, { addressEditing: true });
   assert.equal(Object.hasOwn(draft, "url"), false);
   assert.equal(draft.title, "Still titled");
-  assert.equal(draft.loading, true);
   assert.deepEqual(pageLifecycleUpdates({ pageId: 0, phase: "paint", url: "https://x", title: "X" }, 0), {});
   assert.deepEqual(pageLifecycleUpdates(null, 0), {});
 });

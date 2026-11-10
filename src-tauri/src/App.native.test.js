@@ -63,3 +63,71 @@ test("native assistant shares no page by default, cancels, and ignores a late re
     assert.equal(document.querySelector("main").className,"assistant-closed");
   });
 });
+test("approval is held while a provider request is in flight and no reply is dropped", async () => {
+  const source = "https://manifest.example/";
+  const documentStamp = { runtime_id: "page-runtime-0", document_id: "doc-1", revision: 1 };
+  const target = { id: "t-1", role: "button", tag: "button", label: "Confirm", disabled: false, sensitive: false };
+  const approval = {
+    run_id: "run-1", status: "awaiting_approval", final_response: "Review first.",
+    approval_context: { url: source, title: "Manifest", document: documentStamp, target },
+    events: [{ type: "ApprovalRequested", tool: "click_target", decision: { reasons: ["Needs approval"], redacted_arguments: {} } }],
+  };
+  let resolveReply, resolveSubmit;
+  const calls = [];
+  const adapter = {
+    rendersPageInHost: false,
+    createSession: async () => "session", createPage: async () => 0, getActionPolicy: async () => null,
+    getPageSnapshot: async () => ({ url: source, title: "Manifest" }),
+    getPageObservation: async () => ({
+      schema_version: 1, url: source, title: "Manifest", text: "Manifest.", document: documentStamp,
+      targets: [target], links: [], tables: [], omissions: [],
+      capabilities: { javascript: true, interaction: true, scoped_targets: true, screenshots: false, enforcing_subresource_network: false },
+    }),
+    executeBrowserTool: async () => approval,
+    askAssistant: async (...args) => { calls.push(["ask", args[3]]); return new Promise(resolve => { resolveReply = resolve; }); },
+    cancelAssistantRequest: async id => { calls.push(["cancel", id]); },
+    submitApproval: async (runId, approved) => {
+      calls.push(["submit", runId, approved]);
+      return new Promise(resolve => { resolveSubmit = resolve; });
+    },
+  };
+  await mounted(adapter, async win => {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    await act(async () => { document.querySelector(".evidence-panel > button").click(); });
+    await act(async () => {
+      document.querySelector(".evidence-actions").dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    const approveButton = () => [...document.querySelectorAll(".approval-card button")].find(b => b.textContent.trim() === "Approve");
+    assert.ok(approveButton(), "approval card is shown");
+    assert.equal(approveButton().disabled, false);
+
+    // Ask while the approval is pending.
+    await act(async () => {
+      const input = document.querySelector(".chat-input");
+      Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, "value").set.call(input, "First question");
+      input.dispatchEvent(new win.Event("input", { bubbles: true }));
+    });
+    await act(async () => document.querySelector(".chat-input-area").dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true })));
+    assert.equal(calls.filter(c => c[0] === "ask").length, 1);
+
+    // Approve is blocked while the provider request is in flight.
+    assert.equal(approveButton().disabled, true);
+    await act(async () => approveButton().click());
+    assert.equal(calls.some(c => c[0] === "submit"), false);
+    assert.equal(document.querySelector(".chat-input").disabled, true);
+
+    await act(async () => resolveReply("FIRST_REPLY_CANARY"));
+    assert.match(document.querySelector(".chat-messages").textContent, /FIRST_REPLY_CANARY/);
+
+    // The held approval is now actionable. Resolving blocks a new ask and a second approve.
+    assert.equal(approveButton().disabled, false);
+    await act(async () => approveButton().click());
+    await act(async () => approveButton()?.click());
+    assert.deepEqual(calls.filter(c => c[0] === "submit"), [["submit", "run-1", true]]);
+    assert.equal(document.querySelector(".chat-input").disabled, true);
+
+    await act(async () => resolveSubmit({ run_id: "run-1", status: "completed", final_response: "Done.", events: [] }));
+    assert.equal(document.querySelector(".approval-card"), null);
+    assert.equal(document.querySelector(".chat-input").disabled, false);
+  });
+});
