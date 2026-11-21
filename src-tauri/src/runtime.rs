@@ -799,10 +799,7 @@ enum NavigationPoll {
 
 /// Where one page's navigation stands.
 ///
-/// Replaces three independent fields (`loading`, a cancel reason and a
-/// suppress-Finished flag) whose eight combinations held four real states.
-/// A refusal now ends when a new command or a new load begins, so a load
-/// that never passes through `on_navigation` cannot inherit its suppression.
+/// A new command or a new load ends a refusal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NavPhase {
     /// No load in flight; the last load finished or was stopped.
@@ -2438,7 +2435,7 @@ mod response_tests {
         .is_some());
     }
 
-    /// The four phases and the transitions between them, without a webview.
+    /// The three phases and the transitions between them, without a webview.
     #[test]
     fn nav_phase_transitions_cover_every_state() {
         use super::{NavPhase, NavigationPoll};

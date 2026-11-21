@@ -102,6 +102,12 @@ versions remain 0.1.0 until an actual version bump and release tag.
   in `src-tauri/src/pageFindFunction.js`, so a case fold that changes UTF-16
   length no longer throws a DOM Range exception (#154).
 - The browser page stays visible beside the assistant below 680px wide (#168).
+- A background tab that finishes loading no longer leaves Stop and the
+  progress bar stuck; load state is kept per page (#171).
+- Approving or sending while an assistant request is in flight no longer
+  re-enables Send early or drops the in-flight reply (#171).
+- After a refused navigation, a later load that skips the navigation hook
+  (reload, cached history entry) no longer drops its Finished event (#172).
 
 ### Removed
 

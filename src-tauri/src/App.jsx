@@ -547,7 +547,6 @@ export default function App({ adapter, lane }) {
   const [policyMode, setPolicyModeValue] = useState("assisted");
   const [actionPolicy, setActionPolicy] = useState(null);
   const [actionEvents, setActionEvents] = useState([]);
-  // One explicit assistant turn instead of `thinking` + pending approval + request ref.
   const [agentTurn, setAgentTurn] = useState(AGENT_TURN_IDLE);
   const agentTurnRef = useRef(agentTurn);
   // Applies synchronously so a second click in the same frame sees the new state.
